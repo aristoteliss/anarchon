@@ -1,0 +1,119 @@
+{
+  "name": "anarchon",
+  "version": "0.2.0",
+  "description": "Leaderless cron for Node.js clusters: every job runs once per scheduled time across all instances, with backup runners, no overlapping runs and catch-up after restarts. Redis, Valkey, PostgreSQL or SQLite (RabbitMQ and NATS with the simple claim).",
+  "keywords": [
+    "cron",
+    "scheduler",
+    "distributed",
+    "leaderless",
+    "cluster",
+    "redis",
+    "valkey",
+    "lease",
+    "interval",
+    "synced-cron",
+    "postgres",
+    "postgresql",
+    "sqlite",
+    "libsql",
+    "rabbitmq",
+    "nats",
+    "jetstream"
+  ],
+  "author": "Aristotelis <aristotelis@ik.me>",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aristoteliss/anarchon.git"
+  },
+  "homepage": "https://github.com/aristoteliss/anarchon#readme",
+  "bugs": {
+    "url": "https://github.com/aristoteliss/anarchon/issues"
+  },
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "COMMERCIAL_LICENSE.txt"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts",
+    "scenarios": "tsx test/scenarios/report.ts stream-id lease postgres sqlite",
+    "example": "tsx examples/basic.ts",
+    "example:api": "tsx examples/http-api.ts",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "croner": "^10.0.1"
+  },
+  "peerDependencies": {
+    "@libsql/client": ">=0.5",
+    "@nats-io/jetstream": ">=3",
+    "@nats-io/transport-node": ">=3",
+    "amqplib": ">=0.10",
+    "better-sqlite3": ">=9",
+    "ioredis": ">=5",
+    "pg": ">=8",
+    "postgres": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "@libsql/client": {
+      "optional": true
+    },
+    "@nats-io/jetstream": {
+      "optional": true
+    },
+    "@nats-io/transport-node": {
+      "optional": true
+    },
+    "amqplib": {
+      "optional": true
+    },
+    "better-sqlite3": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    },
+    "postgres": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@libsql/client": "^0.18.0",
+    "@nats-io/jetstream": "^3.4.0",
+    "@nats-io/transport-node": "^3.4.0",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.4",
+    "@types/pg": "^8.23.1",
+    "@valkey/valkey-glide": "^2.5.3",
+    "amqplib": "^2.2.0",
+    "better-sqlite3": "^13.0.3",
+    "ioredis": "^6.0.0",
+    "iovalkey": "^0.4.0",
+    "pg": "^8.23.1",
+    "postgres": "^3.4.9",
+    "redis": "^6.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

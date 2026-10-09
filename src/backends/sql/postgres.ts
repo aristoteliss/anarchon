@@ -1,0 +1,149 @@
+import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlQuery, type SqlRow, type SqlValue } from './base';
+
+/** A node-postgres (`pg`) Pool. */
+export interface PgPoolLike {
+  query(text: string, values?: unknown[]): Promise<{ rows: SqlRow[] }>;
+  connect(): Promise<{ query(text: string, values?: unknown[]): Promise<{ rows: SqlRow[] }>; release(error?: unknown): void }>;
+  readonly idleCount: number;
+}
+
+/** A single node-postgres (`pg`) Client (already connected). */
+export interface PgClientLike {
+  query(text: string, values?: unknown[]): Promise<{ rows: SqlRow[] }>;
+}
+
+/** A postgres.js (`postgres`) sql instance. */
+export interface PostgresJsLike {
+  unsafe(query: string, params?: any[]): PromiseLike<ArrayLike<SqlRow>>;
+  begin<T>(fn: (sql: { unsafe(query: string, params?: any[]): PromiseLike<ArrayLike<SqlRow>> }) => Promise<T>): PromiseLike<T>;
+}
+
+export interface PostgresBackendOptions {
+  /**
+   * A connection string (default: `postgres://localhost:5432/postgres`, with PG* environment variables
+   * filling the gaps), or your own `pg` Pool or Client, `postgres.js` sql instance, or
+   * `{ all, transaction }`. Connections you pass in are not closed on stop.
+   */
+  connection?: string | PgPoolLike | PgClientLike | PostgresJsLike | SqlClient;
+  /** Table name, may include a schema. Default 'anarchon_runs'. Tables are created on start. */
+  table?: string;
+}
+
+const dialect: SqlDialect = {
+  bigint: 'BIGINT',
+  nowMs: `(floor(extract(epoch from clock_timestamp()) * 1000))::bigint`,
+  forUpdate: ' FOR UPDATE',
+  placeholders: (sql) => {
+    let n = 0;
+    return sql.replace(/\?/g, () => `$${++n}`);
+  },
+  extraTables: (table) => [`CREATE TABLE IF NOT EXISTS ${table}_jobs (job TEXT PRIMARY KEY, claimed_at BIGINT NOT NULL)`],
+  // Claims of one job wait for each other: the first statement of a claim writes the job's row.
+  serialize: async (tx: SqlQuery, table: string, job: string) => {
+    await tx.all(
+      `INSERT INTO ${table}_jobs (job, claimed_at) VALUES (?, 0) ON CONFLICT (job) DO UPDATE SET claimed_at = ${table}_jobs.claimed_at + 1`,
+      [job],
+    );
+  },
+  // Two instances creating the tables at the same moment can trip over each other.
+  isAlreadyCreated: (error) => ['23505', '42P07', '42710'].includes(String((error as { code?: unknown }).code)),
+};
+
+/**
+ * PostgreSQL 9.5+, with the same leases, backups, no-overlap, catch-up and hand-over as the Redis
+ * 'lease' strategy. Each claim is one short transaction; leases use the database's clock.
+ */
+export class PostgresBackend extends SqlBackend {
+  readonly name = 'postgres';
+  protected readonly dialect = dialect;
+  private readonly input: PostgresBackendOptions['connection'];
+
+  constructor(options: PostgresBackendOptions = {}) {
+    super(options.table ?? 'anarchon_runs');
+    this.input = options.connection;
+  }
+
+  protected async connect(): Promise<{ client: SqlClient; owned: boolean }> {
+    const input = this.input;
+    if (input !== undefined && typeof input !== 'string') return { client: toSqlClient(input), owned: false };
+    let pg: any;
+    try {
+      pg = await import('pg');
+    } catch {
+      throw new Error('The Postgres backend needs "pg": run `npm install pg`, or pass your own client as connection.');
+    }
+    const Pool = pg.Pool ?? pg.default?.Pool;
+    const pool = new Pool(input ? { connectionString: input } : {});
+    pool.on('error', () => {}); // idle client errors; the next query reconnects
+    return { client: { ...fromPgPool(pool), close: () => pool.end() }, owned: true };
+  }
+
+  protected async checkServer(client: SqlClient): Promise<void> {
+    const [row] = await client.all('SHOW server_version_num', []);
+    const version = Number(row?.server_version_num);
+    if (!(version >= 90_500)) throw new Error(`The Postgres backend needs PostgreSQL 9.5 or newer (server_version_num ${version}).`);
+  }
+}
+
+/** A pg Pool: each transaction takes its own connection from the pool. */
+export function fromPgPool(pool: PgPoolLike): SqlClient {
+  return {
+    all: async (sql, params) => (await pool.query(sql, [...params])).rows,
+    transaction: async (fn) => {
+      const connection = await pool.connect();
+      try {
+        await connection.query('BEGIN');
+        const result = await fn({ all: async (sql, params) => (await connection.query(sql, [...params])).rows });
+        await connection.query('COMMIT');
+        connection.release();
+        return result;
+      } catch (error) {
+        await connection.query('ROLLBACK').catch(() => {});
+        connection.release();
+        throw error;
+      }
+    },
+  };
+}
+
+/** A single pg Client: statements and transactions take turns on its one connection. */
+export function fromPgClient(client: PgClientLike): SqlClient {
+  const mutex = new Mutex();
+  const query = async (sql: string, params: ReadonlyArray<SqlValue>) => (await client.query(sql, [...params])).rows;
+  return {
+    all: (sql, params) => mutex.run(() => query(sql, params)),
+    transaction: (fn) =>
+      mutex.run(async () => {
+        await client.query('BEGIN');
+        try {
+          const result = await fn({ all: query });
+          await client.query('COMMIT');
+          return result;
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw error;
+        }
+      }),
+  };
+}
+
+export function fromPostgresJs(sql: PostgresJsLike): SqlClient {
+  return {
+    all: async (text, params) => Array.from(await sql.unsafe(text, [...params])),
+    transaction: async (fn) => sql.begin((tx) => fn({ all: async (text, params) => Array.from(await tx.unsafe(text, [...params])) })),
+  };
+}
+
+function toSqlClient(input: PgPoolLike | PgClientLike | PostgresJsLike | SqlClient): SqlClient {
+  if (typeof (input as SqlClient).all === 'function') {
+    if (typeof (input as SqlClient).transaction !== 'function') throw new TypeError('A custom SQL client needs both all() and transaction()');
+    return input as SqlClient;
+  }
+  if (typeof (input as PostgresJsLike).unsafe === 'function') return fromPostgresJs(input as PostgresJsLike);
+  if (typeof (input as PgPoolLike).query === 'function') {
+    return 'idleCount' in input ? fromPgPool(input as PgPoolLike) : fromPgClient(input as PgClientLike);
+  }
+  throw new TypeError('connection must be a connection string, a pg Pool or Client, a postgres.js sql instance, or { all, transaction }');
+}
+
+export type { SqlClient, SqlValue };
