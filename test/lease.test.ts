@@ -4,13 +4,22 @@
  */
 import assert from 'node:assert/strict';
 import { getEventListeners } from 'node:events';
-import { describe, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-
 import { Redis } from 'ioredis';
+import { describe, test } from 'vitest';
 
-import { LeaseStore, RedisBackend, Scheduler, type Backend, type JobContext, type RunClaim, type RunRecord, type RunStore, type SkipEvent } from '../src';
-import { leaseSpecs, makeBackend, probeRedis, REDIS_URL, sleep, uniqueId, type Spec } from './helpers';
+import {
+  type Backend,
+  type JobContext,
+  type LeaseStore,
+  RedisBackend,
+  type RunClaim,
+  type RunRecord,
+  type RunStore,
+  Scheduler,
+  type SkipEvent,
+} from '../src';
+import { leaseSpecs, makeBackend, probeRedis, REDIS_URL, type Spec, sleep, uniqueId } from './helpers';
 
 const T = 1_000_000;
 
@@ -23,11 +32,23 @@ describe('lease rules', async () => {
       return { backend, runs: backend.runs!, spec: full };
     };
 
-    describe(label, { skip }, () => {
+    describe.skipIf(skip)(label, () => {
       test('state machine: claim, resend, backup, takeover, fencing, give up', async () => {
         const { backend, runs } = fresh('lease');
         const claim = (slot: number, token: string, instanceId: string, extra: Partial<RunClaim> = {}) =>
-          runs.claim({ job: 'j', slot, token, instanceId, historySize: 100, leaseMs: 400, overlap: 'skip', maxAttempts: 2, mode: 'new', reason: 'scheduled', ...extra });
+          runs.claim({
+            job: 'j',
+            slot,
+            token,
+            instanceId,
+            historySize: 100,
+            leaseMs: 400,
+            overlap: 'skip',
+            maxAttempts: 2,
+            mode: 'new',
+            reason: 'scheduled',
+            ...extra,
+          });
         try {
           await backend.init();
           assert.deepEqual(await claim(T, 'a1', 'A'), { kind: 'won', attempt: 1 }, 'first claim wins');
@@ -38,8 +59,16 @@ describe('lease rules', async () => {
 
           await sleep(500); // A stops renewing: it "died"
           assert.deepEqual(await runs.active('j'), [{ slot: T, attempt: 1, alive: false }]);
-          assert.deepEqual(await claim(T, 'b3', 'B', { mode: 'takeover', reason: 'takeover' }), { kind: 'won', attempt: 2 }, 'a backup takes over');
-          assert.deepEqual(await claim(T, 'c0', 'C', { mode: 'takeover', reason: 'takeover' }), { kind: 'running', attempt: 2 }, 'only one backup');
+          assert.deepEqual(
+            await claim(T, 'b3', 'B', { mode: 'takeover', reason: 'takeover' }),
+            { kind: 'won', attempt: 2 },
+            'a backup takes over',
+          );
+          assert.deepEqual(
+            await claim(T, 'c0', 'C', { mode: 'takeover', reason: 'takeover' }),
+            { kind: 'running', attempt: 2 },
+            'only one backup',
+          );
           assert.equal(await runs.heartbeat('j', T, 'a1', 400), false, 'the old runner learns it lost the run');
           assert.equal(await runs.finish('j', T, 'a1', 'success'), false, 'and cannot finish it');
 
@@ -50,7 +79,11 @@ describe('lease rules', async () => {
           assert.deepEqual(await runs.active('j'), []);
           assert.deepEqual(await claim(T + 9, 'x', 'C', { mode: 'takeover', reason: 'takeover' }), { kind: 'none' });
 
-          await backend.saveResult('j', { slot: T + 5, by: 'C', attempt: 1, status: 'success', startedAt: 1, finishedAt: 2, durationMs: 1 }, 100);
+          await backend.saveResult(
+            'j',
+            { slot: T + 5, by: 'C', attempt: 1, status: 'success', startedAt: 1, finishedAt: 2, durationMs: 1 },
+            100,
+          );
           const history = await backend.history('j', 10);
           assert.deepEqual(
             history.map((r) => [r.slot - T, r.instanceId, r.attempt, r.status]),
@@ -67,7 +100,16 @@ describe('lease rules', async () => {
 
       test('overlap "allow" lets runs of the same job run side by side', async () => {
         const { backend, runs } = fresh('allow');
-        const base = { job: 'j', instanceId: 'A', historySize: 100, leaseMs: 5_000, overlap: 'allow' as const, maxAttempts: 1, mode: 'new' as const, reason: 'scheduled' as const };
+        const base = {
+          job: 'j',
+          instanceId: 'A',
+          historySize: 100,
+          leaseMs: 5_000,
+          overlap: 'allow' as const,
+          maxAttempts: 1,
+          mode: 'new' as const,
+          reason: 'scheduled' as const,
+        };
         try {
           assert.equal((await runs.claim({ ...base, slot: T, token: 't1' })).kind, 'won');
           assert.equal((await runs.claim({ ...base, slot: T + 1, token: 't2' })).kind, 'won');
@@ -83,7 +125,15 @@ describe('lease rules', async () => {
           const manual = await runs.claim({ ...base, slot: T, token: 'm', instanceId: 'A', maxAttempts: 1, mode: 'new', reason: 'manual' });
           assert.equal(manual.kind, 'won');
           await sleep(400); // the instance running it died
-          const takeover = await runs.claim({ ...base, slot: T, token: 'b', instanceId: 'B', maxAttempts: 3, mode: 'takeover', reason: 'takeover' });
+          const takeover = await runs.claim({
+            ...base,
+            slot: T,
+            token: 'b',
+            instanceId: 'B',
+            maxAttempts: 3,
+            mode: 'takeover',
+            reason: 'takeover',
+          });
           assert.deepEqual(takeover, { kind: 'done' });
         } finally {
           await backend.close();
@@ -93,7 +143,8 @@ describe('lease rules', async () => {
       test('a run handed over on stop() is taken over at once, and a hand-over is not a failed attempt', async () => {
         const { backend, runs } = fresh('release');
         const base = { job: 'j', historySize: 100, leaseMs: 60_000, overlap: 'skip' as const, maxAttempts: 1 };
-        const takeover = (token: string, instanceId: string) => runs.claim({ ...base, slot: T, token, instanceId, mode: 'takeover', reason: 'takeover' });
+        const takeover = (token: string, instanceId: string) =>
+          runs.claim({ ...base, slot: T, token, instanceId, mode: 'takeover', reason: 'takeover' });
         try {
           assert.equal((await runs.claim({ ...base, slot: T, token: 'a', instanceId: 'A', mode: 'new', reason: 'scheduled' })).kind, 'won');
           assert.deepEqual(await takeover('b', 'B'), { kind: 'running', attempt: 1 }, 'alive: nothing to take over');
@@ -110,7 +161,16 @@ describe('lease rules', async () => {
 
       test('a new run is refused when its claim arrives later than maxLateMs, by the server clock', async () => {
         const { backend, runs } = fresh('late');
-        const base = { job: 'j', instanceId: 'A', historySize: 100, leaseMs: 5_000, overlap: 'allow' as const, maxAttempts: 1, mode: 'new' as const, reason: 'scheduled' as const };
+        const base = {
+          job: 'j',
+          instanceId: 'A',
+          historySize: 100,
+          leaseMs: 5_000,
+          overlap: 'allow' as const,
+          maxAttempts: 1,
+          mode: 'new' as const,
+          reason: 'scheduled' as const,
+        };
         try {
           const now = Date.now();
           const stale = await runs.claim({ ...base, slot: now - 30_000, token: 'x', maxLateMs: 10_000 });
@@ -132,7 +192,18 @@ describe('lease rules', async () => {
         const old = latest - 3 * interval;
         const { backend: setup, runs } = fresh('recover', id);
         const claim = (slot: number, token: string) =>
-          runs.claim({ job: 'job', slot, token, instanceId: 'dead', historySize: 100, leaseMs: 200, overlap: 'allow', maxAttempts: 3, mode: 'new', reason: 'scheduled' });
+          runs.claim({
+            job: 'job',
+            slot,
+            token,
+            instanceId: 'dead',
+            historySize: 100,
+            leaseMs: 200,
+            overlap: 'allow',
+            maxAttempts: 3,
+            mode: 'new',
+            reason: 'scheduled',
+          });
         await claim(old, 'o');
         await claim(latest, 'l');
         await sleep(300); // both runners are gone
@@ -144,12 +215,25 @@ describe('lease rules', async () => {
         await scheduler.start();
         await sleep(500);
         await scheduler.stop();
-        assert.deepEqual(started.filter(([slot]) => slot <= latest), [[latest, 2, 'takeover']], `started: ${JSON.stringify(started)}`);
+        assert.deepEqual(
+          started.filter(([slot]) => slot <= latest),
+          [[latest, 2, 'takeover']],
+          `started: ${JSON.stringify(started)}`,
+        );
       });
 
       test('trimming never drops a run in progress, or one a late claim could still ask for', async () => {
         const { backend, runs } = fresh('trim');
-        const base = { job: 'j', instanceId: 'A', historySize: 2, leaseMs: 60_000, overlap: 'allow' as const, maxAttempts: 1, mode: 'new' as const, keepMs: 60_000 };
+        const base = {
+          job: 'j',
+          instanceId: 'A',
+          historySize: 2,
+          leaseMs: 60_000,
+          overlap: 'allow' as const,
+          maxAttempts: 1,
+          mode: 'new' as const,
+          keepMs: 60_000,
+        };
         const run = async (slot: number, token: string, reason: 'scheduled' | 'manual' = 'scheduled') => {
           const outcome = await runs.claim({ ...base, slot, token, reason });
           if (outcome.kind === 'won') await runs.finish('j', slot, token, 'success');
@@ -179,7 +263,9 @@ describe('lease rules', async () => {
       describe('scheduler', () => {
         /** Two instances of one service, in this process. */
         const pair = (id: string) =>
-          ['A', 'B'].map((name) => new Scheduler({ backend: makeBackend({ ...spec, id }), instanceId: name, leaseMs: 1_000, heartbeatMs: 200 }));
+          ['A', 'B'].map(
+            (name) => new Scheduler({ backend: makeBackend({ ...spec, id }), instanceId: name, leaseMs: 1_000, heartbeatMs: 200 }),
+          );
 
         test('stop() hands a running job to another instance when the job throws on abort', async () => {
           const [a, b] = pair(uniqueId('handover')) as [Scheduler, Scheduler];
@@ -187,10 +273,15 @@ describe('lease rules', async () => {
           const interrupted: Array<{ by: string; handedOver: boolean }> = [];
           const at = Date.now() + 300;
           for (const s of [a, b]) {
-            s.at('job', at, async (ctx: JobContext) => {
-              starts.push({ by: ctx.instanceId, attempt: ctx.attempt, reason: ctx.reason, at: Date.now() });
-              await delay(1_500, undefined, { signal: ctx.signal }); // throws when ctx.signal aborts
-            }, { jitterMs: 100 });
+            s.at(
+              'job',
+              at,
+              async (ctx: JobContext) => {
+                starts.push({ by: ctx.instanceId, attempt: ctx.attempt, reason: ctx.reason, at: Date.now() });
+                await delay(1_500, undefined, { signal: ctx.signal }); // throws when ctx.signal aborts
+              },
+              { jitterMs: 100 },
+            );
             s.on('interrupted', (e) => interrupted.push({ by: e.instanceId, handedOver: e.handedOver }));
             s.on('error', () => {});
           }
@@ -226,10 +317,15 @@ describe('lease rules', async () => {
           const at = Date.now() + 300;
           for (const s of [a, b]) {
             // Ignores ctx.signal on purpose
-            s.at('job', at, async (ctx: JobContext) => {
-              starts.push({ by: ctx.instanceId, attempt: ctx.attempt });
-              await sleep(ctx.attempt === 1 ? 2_500 : 100);
-            }, { jitterMs: 100 });
+            s.at(
+              'job',
+              at,
+              async (ctx: JobContext) => {
+                starts.push({ by: ctx.instanceId, attempt: ctx.attempt });
+                await sleep(ctx.attempt === 1 ? 2_500 : 100);
+              },
+              { jitterMs: 100 },
+            );
             s.on('error', () => {});
           }
           await Promise.all([a.start(), b.start()]);
@@ -275,6 +371,55 @@ describe('lease rules', async () => {
         });
       });
     });
+  }
+});
+
+test('an instance that skipped a run as an overlap backs it up when another instance starts it', async (t) => {
+  if (!(await probeRedis(REDIS_URL))) return t.skip('no Redis');
+  const interval = 2_000;
+  const prefix = `test:${uniqueId('overlap-backup')}:`;
+  const backends = [0, 1].map(() => new RedisBackend({ redis: REDIS_URL, prefix }));
+  const [a, b] = backends.map((backend, i) => new Scheduler({ backend, instanceId: 'AB'[i]!, leaseMs: 400, heartbeatMs: 100 })) as [
+    Scheduler,
+    Scheduler,
+  ];
+  // B's claims of new runs arrive late: A decides first, and B asks for the second run after the first has ended.
+  const runs = backends[1]!.runs!;
+  const claim = runs.claim.bind(runs);
+  runs.claim = async (input: RunClaim) => {
+    if (input.mode === 'new') await sleep(300);
+    return claim(input);
+  };
+
+  const starts: Array<{ by: string; run: number; attempt: number }> = [];
+  let first: number | undefined;
+  for (const s of [a, b]) {
+    s.every(
+      'job',
+      interval,
+      async (ctx: JobContext) => {
+        first ??= ctx.slot;
+        starts.push({ by: ctx.instanceId, run: (ctx.slot - first) / interval, attempt: ctx.attempt });
+        if (ctx.slot === first)
+          await sleep(first + interval + 150 - Date.now()); // still going when the second run is due
+        else if (ctx.attempt === 1) await sleep(2_500); // ignores ctx.signal
+      },
+      { jitterMs: 0, catchUpMs: 0 },
+    );
+    s.on('error', () => {});
+  }
+  await Promise.all([a.start(), b.start()]);
+  try {
+    while (starts.length < 2) await sleep(20);
+    await b.stop({ timeoutMs: 100 }); // returns while the job is still going: its lease runs out
+    while (starts.length < 3 && Date.now() < first! + 2 * interval - 200) await sleep(20);
+    assert.deepEqual(starts, [
+      { by: 'A', run: 0, attempt: 1 },
+      { by: 'B', run: 1, attempt: 1 },
+      { by: 'A', run: 1, attempt: 2 },
+    ]);
+  } finally {
+    await Promise.all([a.stop({ timeoutMs: 100 }), b.stop()]);
   }
 });
 

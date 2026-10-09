@@ -1,0 +1,67 @@
+# Every server the tests use, on the ports test/helpers.ts expects by default. The ports
+# differ from the usual 6379 and 5432 so a Redis or Postgres you already run is never
+# touched. Nothing is kept: `pnpm test:servers:down` removes the containers and their data.
+#
+#   pnpm test:servers                          Redis 8.6, Redis 7.0, Valkey, PostgreSQL, libSQL
+#   COMPOSE_PROFILES=brokers pnpm test:servers  also RabbitMQ and NATS (5672, 4222)
+#   pnpm test:servers:down
+name: anarchon-test
+
+services:
+  redis:
+    image: redis:8.6-alpine
+    ports: ['127.0.0.1:6381:6379']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      retries: 15
+
+  redis-7:
+    image: redis:7.0-alpine
+    ports: ['127.0.0.1:6380:6379']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      retries: 15
+
+  valkey:
+    image: valkey/valkey:9.1-alpine
+    ports: ['127.0.0.1:6390:6379']
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 2s
+      retries: 15
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres # a throwaway test database, never a real one
+      POSTGRES_DB: anarchon_test
+    ports: ['127.0.0.1:5433:5432']
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'postgres', '-d', 'anarchon_test']
+      interval: 2s
+      retries: 15
+
+  libsql:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    ports: ['127.0.0.1:8081:8080']
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    profiles: [brokers]
+    ports: ['127.0.0.1:5672:5672', '127.0.0.1:15672:15672']
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 5s
+      retries: 20
+
+  nats:
+    image: nats:alpine
+    profiles: [brokers]
+    command: ['-js', '-m', '8222']
+    ports: ['127.0.0.1:4222:4222', '127.0.0.1:8222:8222']
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '-', 'http://localhost:8222/healthz']
+      interval: 2s
+      retries: 15

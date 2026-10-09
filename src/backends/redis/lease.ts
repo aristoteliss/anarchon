@@ -1,6 +1,6 @@
+import { mergeRuns, parseJson, toResult } from '../../history';
 import type { ClaimOutcome, RunClaim, RunRecord, RunStore, StoredResult } from '../../types';
 import { errorMessage } from '../../util';
-import { mergeRuns, parseJson, toResult } from '../../history';
 import type { RedisCommandClient } from './client';
 import { parseEntries, toStr } from './replies';
 
@@ -273,8 +273,7 @@ export class LeaseStore implements RunStore {
     const slots = [...new Set(claims.map((c) => c.slot))];
     const reply = (await this.eval(STATES, [this.key(job, 'state')], slots)) as unknown[];
     const now = Number(toStr(reply[0]));
-    const states = new Map<number, StoredRun | null>();
-    slots.forEach((slot, i) => states.set(slot, (parseJson(toStr(reply[i + 1]) || 'null') as StoredRun | null) ?? null));
+    const states = new Map(slots.map((slot, i) => [slot, (parseJson(toStr(reply[i + 1]) || 'null') as StoredRun | null) ?? null] as const));
 
     const records = mergeRuns(job, claims, results, limit, (claim) => {
       const run = states.get(claim.slot);

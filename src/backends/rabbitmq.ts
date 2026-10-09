@@ -1,6 +1,6 @@
 import type { Channel, ChannelModel, ConfirmChannel, ConsumeMessage } from 'amqplib';
 
-import { claimPayload, mergeRuns, parseJson, toClaim, toResult, type ClaimRecord } from '../history';
+import { type ClaimRecord, claimPayload, mergeRuns, parseJson, toClaim, toResult } from '../history';
 import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
 import { assertSimpleName, positiveInt, versionAtLeast } from '../util';
 

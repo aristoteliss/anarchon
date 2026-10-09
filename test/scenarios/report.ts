@@ -1,16 +1,17 @@
 /**
  * Runs every failure scenario for the given strategies and prints what happened.
  *
- *   npx tsx test/scenarios/report.ts stream-id lease postgres sqlite
+ *   pnpm exec tsx test/scenarios/report.ts stream-id lease postgres sqlite libsql
  *
- * Each argument is a Redis strategy, or 'postgres' / 'sqlite'.
+ * Each argument is a Redis strategy, or 'postgres' / 'sqlite' / 'libsql'.
  */
+import { REDIS_URL } from '../helpers';
 import { SCENARIOS, type ScenarioConfig } from './harness';
 
 async function main() {
   const strategies = process.argv.slice(2);
   if (strategies.length === 0) strategies.push('stream-id');
-  const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+  const redisUrl = REDIS_URL;
   const results: Record<string, Array<{ name: string; summary: string; facts: unknown }>> = {};
   for (const strategy of strategies) {
     results[strategy] = [];

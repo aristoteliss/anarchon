@@ -52,12 +52,30 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist coverage",
+    "clean:all": "rm -rf node_modules dist coverage test-run.log",
+    "rebuild": "pnpm clean && pnpm build",
+    "lint": "tsc -p tsconfig.test.json",
     "typecheck": "tsc -p tsconfig.test.json",
-    "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts",
+    "check": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run --exclude test/scenarios.test.ts --exclude test/cluster.test.ts",
+    "test:slow": "vitest run test/scenarios.test.ts test/cluster.test.ts",
+    "test:all": "vitest run",
+    "test:watch": "vitest --exclude test/scenarios.test.ts --exclude test/cluster.test.ts",
+    "test:servers": "docker compose -f docker-compose.test.yml up -d --wait",
+    "test:servers:down": "docker compose -f docker-compose.test.yml --profile '*' down",
+    "test:coverage": "vitest run --coverage --coverage.reporter=text-summary --coverage.reporter=json-summary",
+    "test:all:full": "vitest run --coverage --coverage.reporter=text-summary --coverage.reporter=html --reporter=verbose 2>&1 | tee test-run.log",
+    "test:last:review": "node scripts/test-log.mjs review",
+    "test:last:log": "less -R test-run.log",
+    "test:last:fails": "node scripts/test-log.mjs fails",
+    "test:release": "pnpm rebuild && node scripts/release-check.mjs",
+    "verify:all": "pnpm lint && pnpm check && pnpm test:all && pnpm test:release",
     "scenarios": "tsx test/scenarios/report.ts stream-id lease postgres sqlite",
     "example": "tsx examples/basic.ts",
     "example:api": "tsx examples/http-api.ts",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "pnpm rebuild"
   },
   "dependencies": {
     "croner": "^10.0.1"
@@ -99,6 +117,7 @@
     }
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
     "@libsql/client": "^0.18.0",
     "@nats-io/jetstream": "^3.4.0",
     "@nats-io/transport-node": "^3.4.0",
@@ -106,6 +125,7 @@
     "@types/node": "^26.6.4",
     "@types/pg": "^8.23.1",
     "@valkey/valkey-glide": "^2.5.3",
+    "@vitest/coverage-v8": "^5.0.3",
     "amqplib": "^2.2.0",
     "better-sqlite3": "^13.0.3",
     "ioredis": "^6.0.0",
@@ -114,6 +134,7 @@
     "postgres": "^3.4.9",
     "redis": "^6.3.0",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
   }
 }

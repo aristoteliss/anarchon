@@ -6,25 +6,19 @@ import BetterSqlite3 from 'better-sqlite3';
 import { Redis } from 'ioredis';
 import { Pool } from 'pg';
 
-import {
-  NatsBackend,
-  PostgresBackend,
-  RabbitMQBackend,
-  RedisBackend,
-  SqliteBackend,
-  type Backend,
-  type RedisStrategyName,
-} from '../src';
+import { type Backend, NatsBackend, PostgresBackend, RabbitMQBackend, RedisBackend, type RedisStrategyName, SqliteBackend } from '../src';
 
-/** Redis 8.6+ (the only server with IDMP). */
-export const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
+/** Redis 8.6+ (the only server with IDMP). The default ports below are docker-compose.test.yml's. */
+export const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6381';
 /** Optional older Redis (e.g. 7.x). */
 export const REDIS_OLD_URL = process.env.REDIS_OLD_URL ?? 'redis://localhost:6380';
 /** Optional Valkey. */
 export const VALKEY_URL = process.env.VALKEY_URL ?? 'redis://localhost:6390';
-export const POSTGRES_URL = process.env.POSTGRES_URL ?? 'postgres://postgres:postgres@localhost:5432/anarchon_test';
+export const POSTGRES_URL = process.env.POSTGRES_URL ?? 'postgres://postgres:postgres@localhost:5433/anarchon_test';
 export const RABBITMQ_URL = process.env.RABBITMQ_URL ?? 'amqp://localhost';
 export const NATS_URL = process.env.NATS_URL ?? 'nats://localhost:4222';
+/** Optional libSQL server: sqld, or a Turso database (`libsql://...`). Every test gets its own table. */
+export const LIBSQL_URL = process.env.LIBSQL_URL ?? 'http://localhost:8081';
 /** Where the shared SQLite test files go (every test gets its own file). */
 export const SQLITE_DIR = process.env.SQLITE_DIR ?? tmpdir();
 
@@ -41,8 +35,8 @@ export interface Spec {
   url: string;
   /** Redis / Valkey only. */
   strategy?: RedisStrategyName;
-  /** SQLite driver: the built-in node:sqlite (default), better-sqlite3, or the libSQL client. */
-  driver?: 'node:sqlite' | 'better-sqlite3' | 'libsql';
+  /** SQLite driver: the built-in node:sqlite (default), better-sqlite3, the libSQL client on a file, or on a libSQL server (url). */
+  driver?: 'node:sqlite' | 'better-sqlite3' | 'libsql' | 'libsql-server';
   /** Unique per test so tests never share keys, tables, queues or subjects. */
   id: string;
 }
@@ -54,8 +48,9 @@ export function makeBackend(spec: Spec): Backend {
     case 'postgres':
       return new PostgresBackend({ connection: spec.url, table: `t_${spec.id}` });
     case 'sqlite': {
-      const file = join(spec.url, `anarchon-${spec.id}.db`);
       const table = `t_${spec.id}`;
+      if (spec.driver === 'libsql-server') return new SqliteBackend({ database: libsqlServer(spec.url), table });
+      const file = join(spec.url, `anarchon-${spec.id}.db`);
       if (spec.driver === 'better-sqlite3') {
         const db = new BetterSqlite3(file);
         db.pragma('journal_mode = WAL');
@@ -130,6 +125,23 @@ export async function probeSqlite(): Promise<string | null> {
   }
 }
 
+/** The token stays in the environment (LIBSQL_AUTH_TOKEN), never in a spec, so child processes read it too. */
+function libsqlServer(url: string) {
+  return createLibsqlClient({ url, authToken: process.env.LIBSQL_AUTH_TOKEN });
+}
+
+export async function probeLibsql(url: string): Promise<string | null> {
+  const client = libsqlServer(url);
+  try {
+    const { rows } = await client.execute('SELECT sqlite_version() AS v');
+    return String(rows[0]?.v ?? 'unknown');
+  } catch {
+    return null;
+  } finally {
+    client.close();
+  }
+}
+
 export async function probeRabbit(url: string): Promise<string | null> {
   try {
     const amqp = await import('amqplib');
@@ -170,16 +182,17 @@ export async function redisSpecs(): Promise<SpecEntry[]> {
     for (const strategy of ['lease', 'stream-id', 'idmp', 'script'] as const) {
       const label = `${server ? `${server.product} ${server.version}` : fallback} · ${strategy}`;
       if (!server) specs.push({ label, spec: { url, strategy }, skip: `nothing at ${url}` });
-      else if (strategy === 'idmp' && !supportsIdmp(server)) continue; // covered by the "refuses" test
+      else if (strategy === 'idmp' && !supportsIdmp(server))
+        continue; // covered by the "refuses" test
       else specs.push({ label, spec: { url, strategy } });
     }
   }
   return specs;
 }
 
-/** Postgres and SQLite (every driver): the other backends with leases. */
+/** Postgres, SQLite (every driver) and a libSQL server: the other backends with leases. */
 export async function sqlSpecs(): Promise<SpecEntry[]> {
-  const [postgres, sqlite] = await Promise.all([probePostgres(POSTGRES_URL), probeSqlite()]);
+  const [postgres, sqlite, libsql] = await Promise.all([probePostgres(POSTGRES_URL), probeSqlite(), probeLibsql(LIBSQL_URL)]);
   const specs: SpecEntry[] = [
     {
       label: `PostgreSQL ${postgres ?? ''}`.trim(),
@@ -194,6 +207,11 @@ export async function sqlSpecs(): Promise<SpecEntry[]> {
       ...(driver === 'node:sqlite' && !sqlite ? { skip: 'this Node has no node:sqlite' } : {}),
     });
   }
+  specs.push({
+    label: `libSQL server ${libsql ?? ''}`.trim(),
+    spec: { kind: 'sqlite', url: LIBSQL_URL, driver: 'libsql-server' },
+    ...(libsql ? {} : { skip: `nothing at ${LIBSQL_URL}` }),
+  });
   return specs;
 }
 
@@ -201,7 +219,11 @@ export async function sqlSpecs(): Promise<SpecEntry[]> {
 export async function queueSpecs(): Promise<SpecEntry[]> {
   const [rabbit, nats] = await Promise.all([probeRabbit(RABBITMQ_URL), probeNats(NATS_URL)]);
   return [
-    { label: `RabbitMQ ${rabbit ?? ''}`.trim(), spec: { kind: 'rabbitmq', url: RABBITMQ_URL }, ...(rabbit ? {} : { skip: `nothing at ${RABBITMQ_URL}` }) },
+    {
+      label: `RabbitMQ ${rabbit ?? ''}`.trim(),
+      spec: { kind: 'rabbitmq', url: RABBITMQ_URL },
+      ...(rabbit ? {} : { skip: `nothing at ${RABBITMQ_URL}` }),
+    },
     { label: `NATS ${nats ?? ''}`.trim(), spec: { kind: 'nats', url: NATS_URL }, ...(nats ? {} : { skip: `nothing at ${NATS_URL}` }) },
   ];
 }

@@ -2,10 +2,10 @@
  * Runs real processes against Redis and breaks them on purpose (kill -9, pause, restart all),
  * then reports what happened to each scheduled run.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { join } from 'node:path';
 
-import { Scheduler, type RunRecord } from '../../src';
+import { type RunRecord, Scheduler } from '../../src';
 import { scenarioBackend } from './backend';
 
 export interface ScenarioConfig {
@@ -65,8 +65,7 @@ export class Cluster {
     let buffer = '';
     child.stdout!.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
-      let newline: number;
-      while ((newline = buffer.indexOf('\n')) >= 0) {
+      for (let newline = buffer.indexOf('\n'); newline >= 0; newline = buffer.indexOf('\n')) {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
         if (!line.startsWith('{')) continue;
@@ -283,11 +282,15 @@ export async function allRestartMidRun(base: ScenarioConfig): Promise<ScenarioRe
   const facts = {
     executionsOfThatRun: ofSlot.map(describe),
     finished: finished.map(describe),
-    history: (await c.history()).filter((r) => r.slot === first.slot).map((r) => `${r.instanceId}#${(r as { attempt?: number }).attempt ?? 1}:${r.status}`),
+    history: (await c.history())
+      .filter((r) => r.slot === first.slot)
+      .map((r) => `${r.instanceId}#${(r as { attempt?: number }).attempt ?? 1}:${r.status}`),
   };
   return {
     name: 'All 3 restart in the middle of a run',
-    summary: finished.length ? `the interrupted run was finished by ${facts.finished.join(', ')}` : `the run was lost; history: ${facts.history.join(', ')}`,
+    summary: finished.length
+      ? `the interrupted run was finished by ${facts.finished.join(', ')}`
+      : `the run was lost; history: ${facts.history.join(', ')}`,
     facts,
   };
 }
@@ -372,4 +375,12 @@ export async function winnerStopsGracefully(base: ScenarioConfig): Promise<Scena
   };
 }
 
-export const SCENARIOS = [longRuns, winnerCrashes, nonWinnerRestarts, allRestartMidRun, allDownAtRunTime, winnerFreezes, winnerStopsGracefully];
+export const SCENARIOS = [
+  longRuns,
+  winnerCrashes,
+  nonWinnerRestarts,
+  allRestartMidRun,
+  allDownAtRunTime,
+  winnerFreezes,
+  winnerStopsGracefully,
+];

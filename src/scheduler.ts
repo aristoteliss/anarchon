@@ -119,13 +119,13 @@ export class Scheduler {
   constructor(options: SchedulerOptions = {}) {
     this.instanceId = options.instanceId ?? `${hostname()}:${process.pid}`;
     if (typeof this.instanceId !== 'string' || this.instanceId === '') throw new TypeError('instanceId must be a non-empty string');
-    const redisShortcuts = options.redis !== undefined || options.strategy !== undefined || options.prefix !== undefined || options.idmp !== undefined;
+    const redisShortcuts =
+      options.redis !== undefined || options.strategy !== undefined || options.prefix !== undefined || options.idmp !== undefined;
     if (options.backend && redisShortcuts) {
       throw new TypeError('Pass either backend, or the Redis shortcuts (redis, strategy, prefix, idmp), not both');
     }
     this.backend =
-      options.backend ??
-      new RedisBackend({ redis: options.redis, strategy: options.strategy, prefix: options.prefix, idmp: options.idmp });
+      options.backend ?? new RedisBackend({ redis: options.redis, strategy: options.strategy, prefix: options.prefix, idmp: options.idmp });
     this.defaults = {
       jitterMs: nonNegativeInt('jitterMs', options.jitterMs ?? 2_000),
       maxLateMs: positiveInt('maxLateMs', options.maxLateMs ?? 60_000),
@@ -136,7 +136,9 @@ export class Scheduler {
     this.leaseMs = positiveInt('leaseMs', options.leaseMs ?? 30_000);
     this.heartbeatMs = positiveInt('heartbeatMs', options.heartbeatMs ?? Math.min(5_000, Math.floor(this.leaseMs / 6)));
     if (this.heartbeatMs * 2 >= this.leaseMs) {
-      throw new RangeError(`heartbeatMs (${this.heartbeatMs}) must be under half of leaseMs (${this.leaseMs}), so a lease is renewed at least twice`);
+      throw new RangeError(
+        `heartbeatMs (${this.heartbeatMs}) must be under half of leaseMs (${this.leaseMs}), so a lease is renewed at least twice`,
+      );
     }
     this.logger = options.logger ?? console;
     this.unrefTimers = options.unrefTimers ?? false;
@@ -318,14 +320,10 @@ export class Scheduler {
         ? nonNegativeInt('jitterMs', options.jitterMs)
         : Math.min(this.defaults.jitterMs, Math.floor(schedule.minGapMs / 4));
     if (jitterMs * 2 >= schedule.minGapMs) {
-      throw new RangeError(
-        `Job "${name}": jitterMs (${jitterMs}) must be under half the time between runs (${schedule.minGapMs} ms)`,
-      );
+      throw new RangeError(`Job "${name}": jitterMs (${jitterMs}) must be under half the time between runs (${schedule.minGapMs} ms)`);
     }
     const maxLateMs =
-      options.maxLateMs !== undefined
-        ? positiveInt('maxLateMs', options.maxLateMs)
-        : Math.max(this.defaults.maxLateMs, jitterMs + 1_000);
+      options.maxLateMs !== undefined ? positiveInt('maxLateMs', options.maxLateMs) : Math.max(this.defaults.maxLateMs, jitterMs + 1_000);
     if (maxLateMs <= jitterMs) {
       throw new RangeError(`Job "${name}": maxLateMs (${maxLateMs}) must be bigger than jitterMs (${jitterMs})`);
     }
@@ -335,8 +333,7 @@ export class Scheduler {
           `${this.backend.name} remembers a run (${this.backend.dedupeWindowMs} ms), or a late instance could run it again`,
       );
     }
-    const historySize =
-      options.historySize !== undefined ? positiveInt('historySize', options.historySize) : this.defaults.historySize;
+    const historySize = options.historySize !== undefined ? positiveInt('historySize', options.historySize) : this.defaults.historySize;
     const historyTtlMs =
       options.historyTtlMs !== undefined ? positiveInt('historyTtlMs', options.historyTtlMs) : this.defaults.historyTtlMs;
     if (options.overlap !== undefined && options.overlap !== 'skip' && options.overlap !== 'allow') {
@@ -510,10 +507,20 @@ export class Scheduler {
       case 'overlap': // the previous run is still going: skip this one, back that one up
         skip('overlap');
         this.watch(runs, job, outcome.slot);
+        // Another instance may still start this run once the previous one ends: be its backup then.
+        this.watch(runs, job, slot);
         return;
       case 'late':
         skip('late', outcome.lateMs);
         return;
+      case 'none': {
+        // Skipped here as an overlap, and not started by anyone yet. Keep checking while another
+        // instance could still start it: it is the job's latest run and not too late.
+        const now = Date.now();
+        const latest = job.schedule.prev(now);
+        if ((latest === null || slot >= latest) && now - slot <= job.maxLateMs + CLOCK_TOLERANCE_MS) this.watch(runs, job, slot);
+        return;
+      }
       default: // done, given up, or never claimed
         this.unwatch(job, slot);
         skip('taken');
@@ -739,7 +746,9 @@ export class Scheduler {
     this.on('success', (r) => info(`[anarchon] ${r.job} @ ${at(r.slot)}: finished in ${r.durationMs} ms`));
     this.on('failure', (r) => this.logger.warn(`[anarchon] ${r.job} @ ${at(r.slot)}: failed after ${r.durationMs} ms: ${r.error}`));
     this.on('interrupted', (r) =>
-      info(`[anarchon] ${r.job} @ ${at(r.slot)}: interrupted after ${r.durationMs} ms${r.handedOver ? ', handed over to another instance' : ''}`),
+      info(
+        `[anarchon] ${r.job} @ ${at(r.slot)}: interrupted after ${r.durationMs} ms${r.handedOver ? ', handed over to another instance' : ''}`,
+      ),
     );
     this.on('skip', (e) => info(`[anarchon] ${e.job} @ ${at(e.slot)}: skipped (${e.reason})`));
     this.on('lost', (e) => this.logger.warn(`[anarchon] ${e.job} @ ${at(e.slot)}: attempt ${e.attempt} was taken over by a backup`));

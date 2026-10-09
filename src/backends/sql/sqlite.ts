@@ -1,3 +1,4 @@
+import { sleep } from '../../util';
 import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlRow, type SqlValue } from './base';
 
 /** A synchronous SQLite database: `node:sqlite` DatabaseSync or `better-sqlite3`. */
@@ -72,7 +73,20 @@ export class SqliteBackend extends SqlBackend {
     if (typeof input !== 'string') return { client: toSqlClient(input!), owned: false };
     const db = await openFile(input);
     // WAL lets readers work while one process writes; busy_timeout makes writers wait their turn.
-    db.exec(`PRAGMA busy_timeout = ${Math.floor(this.busyTimeoutMs)}; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;`);
+    db.exec(`PRAGMA busy_timeout = ${Math.floor(this.busyTimeoutMs)}`);
+    // Switching a new file to WAL needs the file to itself, and SQLite fails at once instead of
+    // waiting (busy_timeout doesn't apply here). So instances starting together on a new file retry.
+    const deadline = Date.now() + this.busyTimeoutMs;
+    for (;;) {
+      try {
+        db.exec('PRAGMA journal_mode = WAL');
+        break;
+      } catch (error) {
+        if (!isBusy(error) || Date.now() >= deadline) throw error;
+        await sleep(20 + Math.random() * 30);
+      }
+    }
+    db.exec('PRAGMA synchronous = NORMAL');
     return { client: { ...fromSqliteDatabase(db), close: async () => (db as unknown as { close(): void }).close() }, owned: true };
   }
 
@@ -81,11 +95,19 @@ export class SqliteBackend extends SqlBackend {
     // connection, and remote libSQL servers may ignore it).
     await client.all(`PRAGMA busy_timeout = ${Math.floor(this.busyTimeoutMs)}`, []).catch(() => {});
     const [row] = await client.all('SELECT sqlite_version() AS v', []);
-    const [major = 0, minor = 0] = String(row?.v ?? '0').split('.').map(Number);
+    const [major = 0, minor = 0] = String(row?.v ?? '0')
+      .split('.')
+      .map(Number);
     if (major < 3 || (major === 3 && minor < 35)) {
       throw new Error(`The SQLite backend needs SQLite 3.35 or newer for RETURNING (this one is ${row?.v}).`);
     }
   }
+}
+
+/** SQLITE_BUSY from node:sqlite (errcode) or better-sqlite3 (code). */
+function isBusy(error: unknown): boolean {
+  const { errcode, code } = error as { errcode?: number; code?: string };
+  return (typeof errcode === 'number' && (errcode & 0xff) === 5) || (typeof code === 'string' && code.startsWith('SQLITE_BUSY'));
 }
 
 /** node:sqlite or better-sqlite3: statements and transactions take turns (see processQueue). */
@@ -144,12 +166,15 @@ export function fromLibsql(client: LibsqlClientLike): SqlClient {
 
 function toSqlClient(input: SqliteDatabaseLike | LibsqlClientLike | SqlClient): SqlClient {
   if (typeof (input as SqlClient).all === 'function') {
-    if (typeof (input as SqlClient).transaction !== 'function') throw new TypeError('A custom SQL client needs both all() and transaction()');
+    if (typeof (input as SqlClient).transaction !== 'function')
+      throw new TypeError('A custom SQL client needs both all() and transaction()');
     return input as SqlClient;
   }
   if (typeof (input as LibsqlClientLike).execute === 'function') return fromLibsql(input as LibsqlClientLike);
   if (typeof (input as SqliteDatabaseLike).prepare === 'function') return fromSqliteDatabase(input as SqliteDatabaseLike);
-  throw new TypeError('database must be a file path, a node:sqlite or better-sqlite3 database, a @libsql/client client, or { all, transaction }');
+  throw new TypeError(
+    'database must be a file path, a node:sqlite or better-sqlite3 database, a @libsql/client client, or { all, transaction }',
+  );
 }
 
 /** Opens a file with the built-in node:sqlite (Node 22.5+), or better-sqlite3 if that's missing. */

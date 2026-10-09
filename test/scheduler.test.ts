@@ -1,20 +1,21 @@
 import assert from 'node:assert/strict';
-import { before, test } from 'node:test';
-
 import { Redis } from 'ioredis';
+import { beforeAll, test } from 'vitest';
 
-import { RedisBackend, Scheduler, type RunRecord, type SkipEvent } from '../src';
-import { probeRedis, REDIS_URL, sleep, supportsIdmp, uniqueId, type ServerInfo } from './helpers';
+import { RedisBackend, type RunRecord, Scheduler, type SkipEvent } from '../src';
+import { probeRedis, REDIS_URL, type ServerInfo, sleep, supportsIdmp, uniqueId } from './helpers';
 
 const uniquePrefix = (label: string) => `test:${uniqueId(label)}:`;
 
 let main: ServerInfo | null;
-before(async () => {
+beforeAll(async () => {
   main = await probeRedis(REDIS_URL);
   assert.ok(main, `No Redis at ${REDIS_URL}`);
 });
 
-test('defaults to localhost:6379 and reports jobs and next runs', async () => {
+test('defaults to localhost:6379 and reports jobs and next runs', async (t) => {
+  // The library's own default, not the test Redis: skipped when nothing listens there.
+  if (!(await probeRedis('redis://localhost:6379'))) return t.skip('nothing at redis://localhost:6379');
   const scheduler = new Scheduler({ prefix: uniquePrefix('defaults') });
   scheduler.every('sync', '10s', () => {}).cron('report', '0 */2 * * *', () => {}, { timezone: 'Europe/Athens' });
   await scheduler.start();
@@ -131,10 +132,18 @@ test('every second, one process: one run per slot and skip events for late or ta
   const b = new Scheduler({ redis: REDIS_URL, prefix, instanceId: 'B' });
   const runs: Array<[string, number]> = [];
   const skips: SkipEvent[] = [];
-  for (const [s, id] of [[a, 'A'], [b, 'B']] as const) {
-    s.every('tick', '1s', (ctx) => {
-      runs.push([id, ctx.slot]);
-    }, { jitterMs: 200, catchUpMs: 0 }); // only scheduled runs (a catch-up at start reports no skip)
+  for (const [s, id] of [
+    [a, 'A'],
+    [b, 'B'],
+  ] as const) {
+    s.every(
+      'tick',
+      '1s',
+      (ctx) => {
+        runs.push([id, ctx.slot]);
+      },
+      { jitterMs: 200, catchUpMs: 0 },
+    ); // only scheduled runs (a catch-up at start reports no skip)
     s.on('skip', (e) => skips.push(e));
   }
   await Promise.all([a.start(), b.start()]);
@@ -208,7 +217,11 @@ test('at(): a one-off job runs once, on one instance', async () => {
 
 test('log: true writes one line per start and finish', async () => {
   const lines: string[] = [];
-  const logger = { info: (m: string) => void lines.push(m), warn: (m: string) => void lines.push(m), error: (m: string) => void lines.push(m) };
+  const logger = {
+    info: (m: string) => void lines.push(m),
+    warn: (m: string) => void lines.push(m),
+    error: (m: string) => void lines.push(m),
+  };
   const scheduler = new Scheduler({ redis: REDIS_URL, prefix: uniquePrefix('log'), log: true, logger });
   scheduler.every('job', '1h', () => {});
   await scheduler.start();
@@ -217,8 +230,14 @@ test('log: true writes one line per start and finish', async () => {
   } finally {
     await scheduler.stop();
   }
-  assert.ok(lines.some((l) => /^\[anarchon\] job @ .*: started on .* \(attempt 1, manual\)$/.test(l)), lines.join('\n'));
-  assert.ok(lines.some((l) => /^\[anarchon\] job @ .*: finished in \d+ ms$/.test(l)), lines.join('\n'));
+  assert.ok(
+    lines.some((l) => /^\[anarchon\] job @ .*: started on .* \(attempt 1, manual\)$/.test(l)),
+    lines.join('\n'),
+  );
+  assert.ok(
+    lines.some((l) => /^\[anarchon\] job @ .*: finished in \d+ ms$/.test(l)),
+    lines.join('\n'),
+  );
 });
 
 test('historyTtlMs drops history older than the limit', async () => {

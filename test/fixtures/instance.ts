@@ -31,6 +31,9 @@ scheduler.on('error', (e) => log({ type: 'error', job: e.job, error: String(e.er
   await scheduler.start();
   log({ type: 'ready' });
   await sleep(Number(process.env.RUN_MS ?? 8_000));
+  // Stop between runs: every job is due on a whole second and starts up to 400 ms later. A run
+  // claimed while stop() is aborting is recorded as interrupted, even when the job itself threw.
+  await sleep((1_700 - (Date.now() % 1_000)) % 1_000);
   await scheduler.stop();
   log({ type: 'stopped' });
 })().catch((error: unknown) => {

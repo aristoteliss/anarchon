@@ -1,19 +1,10 @@
 import { mergeRuns, parseJson, toClaim, toResult } from '../../history';
-import type {
-  Backend,
-  ClaimInput,
-  IdmpOptions,
-  JobLimits,
-  RedisStrategyName,
-  RunRecord,
-  RunStore,
-  StoredResult,
-} from '../../types';
+import type { Backend, ClaimInput, IdmpOptions, JobLimits, RedisStrategyName, RunRecord, RunStore, StoredResult } from '../../types';
 import { intInRange, positiveInt, versionAtLeast } from '../../util';
-import { resolveRedis, type RedisCommandClient, type RedisInput } from './client';
-import { parseEntries, toStr } from './replies';
+import { type RedisCommandClient, type RedisInput, resolveRedis } from './client';
 import { LeaseStore } from './lease';
-import { IdmpStrategy, ScriptStrategy, StreamIdStrategy, claimFields, type ClaimStrategy } from './strategies';
+import { parseEntries, toStr } from './replies';
+import { type ClaimStrategy, claimFields, IdmpStrategy, ScriptStrategy, StreamIdStrategy } from './strategies';
 
 export interface RedisBackendOptions {
   /** Connection or client. Default: localhost:6379 via ioredis. Works with Redis and Valkey. */
@@ -80,7 +71,9 @@ export class RedisBackend implements Backend {
       );
     }
     if (this.strategy === 'script' && job.historyTtlMs !== undefined && job.historyTtlMs <= this.scriptWindowMs) {
-      throw new RangeError(`Job "${job.name}": historyTtlMs must be longer than scriptWindowMs (${this.scriptWindowMs} ms) for the "script" strategy`);
+      throw new RangeError(
+        `Job "${job.name}": historyTtlMs must be longer than scriptWindowMs (${this.scriptWindowMs} ms) for the "script" strategy`,
+      );
     }
     // ('lease' needs no such check: it never forgets a run that a late claim could still ask for.)
     if (this.strategy === 'script' && job.historySize * job.minGapMs <= needed) {
@@ -109,7 +102,14 @@ export class RedisBackend implements Backend {
   async claim(input: ClaimInput): Promise<boolean> {
     if (this.lease) {
       // Used only without the scheduler's lease handling: a long lease, no backups.
-      const outcome = await this.lease.claim({ ...input, mode: 'new', reason: 'scheduled', leaseMs: 86_400_000, overlap: 'allow', maxAttempts: 1 });
+      const outcome = await this.lease.claim({
+        ...input,
+        mode: 'new',
+        reason: 'scheduled',
+        leaseMs: 86_400_000,
+        overlap: 'allow',
+        maxAttempts: 1,
+      });
       return outcome.kind === 'won';
     }
     return (await this.getStrategy()).claim({ ...input, key: this.streamKey(input.job) });
@@ -119,7 +119,15 @@ export class RedisBackend implements Backend {
     // (lease strategy: the scheduler claims manual runs itself, through runs.claim)
     if (this.lease) {
       for (let slot = input.slot; slot < input.slot + 10; slot++) {
-        const outcome = await this.lease.claim({ ...input, slot, mode: 'new', reason: 'manual', leaseMs: 86_400_000, overlap: 'allow', maxAttempts: 1 });
+        const outcome = await this.lease.claim({
+          ...input,
+          slot,
+          mode: 'new',
+          reason: 'manual',
+          leaseMs: 86_400_000,
+          overlap: 'allow',
+          maxAttempts: 1,
+        });
         if (outcome.kind === 'won') return slot;
       }
       throw new Error(`Could not record a manual run of "${input.job}"`);

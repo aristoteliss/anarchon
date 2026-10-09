@@ -40,7 +40,12 @@ export function parseDuration(value: number | string): number {
 export function formatDuration(ms: number): string {
   const parts: string[] = [];
   let rest = ms;
-  for (const [unit, size] of [['d', 86_400_000], ['h', 3_600_000], ['m', 60_000], ['s', 1_000]] as const) {
+  for (const [unit, size] of [
+    ['d', 86_400_000],
+    ['h', 3_600_000],
+    ['m', 60_000],
+    ['s', 1_000],
+  ] as const) {
     if (rest >= size) {
       parts.push(`${Math.floor(rest / size)}${unit}`);
       rest %= size;

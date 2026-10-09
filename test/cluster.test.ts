@@ -6,10 +6,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { describe, test } from 'node:test';
+import { describe, test } from 'vitest';
 
 import { Scheduler } from '../src';
-import { availableSpecs, makeBackend, uniqueId, type Spec } from './helpers';
+import { availableSpecs, makeBackend, type Spec, uniqueId } from './helpers';
 
 interface Event {
   type: string;
@@ -45,12 +45,14 @@ function startInstance(env: Record<string, string>): Promise<{ events: Event[]; 
 
 async function runCluster(spec: Spec) {
   const ids = ['A', 'B', 'C'];
-  const runs = await Promise.all(
-    ids.map((id) => startInstance({ SPEC: JSON.stringify(spec), INSTANCE_ID: id, RUN_MS: String(RUN_MS) })),
-  );
-  runs.forEach((r, i) => assert.equal(r.code, 0, `instance ${ids[i]} exited with ${r.code}: ${r.stderr}`));
+  const runs = await Promise.all(ids.map((id) => startInstance({ SPEC: JSON.stringify(spec), INSTANCE_ID: id, RUN_MS: String(RUN_MS) })));
+  for (const [i, r] of runs.entries()) assert.equal(r.code, 0, `instance ${ids[i]} exited with ${r.code}: ${r.stderr}`);
   const events = runs.flatMap((r, i) => r.events.map((e) => ({ ...e, instanceId: e.instanceId ?? ids[i] })));
-  assert.deepEqual(events.filter((e) => e.type === 'error' || e.type === 'fatal'), [], 'no backend errors');
+  assert.deepEqual(
+    events.filter((e) => e.type === 'error' || e.type === 'fatal'),
+    [],
+    'no backend errors',
+  );
 
   const starts = events.filter((e) => e.type === 'start');
   for (const job of JOBS) {
@@ -88,11 +90,12 @@ async function runCluster(spec: Spec) {
   return { runs: starts.length, perInstance: Object.fromEntries(ids.map((id) => [id, starts.filter((s) => s.instanceId === id).length])) };
 }
 
-describe('3 instances, same jobs, every backend', async () => {
+// Each backend's cluster has its own keys or tables, so the backends run side by side.
+describe.concurrent('3 instances, same jobs, every backend', async () => {
   for (const { label, spec, skip } of await availableSpecs()) {
-    test(label, { skip }, async (t) => {
+    test.skipIf(skip)(label, async (t) => {
       const summary = await runCluster({ ...spec, id: uniqueId('cl') });
-      t.diagnostic(`${summary.runs} runs, per instance ${JSON.stringify(summary.perInstance)}`);
+      await t.annotate(`${summary.runs} runs, per instance ${JSON.stringify(summary.perInstance)}`);
     });
   }
 });

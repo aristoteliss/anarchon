@@ -11,7 +11,7 @@
  * over at once) or kill -9 (a backup takes over when its lease runs out), and watch another one
  * finish it as attempt 2.
  */
-import { PostgresBackend, Scheduler, SqliteBackend, type Backend, type RedisStrategyName } from '../src';
+import { type Backend, PostgresBackend, type RedisStrategyName, Scheduler, SqliteBackend } from '../src';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -51,7 +51,8 @@ async function main() {
 
   await scheduler.start();
   console.log(`Started as ${scheduler.instanceId} on ${scheduler.backend.name}`);
-  for (const job of scheduler.jobs()) console.log(`  ${job.name.padEnd(8)} ${job.schedule.padEnd(40)} next ${job.nextRunAt?.toISOString()}`);
+  for (const job of scheduler.jobs())
+    console.log(`  ${job.name.padEnd(8)} ${job.schedule.padEnd(40)} next ${job.nextRunAt?.toISOString()}`);
 
   // Who ran "sync" lately, and how it ended
   setInterval(async () => {

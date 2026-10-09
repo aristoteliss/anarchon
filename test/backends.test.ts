@@ -4,13 +4,12 @@
  */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { describe, test } from 'node:test';
-
 import { GlideClient, Logger as GlideLogger } from '@valkey/valkey-glide';
 import IoValkey from 'iovalkey';
 import { createClient } from 'redis';
+import { describe, test } from 'vitest';
 
-import { RedisBackend, type Backend } from '../src';
+import { type Backend, RedisBackend } from '../src';
 import { availableSpecs, makeBackend, probeRedis, REDIS_OLD_URL, REDIS_URL, uniqueId, VALKEY_URL } from './helpers';
 
 // GLIDE logs every server error (expected here: losers' XADDs are refused) to stdout.
@@ -32,8 +31,8 @@ async function race(backends: Backend[], runs = 40): Promise<void> {
 
 describe('every backend', async () => {
   for (const { label, spec, skip } of await availableSpecs()) {
-    describe(label, () => {
-      test('3 instances race for 40 runs: exactly one winner each', { skip }, async () => {
+    describe.skipIf(skip)(label, () => {
+      test('3 instances race for 40 runs: exactly one winner each', async () => {
         const id = uniqueId('race');
         const backends = [0, 1, 2].map(() => makeBackend({ ...spec, id }));
         try {
@@ -43,7 +42,7 @@ describe('every backend', async () => {
         }
       });
 
-      test('the same claim sent twice is still a win; another instance loses', { skip }, async () => {
+      test('the same claim sent twice is still a win; another instance loses', async () => {
         const backend = makeBackend({ ...spec, id: uniqueId('retry') });
         try {
           await backend.init();
@@ -58,14 +57,17 @@ describe('every backend', async () => {
         }
       });
 
-      test('history joins claims and results, newest first', { skip }, async () => {
+      test('history joins claims and results, newest first', async () => {
         const backend = makeBackend({ ...spec, id: uniqueId('hist') });
         try {
           await backend.init();
           await backend.prepareJob('job', 1000);
           const first = futureSlot(30);
           const second = first + 1000;
-          for (const [slot, who] of [[first, 'A'], [second, 'B']] as const) {
+          for (const [slot, who] of [
+            [first, 'A'],
+            [second, 'B'],
+          ] as const) {
             const claim = input(slot, who);
             assert.equal(await backend.claim(claim), true);
             await backend.recordClaim?.(claim);
@@ -124,13 +126,17 @@ describe('Redis / Valkey specifics', () => {
           const backends = clients.map((redis) => new RedisBackend({ redis: redis as never, strategy, prefix }));
           await race(backends, 10);
           const [one] = backends;
-          await one!.saveResult('job', { slot: futureSlot(60), by: 'i0', status: 'success', startedAt: 1, finishedAt: 2, durationMs: 1 }, 1000);
+          await one!.saveResult(
+            'job',
+            { slot: futureSlot(60), by: 'i0', status: 'success', startedAt: 1, finishedAt: 2, durationMs: 1 },
+            1000,
+          );
           assert.ok((await one!.history('job', 5)).length > 0, `${name}/${strategy}: history readable`);
         }
       }
     } finally {
       await Promise.all(iovalkey.map((c) => c.quit()));
-      glide.forEach((c) => c.close());
+      for (const c of glide) c.close();
       await Promise.all(nodeRedis.map((c) => c.quit()));
     }
   });

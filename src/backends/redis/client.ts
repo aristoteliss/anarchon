@@ -41,17 +41,9 @@ export interface ValkeyGlideLike {
  * - your own ioredis, iovalkey, node-redis or Valkey GLIDE client (you keep ownership)
  * - any object implementing `RedisCommandClient`
  */
-export type RedisInput =
-  | RedisCommandClient
-  | IORedisLike
-  | NodeRedisLike
-  | ValkeyGlideLike
-  | RedisConnectionOptions
-  | string;
+export type RedisInput = RedisCommandClient | IORedisLike | NodeRedisLike | ValkeyGlideLike | RedisConnectionOptions | string;
 
-export async function resolveRedis(
-  input: RedisInput | undefined,
-): Promise<{ client: RedisCommandClient; owned: boolean }> {
+export async function resolveRedis(input: RedisInput | undefined): Promise<{ client: RedisCommandClient; owned: boolean }> {
   if (input === undefined || typeof input === 'string') {
     return { client: await createIORedis(input), owned: true };
   }
@@ -95,8 +87,7 @@ async function createIORedis(input: string | RedisConnectionOptions | undefined)
     );
   }
   const IORedis = mod.Redis ?? mod.default?.Redis ?? mod.default;
-  const client: IORedisLike =
-    typeof input === 'string' ? new IORedis(input) : new IORedis({ host: 'localhost', port: 6379, ...input });
+  const client: IORedisLike = typeof input === 'string' ? new IORedis(input) : new IORedis({ host: 'localhost', port: 6379, ...input });
   return fromIORedis(client, true);
 }
 

@@ -26,10 +26,14 @@ function work(ms: number, signal: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
     if (signal.aborted) return resolve(true);
     const timer = setTimeout(() => resolve(false), ms);
-    signal.addEventListener('abort', () => {
-      clearTimeout(timer);
-      resolve(true);
-    }, { once: true });
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        resolve(true);
+      },
+      { once: true },
+    );
   });
 }
 

@@ -136,7 +136,8 @@ export function fromPostgresJs(sql: PostgresJsLike): SqlClient {
 
 function toSqlClient(input: PgPoolLike | PgClientLike | PostgresJsLike | SqlClient): SqlClient {
   if (typeof (input as SqlClient).all === 'function') {
-    if (typeof (input as SqlClient).transaction !== 'function') throw new TypeError('A custom SQL client needs both all() and transaction()');
+    if (typeof (input as SqlClient).transaction !== 'function')
+      throw new TypeError('A custom SQL client needs both all() and transaction()');
     return input as SqlClient;
   }
   if (typeof (input as PostgresJsLike).unsafe === 'function') return fromPostgresJs(input as PostgresJsLike);

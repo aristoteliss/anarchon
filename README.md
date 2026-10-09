@@ -244,22 +244,33 @@ npx tsx examples/http-api.ts    # GET /jobs, /jobs/:name/runs, POST /jobs/:name/
 
 ## Tests
 
-The tests run against real servers, and any server that isn't running is skipped:
+The tests run against real servers, and any server that isn't running is skipped. `docker-compose.test.yml` starts every one of them on the default URLs below:
+
+```sh
+pnpm test:servers                          # Redis 8.6, Redis 7.0, Valkey, PostgreSQL, libSQL
+COMPOSE_PROFILES=brokers pnpm test:servers # also RabbitMQ and NATS
+pnpm test:servers:down                     # remove them and their data
+```
 
 | Server | Default URL | Variable |
 |---|---|---|
-| Redis 8.6+ | `redis://localhost:6379` | `REDIS_URL` |
+| Redis 8.6+ | `redis://localhost:6381` | `REDIS_URL` |
 | Older Redis (optional) | `redis://localhost:6380` | `REDIS_OLD_URL` |
 | Valkey (optional) | `redis://localhost:6390` | `VALKEY_URL` |
-| PostgreSQL (optional) | `postgres://postgres:postgres@localhost:5432/anarchon_test` | `POSTGRES_URL` |
+| PostgreSQL (optional) | `postgres://postgres:postgres@localhost:5433/anarchon_test` | `POSTGRES_URL` |
 | RabbitMQ (optional) | `amqp://localhost` | `RABBITMQ_URL` |
 | NATS with JetStream (optional) | `nats://localhost:4222` | `NATS_URL` |
+| libSQL server: sqld or Turso (optional) | `http://localhost:8081` | `LIBSQL_URL`, token in `LIBSQL_AUTH_TOKEN` |
 
 SQLite needs no server (node:sqlite on Node 22.5+; files go to the temp folder, or `SQLITE_DIR`).
 
 ```sh
-pnpm test            # everything below
-pnpm run scenarios   # the failure scenarios: simple claim vs lease on Redis, Postgres, SQLite
+pnpm test              # everything below except the scenario and cluster files
+pnpm test:slow         # the scenario and cluster files (real processes, real clock)
+pnpm test:all          # every test
+pnpm test:all:full     # the same with coverage, saved to test-run.log
+pnpm test:last:review  # summary of the last full run (test:last:fails: failures only)
+pnpm scenarios         # the failure scenarios: simple claim vs lease on Redis, Postgres, SQLite
 ```
 
 This covers:

@@ -1,7 +1,7 @@
 import type { JetStreamClient, JetStreamManager } from '@nats-io/jetstream';
 import type { NatsConnection } from '@nats-io/transport-node';
 
-import { claimPayload, mergeRuns, parseJson, toClaim, toResult, type ClaimRecord } from '../history';
+import { type ClaimRecord, claimPayload, mergeRuns, parseJson, toClaim, toResult } from '../history';
 import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
 import { assertSimpleName, errorMessage, positiveInt } from '../util';
 
@@ -145,9 +145,12 @@ export class NatsBackend implements Backend {
         transport = await import('@nats-io/transport-node');
         jetstreamModule = await import('@nats-io/jetstream');
       } catch {
-        throw new Error('The NATS backend needs "@nats-io/transport-node" and "@nats-io/jetstream": run `npm install @nats-io/transport-node @nats-io/jetstream`.');
+        throw new Error(
+          'The NATS backend needs "@nats-io/transport-node" and "@nats-io/jetstream": run `npm install @nats-io/transport-node @nats-io/jetstream`.',
+        );
       }
-      const nc: NatsConnection = (this.userConnection as NatsConnection | undefined) ?? (await transport.connect({ servers: this.servers }));
+      const nc: NatsConnection =
+        (this.userConnection as NatsConnection | undefined) ?? (await transport.connect({ servers: this.servers }));
       let jsm: JetStreamManager;
       try {
         jsm = await jetstreamModule.jetstreamManager(nc);
