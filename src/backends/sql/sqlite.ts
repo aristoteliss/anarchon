@@ -18,6 +18,7 @@ export interface LibsqlClientLike {
   }>;
 }
 
+/** Options of {@link SqliteBackend}. */
 export interface SqliteBackendOptions {
   /**
    * A file path (default './anarchon.db'), your own node:sqlite / better-sqlite3 database, a
@@ -41,7 +42,8 @@ const processQueue = new Mutex();
 
 const dialect: SqlDialect = {
   bigint: 'INTEGER',
-  nowMs: `CAST((julianday('now') - 2440587.5) * 86400000.0 AS INTEGER)`,
+  // Rounded, not cut: julianday is a float, and a whole millisecond can come out as x.9999.
+  nowMs: `CAST(ROUND((julianday('now') - 2440587.5) * 86400000.0) AS INTEGER)`,
   forUpdate: '', // BEGIN IMMEDIATE already makes claims take turns: SQLite has one writer at a time
   placeholders: (sql) => sql,
   extraTables: () => [],
@@ -55,6 +57,29 @@ const dialect: SqlDialect = {
  * transaction at a time. A SQLite file only coordinates processes that open that same file (one
  * machine, or a volume with working file locks, not NFS). For several machines use a libSQL server
  * or Postgres.
+ *
+ * **How each run gets exactly one runner.** A run is a row with primary key (job, slot). SQLite
+ * lets one connection write at a time, and `BEGIN IMMEDIATE` takes that write lock up front, so two
+ * instances' claims can't interleave: the first inserts the run's row and wins, the second waits
+ * for the lock (up to `busyTimeoutMs`), then reads that row and sees it taken. The full steps are on
+ * {@link SqlBackend}.
+ *
+ * @example A file, for several processes on one machine
+ * ```ts
+ * new Scheduler({ backend: new SqliteBackend({ database: '/var/lib/myapp/jobs.db' }) });
+ * ```
+ *
+ * @example A database your app already opened (node:sqlite or better-sqlite3)
+ * ```ts
+ * const db = new DatabaseSync('/var/lib/myapp/app.db');
+ * new Scheduler({ backend: new SqliteBackend({ database: db, table: 'cron_runs' }) });
+ * ```
+ *
+ * @example A libSQL server or Turso, for several machines
+ * ```ts
+ * const client = createClient({ url: process.env.LIBSQL_URL, authToken: process.env.LIBSQL_AUTH_TOKEN });
+ * new Scheduler({ backend: new SqliteBackend({ database: client }) });
+ * ```
  */
 export class SqliteBackend extends SqlBackend {
   readonly name = 'sqlite';

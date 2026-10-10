@@ -275,8 +275,8 @@ pnpm test:servers:down                     # remove them and their data
 SQLite needs no server (node:sqlite on Node 22.5+; files go to the temp folder, or `SQLITE_DIR`).
 
 ```sh
-pnpm test              # everything below except the scenario and cluster files
-pnpm test:slow         # the scenario and cluster files (real processes, real clock)
+pnpm test              # everything below except test/e2e
+pnpm test:slow         # test/e2e: the cluster and failure-scenario tests (real processes, real clock)
 pnpm test:all          # every test
 pnpm test:all:full     # the same with coverage, saved to test-run.log
 pnpm test:last:review  # summary of the last full run (test:last:fails: failures only)

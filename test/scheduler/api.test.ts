@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { Redis } from 'ioredis';
 import { beforeAll, test } from 'vitest';
 
-import { RedisBackend, type RunRecord, Scheduler, type SkipEvent } from '../src';
-import { probeRedis, REDIS_URL, type ServerInfo, sleep, supportsIdmp, uniqueId } from './helpers';
+import { RedisBackend, type RunRecord, Scheduler, type SkipEvent } from '../../src';
+import { probeRedis, REDIS_URL, type ServerInfo, sleep, supportsIdmp, uniqueId } from '../support';
 
 const uniquePrefix = (label: string) => `test:${uniqueId(label)}:`;
 

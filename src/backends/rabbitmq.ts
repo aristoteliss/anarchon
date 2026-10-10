@@ -13,6 +13,7 @@ export interface RabbitMQConnectionLike {
   readonly connection: { readonly serverProperties: { version?: string; product?: string } };
 }
 
+/** Options of {@link RabbitMQBackend}. */
 export interface RabbitMQBackendOptions {
   /** AMQP URL. Default 'amqp://localhost'. */
   url?: string;
@@ -34,6 +35,31 @@ const BYTES_PER_RUN = 1_024; // claim + result records, with room to spare
  * (`x-max-length: 1`, `x-overflow: reject-publish`). Every instance publishes its claim there with
  * publisher confirms: RabbitMQ acks the first one and nacks the rest. The queue deletes itself
  * (`x-expires`) a while after the run. History is kept in a stream queue `<prefix><job>.history`.
+ *
+ * **How each run gets exactly one runner.** The feature used is a bounded queue that rejects
+ * overflow, together with publisher confirms:
+ *
+ * 1. Each instance declares the run's gate queue (same arguments everywhere, so declaring is safe to
+ *    repeat) and publishes one message to it on a confirm channel.
+ * 2. The queue holds one message. RabbitMQ confirms (ack) the publish that filled it and rejects
+ *    (nack) every later one. The broker decides the order, so exactly one instance gets the ack.
+ * 3. Nobody consumes the gate queue: the message stays, so the run stays taken until the queue
+ *    expires `slotTtlMs` after it was last used.
+ *
+ * Simple claim only: this decides who runs each time. There are no leases, so no backup runners,
+ * no overlap protection and no catch-up; for those use Redis 'lease', Postgres or SQLite.
+ * Job names may contain letters, digits, "_" and "-" only (they become queue names).
+ *
+ * @example
+ * ```ts
+ * new Scheduler({ backend: new RabbitMQBackend({ url: 'amqp://rabbit.internal' }) });
+ * ```
+ *
+ * @example Your own amqplib connection, and a longer memory for slow or late instances
+ * ```ts
+ * const connection = await amqplib.connect(process.env.AMQP_URL);
+ * new Scheduler({ backend: new RabbitMQBackend({ connection, prefix: 'billing.cron.', slotTtlMs: 15 * 60_000 }) });
+ * ```
  */
 export class RabbitMQBackend implements Backend {
   readonly name = 'rabbitmq';

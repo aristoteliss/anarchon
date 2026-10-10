@@ -5,23 +5,23 @@
  * pauses on the `debugger` line below. From there use F11 (step into) to enter the library, or set
  * breakpoints on the methods listed here and press F5 to jump from one to the next.
  *
- * The flow of one run, all in src/scheduler.ts unless noted:
+ * The flow of one run, with the file under src/scheduler/ each step lives in:
  *
- *   start()            connects (backend.init), then for each job: arm() and recover()
- *   arm()              computes the next run time and sets a timer for it, plus a random jitter
- *   recover()          lease backends, on start: takes over dead runs, catches up a missed run
- *   fire()             the timer fired: the run is due
- *   claimRun()         asks the backend for the run; exactly one instance gets 'won'
- *     claim            src/backends/sql/base.ts claimRun(), or the CLAIM script in src/backends/redis/lease.ts
- *     'won'            -> executeLeased()
- *     'running'        -> watch(): this instance is now a backup of that run
- *   executeLeased()    starts the heartbeat that renews the lease, then execute()
- *   execute()          emits 'start', calls your handler, then stores the result (finish, saveResult)
- *   watch()            a backup's timer: every 1 to 2 heartbeats it calls claimRun(..., 'takeover')
- *   stop()             doStop(): aborts ctx.signal, waits for running jobs, closes the backend
+ *   scheduler.ts      start()            connects (backend.init), then for each job: schedule()
+ *   timers.ts         arm()              computes the next run time and sets a timer for it, plus a random jitter
+ *   lease-runner.ts   recover()          on start: takes over dead runs, catches up a missed run
+ *   scheduler.ts      fire()             the timer fired: the run is due
+ *   lease-runner.ts   run()              asks the backend for the run; exactly one instance gets 'won'
+ *                       the claim        src/backends/sql/base.ts claimRun(), or the CLAIM script in src/backends/redis/lease.ts
+ *                       'won'            -> executeLeased()
+ *                       'running'        -> watch(): this instance is now a backup of that run
+ *   lease-runner.ts   executeLeased()    starts the heartbeat that renews the lease, then execute()
+ *   executor.ts       execute()          emits 'start', calls your handler, then stores the result (finish, saveResult)
+ *   lease-runner.ts   watch()            a backup's timer: every 1 to 2 heartbeats it calls run(..., 'takeover')
+ *   scheduler.ts      stop()             doStop(): aborts ctx.signal, waits for running jobs, closes the backend
  *
  * Two instances (A and B) run in this process, so you see both sides of one claim: the winner in
- * executeLeased() and the other one in watch(). `this.instanceId` tells you which one you are in.
+ * executeLeased() and the other one in watch(). `this.core.instanceId` tells you which one you are in.
  *
  * Pausing in a debugger stops the clock for the process but not for the store, so the timings here
  * are long on purpose: a 10 minute lease and lateness limit, so a run is not lost or skipped while
@@ -46,7 +46,7 @@ async function main() {
       'job',
       '10s',
       async (ctx: JobContext) => {
-        // A breakpoint here stops inside your job. The call stack shows execute() <- executeLeased() <- claimRun() <- fire().
+        // A breakpoint here stops inside your job. The call stack shows execute() <- executeLeased() <- run() <- fire().
         say(
           `${ctx.instanceId}: the job runs (scheduled ${ctx.scheduledAt.toISOString().slice(11, 19)}, attempt ${ctx.attempt}, ${ctx.reason})`,
         );
@@ -63,7 +63,7 @@ async function main() {
 
   // biome-ignore lint/suspicious/noDebugger: the starting point of the walkthrough; does nothing without a debugger
   debugger;
-  await a.start(); // F11 here: start() -> ensureReady() -> arm() -> recover()
+  await a.start(); // F11 here: start() -> ensureReady() -> schedule() -> arm(), recover()
   await b.start();
   say(`both started on ${a.backend.name}; the next run is at ${a.nextRun('job')?.toISOString().slice(11, 19)}`);
 

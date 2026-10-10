@@ -6,25 +6,91 @@ import { LeaseStore } from './lease';
 import { parseEntries, toStr } from './replies';
 import { type ClaimStrategy, claimFields, IdmpStrategy, ScriptStrategy, StreamIdStrategy } from './strategies';
 
+/**
+ * Options of {@link RedisBackend}.
+ *
+ * @example
+ * ```ts
+ * new RedisBackend(); // redis://localhost:6379, 'lease', keys under 'cron:'
+ * new RedisBackend({ redis: 'rediss://user:secret@host:6380/2' });
+ * new RedisBackend({ redis: { host: 'localhost', port: 6390 } }); // Valkey works the same
+ * new RedisBackend({ redis: existingClient, prefix: 'orders:cron:' });
+ * new RedisBackend({ strategy: 'idmp', idmp: { durationSec: 600 } }); // Redis 8.6+
+ * ```
+ */
 export interface RedisBackendOptions {
-  /** Connection or client. Default: localhost:6379 via ioredis. Works with Redis and Valkey. */
+  /**
+   * Where Redis is: a URL (`redis://`, or `rediss://` for TLS), `{ host, port, ... }`, or a client
+   * your app already has (ioredis, node-redis, Valkey GLIDE, or anything with `send(command, args)`).
+   * A client you pass in is never closed by stop(). Default: localhost:6379 via ioredis.
+   */
   redis?: RedisInput;
   /**
-   * Default 'lease': no overlapping runs, backup runners, catch-up and retries (Redis 5+, Valkey).
-   * The simpler 'stream-id', 'idmp' (Redis 8.6+) and 'script' only decide who runs each time.
+   * How the single runner of each run is chosen (see the table on {@link RedisBackend}).
+   * Default 'lease': also gives no overlapping runs, backup runners, catch-up and retries (Redis 5+,
+   * Valkey). The simpler 'stream-id', 'idmp' (Redis 8.6+) and 'script' only decide who runs each time.
    */
   strategy?: RedisStrategyName;
-  /** Prefix for every key. Default 'cron:'. */
+  /**
+   * Prefix for every key. Default 'cron:'. Give each app (or environment) sharing a Redis its own,
+   * e.g. `'billing:cron:'`; instances that should share jobs must use the same one.
+   */
   prefix?: string;
   /** Settings for the 'idmp' strategy. */
   idmp?: IdmpOptions;
-  /** 'script' strategy: how long a claimed run is remembered (ms). Default 300000. */
+  /**
+   * 'script' strategy: how long a claimed run is remembered (ms). Must be longer than a job's
+   * jitterMs + maxLateMs, or a late instance could run it again. Default 300000 (5 min).
+   */
   scriptWindowMs?: number;
 }
 
 /**
- * Redis or Valkey. With 'stream-id', 'idmp' and 'script', per job: a stream `<prefix><job>:runs` (one
- * entry per claimed run) and a sorted set `<prefix><job>:results`. With 'lease', see LeaseStore.
+ * Redis or Valkey.
+ *
+ * **How each run gets exactly one runner.** Redis executes commands and Lua scripts one at a time,
+ * so a single command (or script) that both checks "is this run taken?" and takes it is atomic:
+ * of all the instances that send it for the same run, exactly one sees "not taken". No lock, no
+ * leader. The four strategies differ in which command that is:
+ *
+ * | strategy | the one atomic step | remembers a run |
+ * | --- | --- | --- |
+ * | `lease` (default) | a Lua script on a hash: no state for the run -> store `{token, lease end}` and win; state with a live lease -> 'running'; lease ran out -> the caller wins the next attempt | while the run can still be claimed (`keepMs`) |
+ * | `stream-id` | `XADD <job stream> <run time>-0`: Redis refuses an entry ID that is not greater than the stream's last one, so the second XADD for a run fails | forever (IDs only grow) |
+ * | `idmp` (Redis 8.6+) | `XADD ... IDMP <job> <run time>`: Redis keeps the first entry for an idempotency key and answers repeats with that entry's ID | `idmp.durationSec` |
+ * | `script` | a Lua script: scan the stream's recent entries for this run time; append only if absent | `scriptWindowMs` |
+ *
+ * Every claim carries a random token. After the atomic step, an instance won if the stored token is
+ * its own. That also makes a claim safe to send twice (a client retry after a dropped connection
+ * still recognizes its own win).
+ *
+ * Only `lease` goes further than "who runs it": the winner renews its lease while the job runs, so
+ * the others can tell a dead runner from a slow one and take over (see {@link LeaseStore}).
+ *
+ * Keys per job, with 'stream-id', 'idmp' and 'script': a stream `<prefix><job>:runs` (one entry per
+ * claimed run) and a sorted set `<prefix><job>:results`. With 'lease', see {@link LeaseStore}.
+ *
+ * @example Usually you don't create it yourself: the Scheduler does, from its Redis shortcuts
+ * ```ts
+ * new Scheduler({ redis: 'redis://localhost:6379' }); // = new RedisBackend({ redis, strategy: 'lease' })
+ * ```
+ *
+ * @example Created yourself, to set what the shortcuts don't cover
+ * ```ts
+ * const backend = new RedisBackend({
+ *   redis: { host: 'cache.internal', port: 6379, password: process.env.REDIS_PASSWORD },
+ *   strategy: 'script',
+ *   scriptWindowMs: 10 * 60_000,
+ *   prefix: 'billing:cron:',
+ * });
+ * new Scheduler({ backend });
+ * ```
+ *
+ * @example Your own client (ioredis, node-redis or Valkey GLIDE); stop() leaves it open
+ * ```ts
+ * const redis = new Redis(process.env.REDIS_URL);
+ * new Scheduler({ backend: new RedisBackend({ redis }) });
+ * ```
  */
 export class RedisBackend implements Backend {
   readonly name: string;

@@ -2,8 +2,8 @@
  * One "service instance" for the cluster test. The test starts three of these at once with the same
  * jobs and the same backend, like three copies of one app.
  */
-import { Scheduler } from '../../src';
-import { makeBackend, type Spec } from '../helpers';
+import { Scheduler } from '../../../src';
+import { makeBackend, type Spec } from '../../support';
 
 const log = (event: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(event)}\n`);
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));

@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'vitest';
 
-import { LIBSQL_URL, POSTGRES_URL, probeLibsql, probePostgres, probeRedis, probeSqlite, REDIS_URL } from './helpers';
+import { LIBSQL_URL, POSTGRES_URL, probeLibsql, probePostgres, probeRedis, probeSqlite, REDIS_URL } from '../../support';
 import {
   allDownAtRunTime,
   allRestartMidRun,
@@ -16,7 +16,7 @@ import {
   winnerCrashes,
   winnerFreezes,
   winnerStopsGracefully,
-} from './scenarios/harness';
+} from './harness';
 
 const BACKENDS = [
   { strategy: 'lease', label: 'Redis, lease strategy', probe: () => probeRedis(REDIS_URL), missing: `nothing at ${REDIS_URL}` },

@@ -17,6 +17,15 @@ export type RedisStrategyName = 'lease' | 'stream-id' | 'idmp' | 'script';
 /** @deprecated use RedisStrategyName */
 export type ClaimStrategyName = RedisStrategyName;
 
+/**
+ * Where the scheduler writes its own messages. `console` fits, and so do pino and winston loggers.
+ *
+ * @example
+ * ```ts
+ * new Scheduler({ logger: pino(), log: true });
+ * new Scheduler({ logger: { warn: (m) => myLog('warn', m), error: (m) => myLog('error', m) } });
+ * ```
+ */
 export interface Logger {
   /** Used by `log: true` for run messages. Falls back to console.log when missing. */
   info?(message: string, ...meta: unknown[]): void;
@@ -24,11 +33,34 @@ export interface Logger {
   error(message: string, ...meta: unknown[]): void;
 }
 
+/**
+ * What a job's handler receives.
+ *
+ * @example A job that is safe to run again: `slot` is the same on every instance and every attempt
+ * ```ts
+ * scheduler.every('invoice', '1h', async (ctx) => {
+ *   await db.query('INSERT INTO invoice_runs (period) VALUES ($1) ON CONFLICT DO NOTHING', [ctx.slot]);
+ *   await buildInvoices({ from: ctx.slot - 3_600_000, to: ctx.slot });
+ * });
+ * ```
+ *
+ * @example A long job that stops when asked, so another instance can continue it
+ * ```ts
+ * scheduler.every('export', '10m', async (ctx) => {
+ *   if (ctx.attempt > 1) console.log(`continuing after ${ctx.reason}`); // 'takeover'
+ *   for (const page of pages) {
+ *     ctx.signal.throwIfAborted();
+ *     await exportPage(page, { signal: ctx.signal }); // fetch, pg and many others accept a signal
+ *   }
+ * });
+ * ```
+ */
 export interface JobContext {
   /** Job name. */
   name: string;
   /** Scheduled run time in ms since epoch. Same value on every instance. */
   slot: number;
+  /** `slot` as a Date: when the run was due, not when it actually started (up to jitterMs later). */
   scheduledAt: Date;
   /** The instance running this job (you). */
   instanceId: string;
@@ -49,20 +81,71 @@ export interface JobContext {
   reason: RunReason;
 }
 
-/** scheduled: on time. catch-up: missed while every instance was down. takeover: a backup re-running a run whose runner died. */
+/**
+ * Why a run started:
+ * - `scheduled`: it was due.
+ * - `manual`: `runNow()` was called.
+ * - `catch-up`: it was due while every instance was down, and an instance that started within
+ *   `catchUpMs` ran it (lease backends).
+ * - `takeover`: its runner died, froze or was stopped, and a backup started the next attempt (lease backends).
+ */
 export type RunReason = 'scheduled' | 'manual' | 'catch-up' | 'takeover';
 
+/**
+ * The function a job runs. Sync or async. Returning (any value) means success; throwing means
+ * failure, or 'interrupted' when `ctx.signal` was aborted by stop() or a takeover first.
+ *
+ * @example
+ * ```ts
+ * const sync: JobHandler = async (ctx) => {
+ *   await syncCustomers({ signal: ctx.signal });
+ * };
+ * scheduler.every('sync', '10s', sync);
+ * ```
+ */
 export type JobHandler = (ctx: JobContext) => unknown;
 
+/**
+ * Per-job settings, for `cron()`, `every()` and `at()`. Each one falls back to the scheduler's
+ * option of the same name, then to the default given here.
+ *
+ * @example A heavy nightly job: at most 2 h, started at most twice, never two at once
+ * ```ts
+ * scheduler.cron('rebuild-index', '0 2 * * *', rebuild, {
+ *   timeoutMs: 2 * 60 * 60_000,
+ *   maxAttempts: 2,
+ *   overlap: 'skip',
+ * });
+ * ```
+ *
+ * @example A cheap, frequent job where a missed run doesn't matter
+ * ```ts
+ * scheduler.every('refresh-cache', '5s', refresh, { jitterMs: 0, catchUpMs: 0, historySize: 50 });
+ * ```
+ *
+ * @example A job that must run even if the instances were down when it was due (up to 6 h late)
+ * ```ts
+ * scheduler.cron('daily-report', '0 6 * * *', report, { catchUpMs: 6 * 60 * 60_000 });
+ * ```
+ */
 export interface JobOptions {
   /**
    * Each instance waits a random 0..jitterMs before trying to claim a run, so a random instance
-   * wins each time and the work is spread. 0 = no spreading. Must be under half the time between runs.
+   * wins each time and the work is spread. 0 = no spreading: the instance with the fastest clock
+   * and connection wins every time. Must be under half the time between runs.
+   * Default: the scheduler's `jitterMs` (2000), or a quarter of the time between runs if smaller.
+   *
+   * @example `jitterMs: 5_000` on an hourly job: it starts between hh:00:00 and hh:00:05.
    */
   jitterMs?: number;
-  /** An instance that reaches a run later than this (ms after its scheduled time) skips it. */
+  /**
+   * An instance that reaches a run later than this (ms after its scheduled time) skips it, with a
+   * 'skip' event of reason 'late'. This is what stops a process that was frozen for minutes (a
+   * suspended laptop, a long GC pause) from starting a stale run when it wakes up.
+   * Default: the scheduler's `maxLateMs` (60000).
+   */
   maxLateMs?: number;
-  /** About how many runs to keep in history for this job. */
+  /** About how many runs to keep in history for this job. Default: the scheduler's `historySize` (1000). */
   historySize?: number;
   /** Also drop history older than this (ms), like SyncedCron's collectionTTL. Default: keep by count only. */
   historyTtlMs?: number;
@@ -71,9 +154,17 @@ export interface JobOptions {
    * 'skip' (default) skips it; 'allow' runs both.
    */
   overlap?: 'skip' | 'allow';
-  /** Aborts ctx.signal and marks the run failed after this many ms. Default: no limit. */
+  /**
+   * Aborts ctx.signal and marks the run failed (error `TimeoutError`) after this many ms. The
+   * handler itself is not killed: it should watch `ctx.signal`. Set it on jobs that can hang, since
+   * with overlap 'skip' a hung run blocks every later run of the job. Default: no limit.
+   */
   timeoutMs?: number;
-  /** Lease strategy: how many times a run may be started when runners die (first try included). Default 3. */
+  /**
+   * Lease strategy: how many times a run may be started when runners die (first try included).
+   * 1 = never retried. A hand-over on stop() doesn't count. A run that fails by throwing is not
+   * retried either: retries are for runners that died. Default 3.
+   */
   maxAttempts?: number;
   /**
    * Lease strategy: on start, run the latest scheduled run if nobody ran it and it was due at most this
@@ -82,16 +173,44 @@ export interface JobOptions {
   catchUpMs?: number;
 }
 
+/**
+ * Options of `cron()`.
+ *
+ * @example
+ * ```ts
+ * scheduler.cron('open-market', '30 9 * * 1-5', open, { timezone: 'America/New_York' });
+ * ```
+ */
 export interface CronJobOptions extends JobOptions {
   /** IANA time zone for this cron expression, e.g. 'Europe/Athens'. Defaults to the scheduler's. */
   timezone?: string;
 }
 
+/**
+ * Options of `every()`.
+ *
+ * @example Two hourly jobs that should not start together
+ * ```ts
+ * scheduler.every('a', '1h', runA);                              // 00:00, 01:00, ...
+ * scheduler.every('b', '1h', runB, { offsetMs: 30 * 60_000 });   // 00:30, 01:30, ...
+ * ```
+ */
 export interface EveryJobOptions extends JobOptions {
-  /** Shifts the interval grid. With 0, runs fall on multiples of the interval since 1970 UTC. */
+  /**
+   * Shifts the interval grid (ms). With 0, runs fall on multiples of the interval since 1970 UTC:
+   * `'10s'` runs at :00, :10, :20; `'1h'` on the hour. Must be the same on every instance.
+   */
   offsetMs?: number;
 }
 
+/**
+ * Settings of the Redis 'idmp' strategy (Redis 8.6+).
+ *
+ * @example A job with jitterMs 5 s and maxLateMs 10 min needs Redis to remember runs for longer than that
+ * ```ts
+ * new Scheduler({ redis, strategy: 'idmp', idmp: { durationSec: 900 } });
+ * ```
+ */
 export interface IdmpOptions {
   /**
    * How long Redis remembers a run's ID (seconds, 1-86400). Must be longer than
@@ -104,7 +223,10 @@ export interface IdmpOptions {
 
 // ------------------------------------------------------------------ backend contract
 
-/** What a lease-capable backend answers when asked to claim a run. */
+/**
+ * What a lease-capable backend answers when asked to claim a run. Exactly one instance gets 'won'
+ * for each attempt of a run; what the scheduler does with each answer is in `LeaseRunner.run()`.
+ */
 export type ClaimOutcome =
   | { kind: 'won'; attempt: number }
   /** Someone alive is running it. */
@@ -195,6 +317,40 @@ export interface JobLimits {
 /**
  * Where runs are claimed and recorded. Every backend gives the same guarantee: for one slot,
  * `claim()` returns true for exactly one instance.
+ *
+ * The built-in backends get that from one atomic operation of their store; each class explains its
+ * own: {@link RedisBackend} (a script or XADD), {@link PostgresBackend} and {@link SqliteBackend}
+ * (one transaction on the run's row), {@link RabbitMQBackend} (a queue of length 1 with publisher
+ * confirms), {@link NatsBackend} (JetStream message de-duplication).
+ *
+ * @example The idea, as a backend for tests: one process, so a Map is atomic enough
+ * ```ts
+ * class MemoryBackend implements Backend {
+ *   readonly name = 'memory';
+ *   readonly dedupeWindowMs = Infinity;
+ *   private claims = new Map<string, ClaimInput>();
+ *   private results: StoredResult[] = [];
+ *   async init() {}
+ *   async prepareJob() {}
+ *   async claim(input: ClaimInput) {
+ *     const key = `${input.job}:${input.slot}`;
+ *     const first = this.claims.get(key) ?? input; // whoever asked first holds the run
+ *     this.claims.set(key, first);
+ *     return first.token === input.token;
+ *   }
+ *   async recordManualRun(input: ClaimInput) {
+ *     this.claims.set(`${input.job}:${input.slot}:manual`, input);
+ *   }
+ *   async saveResult(_job: string, result: StoredResult) {
+ *     this.results.push(result);
+ *   }
+ *   async history() {
+ *     return [];
+ *   }
+ *   async close() {}
+ * }
+ * new Scheduler({ backend: new MemoryBackend() });
+ * ```
  */
 export interface Backend {
   /** e.g. 'redis:lease', 'redis:stream-id'. */
@@ -227,6 +383,35 @@ export interface Backend {
 
 // ------------------------------------------------------------------ scheduler
 
+/**
+ * Options of `new Scheduler()`. All optional: `new Scheduler()` uses Redis on localhost:6379.
+ *
+ * Pass either `backend`, or the Redis shortcuts (`redis`, `strategy`, `prefix`, `idmp`), not both.
+ * Give every instance of a service the same options, apart from `instanceId`.
+ *
+ * @example Production-style setup on Redis
+ * ```ts
+ * new Scheduler({
+ *   redis: process.env.REDIS_URL,
+ *   prefix: 'billing:cron:',        // this service's own keys
+ *   instanceId: process.env.POD_NAME, // readable names in history
+ *   timezone: 'Europe/Athens',       // for cron expressions
+ *   logger: pino(),
+ *   log: true,
+ * });
+ * ```
+ *
+ * @example Quick failover for short jobs, slow and steady for long ones
+ * ```ts
+ * new Scheduler({ redis, leaseMs: 6_000, heartbeatMs: 1_000 });   // a dead runner is replaced within ~8 s
+ * new Scheduler({ redis, leaseMs: 120_000 });                    // tolerates 2 min of lost network
+ * ```
+ *
+ * @example In tests and scripts: don't let the scheduler keep the process alive
+ * ```ts
+ * new Scheduler({ backend: new SqliteBackend({ database: ':memory:' }), unrefTimers: true });
+ * ```
+ */
 export interface SchedulerOptions {
   /**
    * Where runs are claimed and recorded. Default: a RedisBackend built from `redis`, `strategy`,
@@ -241,7 +426,10 @@ export interface SchedulerOptions {
   prefix?: string;
   /** Shortcut for the default Redis backend: settings for the 'idmp' strategy. */
   idmp?: IdmpOptions;
-  /** Name of this instance in history. Default `${hostname}:${pid}`. */
+  /**
+   * Name of this instance in history and events. Must differ between instances, or history can't
+   * tell them apart. Default `${hostname}:${pid}`; a pod name or host name reads better.
+   */
   instanceId?: string;
   /** Default jitter for all jobs (ms). Default 2000, lowered automatically for short intervals. */
   jitterMs?: number;
@@ -253,9 +441,12 @@ export interface SchedulerOptions {
   historyTtlMs?: number;
   /** Log every start, success, failure, skip and lost run through `logger` (like SyncedCron's `log`). Default false. */
   log?: boolean;
-  /** Default time zone for cron jobs. Default: the server's local time zone. */
+  /**
+   * Default IANA time zone for cron jobs, e.g. 'Europe/Athens' or 'UTC'. Set it: the default is the
+   * server's local time zone, which can differ between machines. `every()` ignores it (UTC grid).
+   */
   timezone?: string;
-  /** Where to log errors nobody listens for. Default `console`. */
+  /** Where to log 'error' events nobody listens for, and the run messages of `log: true`. Default `console`. */
   logger?: Logger;
   /** If true, the scheduler's timers don't keep the process alive. Default false. */
   unrefTimers?: boolean;
@@ -278,7 +469,20 @@ export interface SchedulerOptions {
  */
 export type RunStatus = 'running' | 'success' | 'failed' | 'interrupted';
 
-/** One run of a job: who ran it, when, and how it ended. */
+/**
+ * One attempt of one run of a job: who ran it, when, and how it ended. Returned by `history()`,
+ * `lastRun()` and `runNow()`, and the payload of the 'success' event.
+ *
+ * @example What `history()` returns for a run that was taken over (newest first)
+ * ```ts
+ * [
+ *   { job: 'report', slot: 1791633600000, instanceId: 'api-2', attempt: 2, reason: 'takeover',
+ *     status: 'success', startedAt: 2026-10-10T12:00:34Z, finishedAt: 2026-10-10T12:01:14Z, durationMs: 40012 },
+ *   { job: 'report', slot: 1791633600000, instanceId: 'api-1', attempt: 1, reason: 'scheduled',
+ *     status: 'interrupted', startedAt: 2026-10-10T12:00:01Z },
+ * ]
+ * ```
+ */
 export interface RunRecord {
   job: string;
   /** Scheduled run time (ms since epoch). */
@@ -303,6 +507,7 @@ export interface RunRecord {
   error?: string;
 }
 
+/** A registered job, as `jobs()` reports it. */
 export interface JobInfo {
   name: string;
   type: 'cron' | 'every' | 'once';
@@ -313,6 +518,7 @@ export interface JobInfo {
   runningHere: number;
 }
 
+/** Payload of 'start': this instance won a run and is about to call the handler. */
 export interface RunStartEvent {
   job: string;
   slot: number;
@@ -331,6 +537,7 @@ export interface LostEvent {
   instanceId: string;
 }
 
+/** Payload of 'failure': the handler threw (or timed out). `error` is the message, `cause` the thrown value. */
 export interface RunFailureEvent extends RunRecord {
   /** The value the job threw. */
   cause: unknown;
@@ -347,6 +554,10 @@ export interface RunInterruptedEvent extends RunRecord {
   handedOver: boolean;
 }
 
+/**
+ * Payload of 'skip': a run was due and this instance did not run it. With several instances this is
+ * the normal case: for every run, all instances but one emit 'skip' with reason 'taken'.
+ */
 export interface SkipEvent {
   job: string;
   slot: number;
@@ -360,6 +571,7 @@ export interface SkipEvent {
   lateMs?: number;
 }
 
+/** Payload of 'error'. Without an 'error' listener these are written to the logger instead. */
 export interface SchedulerErrorEvent {
   /** Backend or setup problem (not a job failure; those come as 'failure'). */
   error: unknown;
@@ -367,6 +579,28 @@ export interface SchedulerErrorEvent {
   slot?: number;
 }
 
+/**
+ * Every event of `scheduler.on()` and its payload. Events describe what happened on this instance
+ * only; `history()` is the view across all instances.
+ *
+ * | event | when |
+ * | --- | --- |
+ * | `start` | this instance won a run and starts the handler |
+ * | `success` | the handler returned |
+ * | `failure` | the handler threw, or `timeoutMs` passed |
+ * | `interrupted` | stop() or a takeover aborted `ctx.signal`, and the handler then threw |
+ * | `skip` | a run was due and this instance didn't run it: 'taken', 'late' or 'overlap' |
+ * | `lost` | a backup took over a run this instance was executing (it stopped renewing its lease) |
+ * | `error` | a backend or setup problem; job failures are 'failure' |
+ *
+ * @example
+ * ```ts
+ * scheduler.on('failure', (run) => {
+ *   if (run.cause instanceof RateLimitError) return; // the thrown value itself
+ *   pager.notify(`${run.job} @ ${run.scheduledAt.toISOString()} failed on ${run.instanceId}: ${run.error}`);
+ * });
+ * ```
+ */
 export interface SchedulerEvents {
   start: RunStartEvent;
   success: RunRecord;

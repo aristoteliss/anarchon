@@ -2,7 +2,7 @@
  * One instance for the failure scenarios: a single job ("job") that runs for jobMs every intervalMs.
  * Every event is logged as a JSON line with a timestamp so the test can rebuild what happened.
  */
-import { Scheduler } from '../../src';
+import { Scheduler } from '../../../src';
 import { scenarioBackend } from './backend';
 
 interface Config {

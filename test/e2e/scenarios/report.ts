@@ -5,7 +5,7 @@
  *
  * Each argument is a Redis strategy, or 'postgres' / 'sqlite' / 'libsql'.
  */
-import { REDIS_URL } from '../helpers';
+import { REDIS_URL } from '../../support';
 import { SCENARIOS, type ScenarioConfig } from './harness';
 
 async function main() {

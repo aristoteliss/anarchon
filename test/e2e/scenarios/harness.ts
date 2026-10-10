@@ -5,7 +5,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { join } from 'node:path';
 
-import { type RunRecord, Scheduler } from '../../src';
+import { type RunRecord, Scheduler } from '../../../src';
 import { scenarioBackend } from './backend';
 
 export interface ScenarioConfig {
@@ -235,7 +235,7 @@ export async function winnerCrashes(base: ScenarioConfig): Promise<ScenarioResul
     name: 'Winner crashes mid-run',
     summary: finisher
       ? `backup ${describe(finisher)} took over ${facts.takeoverAfterMs} ms after the crash and finished the run`
-      : 'nobody finished the run; history still says: ' + facts.history.join(', '),
+      : `nobody finished the run; history still says: ${facts.history.join(', ')}`,
     facts,
   };
 }
@@ -370,7 +370,7 @@ export async function winnerStopsGracefully(base: ScenarioConfig): Promise<Scena
     name: 'Rolling deploy: the winner is stopped (SIGTERM) mid-run',
     summary: finisher
       ? `the stopped instance handed the run over; ${describe(finisher)} started it ${facts.handoverAfterMs} ms later and finished it`
-      : 'nobody finished the run; history: ' + facts.history.join(', '),
+      : `nobody finished the run; history: ${facts.history.join(', ')}`,
     facts,
   };
 }

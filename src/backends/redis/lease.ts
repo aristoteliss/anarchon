@@ -7,6 +7,26 @@ import { parseEntries, toStr } from './replies';
 /**
  * Lease strategy for Redis and Valkey (any version with Lua, so Redis 5+).
  *
+ * **The algorithm.** Every decision about a run is one Lua script, and Redis runs a script to the
+ * end before anything else, so two instances can never both act on the same state:
+ *
+ * 1. claim (`CLAIM`): read the run's state.
+ *    - none: write `{attempt 1, token, lease end = now + leaseMs}` and answer 'won'. Any other
+ *      instance asking after that reads this state, so exactly one wins.
+ *    - running and the lease end is in the future: answer 'running'. The caller becomes a backup.
+ *    - running and the lease end has passed (the runner died, froze, or released it): write
+ *      `{attempt + 1, the caller's token, a new lease}` and answer 'won', unless `maxAttempts` is
+ *      used up. Again only the first backup to ask sees the expired lease.
+ *    - finished: answer 'done'.
+ *    A new run is also refused ('overlap') while an older run of the job has a live lease.
+ * 2. heartbeat (`HEARTBEAT`): the runner moves its lease end forward, but only if the stored token
+ *    is still its own. If a backup took over, the token differs: the old runner is told it lost the
+ *    run and its `ctx.signal` aborts.
+ * 3. finish (`FINISH`): mark the run ended, again only with the matching token. A runner that lost
+ *    the run can't mark it finished.
+ *
+ * The token is what fences an old runner out: after a takeover nothing it sends changes the run.
+ *
  * Per job, all under one hash tag so it also works on Redis Cluster:
  *   {<prefix><job>}:state    hash   slot -> {a: attempt, m: max attempts, r: hand-overs, t: token, s: status, i: instance, l: lease end (server ms)}
  *   {<prefix><job>}:active   set    slots still marked running

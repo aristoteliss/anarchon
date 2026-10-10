@@ -4,7 +4,10 @@ Working instructions for coding agents in this repository. Keep this file short.
 
 anarchon is a published library: leaderless cron for Node.js clusters on Redis/Valkey,
 PostgreSQL, SQLite, RabbitMQ and NATS. The public API is exported from `src/index.ts`;
-each backend lives under `src/backends/`.
+each backend lives under `src/backends/`. The `Scheduler` class (`src/scheduler/scheduler.ts`) is the
+public API and lifecycle only; its parts are beside it: `job.ts` (validation), `timers.ts` (when a
+run is due), `lease-runner.ts` and `claim-only-runner.ts` (claiming a run), `executor.ts` (running the
+handler and recording the result).
 
 ## Commands
 
@@ -15,10 +18,10 @@ Use these scripts. Use pnpm only, never npm or yarn.
 | Install | `pnpm install` |
 | Start every test server (Docker) | `pnpm test:servers` (`COMPOSE_PROFILES=brokers` adds RabbitMQ and NATS) |
 | Stop them and drop their data | `pnpm test:servers:down` |
-| Tests, without the slow scenario and cluster files (about 2 min) | `pnpm test` |
-| The scenario and cluster files only | `pnpm test:slow` |
+| Tests, without the slow `test/e2e` files (about 2 min) | `pnpm test` |
+| The `test/e2e` files only (cluster and failure scenarios) | `pnpm test:slow` |
 | Every test | `pnpm test:all` |
-| One test file | `pnpm test test/lease.test.ts` |
+| One test file | `pnpm test test/leases/rules.test.ts` |
 | Tests in watch mode | `pnpm test:watch` |
 | Coverage summary (text and `coverage/coverage-summary.json`) | `pnpm test:coverage` |
 | Full run with coverage, saved to `test-run.log` | `pnpm test:all:full` |
@@ -38,6 +41,17 @@ Run the narrowest relevant test file first, then `pnpm lint`, `pnpm check` and t
 
 ## Tests
 
+Layout, by what a test needs:
+
+- `test/unit/`: pure logic, no server.
+- `test/scheduler/`: the public API, on the main Redis.
+- `test/backends/`: `contract` (the same checks on every backend), then what is specific to `redis`,
+  `sql` (Postgres, SQLite) and `brokers` (RabbitMQ, NATS).
+- `test/leases/`: the lease `rules` on each lease backend, and the `scheduler` on top of them.
+- `test/e2e/`: real child processes, slow. `cluster/` (3 instances per backend) and `scenarios/`
+  (kill, freeze, restart).
+- `test/support/`: `servers` (URLs and probes), `specs` (one spec per backend to test), `util`.
+
 - Vitest runs against real servers. A server that is not running makes its tests skip, so
   a green run can still hide skipped backends: read the skip count.
 - The servers, their default URLs and the environment variables that override them are
@@ -51,7 +65,7 @@ Run the narrowest relevant test file first, then `pnpm lint`, `pnpm check` and t
   flush or drop data, but they leave keys and tables behind.
 - Test files run one at a time (`fileParallelism: false`): several measure timing.
 - The cluster and scenario tests start child processes with `tsx`
-  (`test/fixtures/instance.ts`, `test/scenarios/instance.ts`).
+  (`test/e2e/cluster/instance.ts`, `test/e2e/scenarios/instance.ts`).
 - `test:all:full` pipes through `tee`, so its exit status does not prove success; use
   `pnpm test:last:review`.
 

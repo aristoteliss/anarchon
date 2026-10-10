@@ -18,6 +18,7 @@ export interface PostgresJsLike {
   begin<T>(fn: (sql: { unsafe(query: string, params?: any[]): PromiseLike<ArrayLike<SqlRow>> }) => Promise<T>): PromiseLike<T>;
 }
 
+/** Options of {@link PostgresBackend}. */
 export interface PostgresBackendOptions {
   /**
    * A connection string (default: `postgres://localhost:5432/postgres`, with PG* environment variables
@@ -52,6 +53,33 @@ const dialect: SqlDialect = {
 /**
  * PostgreSQL 9.5+, with the same leases, backups, no-overlap, catch-up and hand-over as the Redis
  * 'lease' strategy. Each claim is one short transaction; leases use the database's clock.
+ *
+ * **How each run gets exactly one runner.** A run is a row with primary key (job, slot), and a
+ * claim is a transaction that starts with an upsert of the job's row in `<table>_jobs`. Postgres
+ * locks that row until commit, so claims of one job happen one after another: the first inserts the
+ * run's row and wins, every later one reads that row and sees it taken (or sees its lease expired
+ * and takes the next attempt). The full steps are on {@link SqlBackend}.
+ *
+ * Tables, created on start: `<table>` (one row per run), `<table>_attempts` (history) and
+ * `<table>_jobs` (the per-job lock).
+ *
+ * @example
+ * ```ts
+ * new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
+ * ```
+ *
+ * @example The pool your app already has, and a table in your own schema
+ * ```ts
+ * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+ * const backend = new PostgresBackend({ connection: pool, table: 'jobs.cron_runs' });
+ * new Scheduler({ backend }); // stop() does not end the pool
+ * ```
+ *
+ * @example postgres.js
+ * ```ts
+ * const sql = postgres(process.env.DATABASE_URL);
+ * new Scheduler({ backend: new PostgresBackend({ connection: sql }) });
+ * ```
  */
 export class PostgresBackend extends SqlBackend {
   readonly name = 'postgres';

@@ -8,8 +8,8 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { describe, test } from 'vitest';
 
-import { Scheduler } from '../src';
-import { availableSpecs, makeBackend, type Spec, uniqueId } from './helpers';
+import { Scheduler } from '../../../src';
+import { availableSpecs, makeBackend, type Spec, uniqueId } from '../../support';
 
 interface Event {
   type: string;
@@ -19,7 +19,7 @@ interface Event {
   error?: string;
 }
 
-const FIXTURE = join(__dirname, 'fixtures', 'instance.ts');
+const FIXTURE = join(__dirname, 'instance.ts');
 const RUN_MS = 8_000;
 const JOBS = ['every2s', 'cron3s', 'failing'];
 

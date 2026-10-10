@@ -39,6 +39,14 @@ async function serverInfo(redis: RedisCommandClient): Promise<{ product: string;
 /**
  * Redis 5+ and Valkey. The entry ID is `<slot>-0`; the server refuses an ID that is not bigger than the
  * stream's last ID, so the first XADD for a slot wins and the others get an error.
+ *
+ * What the instances send for the 12:00:00 run of "sync", and what Redis answers:
+ * ```
+ * A: XADD cron:sync:runs 1791633600000-0 slot ... token a1   -> "1791633600000-0"   A runs it
+ * B: XADD cron:sync:runs 1791633600000-0 slot ... token b7   -> ERR The ID specified in XADD is equal
+ *                                                               or smaller than the target stream top item
+ * ```
+ * A run older than the stream's newest entry can never be claimed, so runs are remembered forever.
  */
 export class StreamIdStrategy implements ClaimStrategy {
   readonly name = 'stream-id';
@@ -67,6 +75,13 @@ export class StreamIdStrategy implements ClaimStrategy {
  * Redis 8.6+ only. `XADD key IDMP <job> <slot> * ...`: Redis stores the first one and answers the
  * duplicates with the first entry's ID, so each instance reads that entry and compares tokens.
  * All instances use the job name as producer ID: for this job they act as one logical producer.
+ *
+ * ```
+ * A: XADD cron:sync:runs IDMP sync 1791633600000 * slot ... token a1   -> "1791633600012-0" (stored)
+ * B: XADD cron:sync:runs IDMP sync 1791633600000 * slot ... token b7   -> "1791633600012-0" (A's entry)
+ * each: XRANGE cron:sync:runs 1791633600012-0 1791633600012-0          -> token a1: A runs it
+ * ```
+ * Redis remembers an idempotency key for `idmp.durationSec` and at most `idmp.maxSize` of them.
  */
 export class IdmpStrategy implements ClaimStrategy {
   readonly name = 'idmp';
@@ -131,6 +146,9 @@ export class IdmpStrategy implements ClaimStrategy {
  * Same behavior as IDMP for servers without it (Valkey, Redis < 8.6). One atomic script: look at the
  * entries of the last `windowMs`; if this slot is already there return that entry's token, otherwise
  * append the claim and return our token.
+ *
+ * The check and the append can't be separated by another instance, because Redis runs the whole
+ * script before any other command. The caller won if the token that comes back is its own.
  */
 const CLAIM_SCRIPT = `
 local entries = redis.call('XRANGE', KEYS[1], ARGV[2], '+')

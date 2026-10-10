@@ -10,6 +10,7 @@ export interface NatsConnectionLike {
   close(): Promise<void>;
 }
 
+/** Options of {@link NatsBackend}. */
 export interface NatsBackendOptions {
   /** Server URL(s). Default 'nats://localhost:4222'. */
   servers?: string | string[];
@@ -31,6 +32,30 @@ export interface NatsBackendOptions {
  * NATS JetStream. Every instance publishes its claim with the header `Nats-Msg-Id: <job>:<slot>`.
  * JetStream stores the first one and answers repeats with `duplicate: true` (within the stream's
  * duplicate window), so the publisher knows right away whether it won.
+ *
+ * **How each run gets exactly one runner.** The feature used is JetStream's message de-duplication:
+ *
+ * 1. Each instance publishes its claim to `<prefix><job>.claims` with the header
+ *    `Nats-Msg-Id: <job>:<slot>`, the same ID on every instance.
+ * 2. The stream stores the first message with that ID. For every later one, inside the stream's
+ *    duplicate window, the publish acknowledgement says `duplicate: true` and nothing is stored.
+ * 3. An instance won if its acknowledgement is not a duplicate. The stream (its leader, in a
+ *    cluster) orders the publishes, so exactly one is first.
+ *
+ * Simple claim only: this decides who runs each time. There are no leases, so no backup runners,
+ * no overlap protection and no catch-up; for those use Redis 'lease', Postgres or SQLite.
+ * Job names may contain letters, digits, "_" and "-" only (they become subjects).
+ *
+ * @example
+ * ```ts
+ * new Scheduler({ backend: new NatsBackend({ servers: 'nats://nats.internal:4222' }) });
+ * ```
+ *
+ * @example A NATS cluster: three replicas, and your own connection
+ * ```ts
+ * const connection = await connect({ servers: ['nats://n1:4222', 'nats://n2:4222', 'nats://n3:4222'] });
+ * new Scheduler({ backend: new NatsBackend({ connection, stream: 'BILLING_CRON', replicas: 3 }) });
+ * ```
  */
 export class NatsBackend implements Backend {
   readonly name = 'nats';

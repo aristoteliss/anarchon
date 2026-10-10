@@ -69,6 +69,24 @@ interface RunRow {
  * a claim is one transaction that reads and writes the run's row, so exactly one instance wins each
  * attempt. Leases use the database's clock.
  *
+ * **The algorithm.** A run is one row, with primary key (job, slot). A claim is one transaction:
+ *
+ * 1. Make claims of this job wait for each other (Postgres: write the job's row in `<table>_jobs`,
+ *    which locks it until commit; SQLite: `BEGIN IMMEDIATE`, one writer at a time).
+ * 2. Read the run's row.
+ *    - no row: insert it with `attempt 1`, the caller's token and `lease_until = now + leaseMs`: 'won'.
+ *      The second instance waits at step 1, then reads this row.
+ *    - status 'running' and `lease_until` in the future: 'running'. The caller becomes a backup.
+ *    - status 'running' and `lease_until` passed: update the row to `attempt + 1`, the caller's
+ *      token and a new lease: 'won' (unless `max_attempts` is used up).
+ *    - any other status: 'done'.
+ * 3. Commit.
+ *
+ * Heartbeat, release and finish are single `UPDATE ... WHERE token = ?` statements: once a backup
+ * has taken over, the token no longer matches, so the old runner changes nothing and learns it lost
+ * the run. A backup checking on a live run only reads; it opens the transaction when the lease has
+ * run out.
+ *
  * Tables (created on start):
  *   <table>           one row per run: attempt, token, status, lease end
  *   <table>_attempts  one row per attempt: who, why, when, and how it ended (history)

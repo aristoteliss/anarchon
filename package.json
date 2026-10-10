@@ -48,7 +48,7 @@
     "COMMERCIAL_LICENSE.txt"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -59,10 +59,10 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "check": "biome check .",
     "format": "biome check --write .",
-    "test": "vitest run --exclude test/scenarios.test.ts --exclude test/cluster.test.ts",
-    "test:slow": "vitest run test/scenarios.test.ts test/cluster.test.ts",
+    "test": "vitest run --exclude 'test/e2e/**'",
+    "test:slow": "vitest run test/e2e",
     "test:all": "vitest run",
-    "test:watch": "vitest --exclude test/scenarios.test.ts --exclude test/cluster.test.ts",
+    "test:watch": "vitest --exclude 'test/e2e/**'",
     "test:servers": "docker compose -f docker-compose.test.yml up -d --wait",
     "test:servers:down": "docker compose -f docker-compose.test.yml --profile '*' down",
     "test:coverage": "vitest run --coverage --coverage.reporter=text-summary --coverage.reporter=json-summary",
@@ -72,7 +72,7 @@
     "test:last:fails": "node scripts/test-log.mjs fails",
     "test:release": "pnpm rebuild && node scripts/release-check.mjs",
     "verify:all": "pnpm lint && pnpm check && pnpm test:all && pnpm test:release",
-    "scenarios": "tsx test/scenarios/report.ts stream-id lease postgres sqlite",
+    "scenarios": "tsx test/e2e/scenarios/report.ts stream-id lease postgres sqlite",
     "example": "tsx examples/basic.ts",
     "example:api": "tsx examples/http-api.ts",
     "example:walkthrough": "tsx examples/walkthrough.ts",

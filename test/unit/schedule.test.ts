@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
 
-import { cronSchedule, everySchedule, formatDuration, parseDuration } from '../src/schedule';
+import { cronSchedule, everySchedule, formatDuration, parseDuration } from '../../src/schedule';
 
 const at = (h: number, m: number, s = 0, ms = 0) => Date.UTC(2026, 9, 9, h, m, s, ms);
 
