@@ -194,10 +194,12 @@ export class LeaseStore implements RunStore {
     private readonly prefix: string,
   ) {}
 
+  /** A key of one job. All of them share the hash tag `{<prefix><job>}`, so Redis Cluster keeps them on one node. */
   key(job: string, part: 'state' | 'active' | 'slots' | 'runs' | 'results'): string {
     return `{${this.prefix}${job}}:${part}`;
   }
 
+  /** Runs the CLAIM script: the whole decision is atomic. */
   async claim(input: RunClaim): Promise<ClaimOutcome> {
     const reply = (await this.eval(
       CLAIM,
@@ -235,18 +237,22 @@ export class LeaseStore implements RunStore {
     }
   }
 
+  /** Moves the lease end to now + leaseMs, if the run still carries this token. */
   async heartbeat(job: string, slot: number, token: string, leaseMs: number): Promise<boolean> {
     return Number(await this.eval(HEARTBEAT, [this.key(job, 'state')], [slot, token, leaseMs])) === 1;
   }
 
+  /** Marks the run ended and takes it out of the active set, if it still carries this token. */
   async finish(job: string, slot: number, token: string, status: 'success' | 'failed' | 'interrupted'): Promise<boolean> {
     return Number(await this.eval(FINISH, [this.key(job, 'state'), this.key(job, 'active')], [slot, token, status])) === 1;
   }
 
+  /** Ends a live lease now and counts a hand-over, if the run still carries this token. */
   async release(job: string, slot: number, token: string): Promise<boolean> {
     return Number(await this.eval(RELEASE, [this.key(job, 'state')], [slot, token])) === 1;
   }
 
+  /** The job's unfinished runs, each with whether its lease is alive on the server's clock. */
   async active(job: string): Promise<Array<{ slot: number; attempt: number; alive: boolean }>> {
     const reply = await this.eval(ACTIVE, [this.key(job, 'state'), this.key(job, 'active')], []);
     return (Array.isArray(reply) ? reply : []).map((row) => {
@@ -255,6 +261,7 @@ export class LeaseStore implements RunStore {
     });
   }
 
+  /** Adds the attempt's result to the results sorted set and trims it. */
   async saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void> {
     const redis = await this.redis();
     const key = this.key(job, 'results');
@@ -264,6 +271,10 @@ export class LeaseStore implements RunStore {
     if (historyTtlMs) await redis.send('ZREMRANGEBYSCORE', [key, '-inf', `(${result.finishedAt - historyTtlMs}`]);
   }
 
+  /**
+   * Joins the attempts in the stream with their results. An attempt without a result is 'running' only
+   * while it is the current attempt with a live lease; otherwise 'interrupted'.
+   */
   async history(job: string, limit: number): Promise<RunRecord[]> {
     const redis = await this.redis();
     const entries = parseEntries(await redis.send('XREVRANGE', [this.key(job, 'runs'), '+', '-', 'COUNT', limit]));

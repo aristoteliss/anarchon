@@ -9,6 +9,7 @@ export interface StreamClaim extends ClaimInput {
 }
 
 export interface ClaimStrategy {
+  /** The strategy's name, as passed in `strategy`. */
   readonly name: RedisStrategyName;
   /** Checks once that the server supports this strategy. */
   init(): Promise<void>;
@@ -53,10 +54,13 @@ export class StreamIdStrategy implements ClaimStrategy {
 
   constructor(private readonly redis: RedisCommandClient) {}
 
+  /** Nothing to check: XADD with an explicit ID works on every server with streams. */
   async init(): Promise<void> {}
 
+  /** Nothing to prepare: the first XADD creates the stream. */
   async prepareStream(): Promise<void> {}
 
+  /** XADD with the slot as the entry ID. Won if Redis accepts it, or if the entry already there carries our token. */
   async claim(input: StreamClaim): Promise<boolean> {
     const id = `${input.slot}-0`;
     try {
@@ -91,6 +95,7 @@ export class IdmpStrategy implements ClaimStrategy {
     private readonly options: Required<IdmpOptions>,
   ) {}
 
+  /** Refuses servers without idempotent XADD (Valkey, Redis before 8.6), naming the strategies that work there. */
   async init(): Promise<void> {
     const { product, version } = await serverInfo(this.redis);
     const match = /^(\d+)\.(\d+)/.exec(version);
@@ -103,6 +108,7 @@ export class IdmpStrategy implements ClaimStrategy {
     }
   }
 
+  /** Creates the stream if needed and sets how long, and how many, idempotency keys it remembers. */
   async prepareStream(key: string): Promise<void> {
     let info = await this.streamInfo(key);
     if (!info) {
@@ -116,6 +122,7 @@ export class IdmpStrategy implements ClaimStrategy {
     }
   }
 
+  /** XADD with the slot as idempotency key, then reads the entry Redis kept. Won if that entry carries our token. */
   async claim(input: StreamClaim): Promise<boolean> {
     const reply = await this.redis.send('XADD', [
       input.key,
@@ -176,12 +183,15 @@ export class ScriptStrategy implements ClaimStrategy {
     private readonly windowMs: number,
   ) {}
 
+  /** Loads the claim script, so claims can send its hash instead of its text. */
   async init(): Promise<void> {
     this.sha = toStr(await this.redis.send('SCRIPT', ['LOAD', CLAIM_SCRIPT]));
   }
 
+  /** Nothing to prepare: the script's XADD creates the stream. */
   async prepareStream(): Promise<void> {}
 
+  /** Runs the claim script. Won if the token it returns is ours. */
   async claim(input: StreamClaim): Promise<boolean> {
     const args = [
       1,

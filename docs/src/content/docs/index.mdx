@@ -1,0 +1,75 @@
+---
+title: anarchon
+description: Leaderless cron for Node.js clusters. Every job runs once per scheduled time across all instances.
+template: splash
+hero:
+  tagline: Leaderless cron for Node.js clusters. Put the same jobs in every instance of your service, and each scheduled run happens once, on one instance.
+  actions:
+    - text: Get started
+      link: getting-started/introduction/
+      icon: right-arrow
+    - text: How it works
+      link: internals/architecture/
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+```ts
+import { Scheduler } from 'anarchon';
+
+const scheduler = new Scheduler(); // Redis on localhost:6379
+
+scheduler
+  .every('sync', '10s', async (ctx) => { /* ... */ })
+  .cron('digest', '0 8 * * 1-5', async (ctx) => { /* ... */ }, { timezone: 'Europe/Athens' });
+
+await scheduler.start();
+```
+
+Run that code in three instances, and "sync" still runs once every 10 seconds, not three times.
+
+```mermaid
+flowchart LR
+  subgraph service["Your service, 3 instances"]
+    A["Instance A"]
+    B["Instance B"]
+    C["Instance C"]
+  end
+  S[("Redis, Valkey,<br/>PostgreSQL or SQLite")]
+  A -- "claim the 12:00:10 run" --> S
+  B -- "claim the 12:00:10 run" --> S
+  C -- "claim the 12:00:10 run" --> S
+  S -- "won" --> B
+  S -. "taken" .-> A
+  S -. "taken" .-> C
+```
+
+<CardGrid>
+  <Card title="No leader, no lock" icon="random">
+    Nothing is elected and nothing is held. One atomic call to the store decides who runs each time,
+    and a random delay spreads the work across instances.
+  </Card>
+  <Card title="Survives crashes" icon="warning">
+    The winner renews a lease while the job runs. If it dies or freezes, another instance takes the
+    run over and finishes it.
+  </Card>
+  <Card title="No overlapping runs" icon="seti:clock">
+    A job that takes longer than its interval doesn't pile up: the next run is skipped until the
+    current one ends.
+  </Card>
+  <Card title="Catches up after downtime" icon="rocket">
+    A run that was due while every instance was down runs when the first one comes back.
+  </Card>
+</CardGrid>
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="Introduction" description="The problem, in plain words, and how anarchon solves it." href="getting-started/introduction/" />
+  <LinkCard title="Quick start" description="A working scheduler in five minutes, with no server to install." href="getting-started/quick-start/" />
+  <LinkCard title="Guides" description="Every option, method and lifecycle step, with examples." href="guides/defining-jobs/" />
+  <LinkCard title="How it works" description="The claim and lease algorithms, step by step, with diagrams." href="internals/architecture/" />
+  <LinkCard title="Backends" description="Redis, Valkey, PostgreSQL, SQLite, RabbitMQ and NATS." href="backends/overview/" />
+  <LinkCard title="Recipes" description="Express, NestJS, workers, Kubernetes, long jobs." href="recipes/express/" />
+</CardGrid>

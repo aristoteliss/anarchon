@@ -7,24 +7,80 @@ import { assertSimpleName, errorMessage, positiveInt } from '../util';
 
 /** The parts of a NATS connection this backend uses. */
 export interface NatsConnectionLike {
+  /** Only called on connections anarchon opened. */
   close(): Promise<void>;
 }
 
 /** Options of {@link NatsBackend}. */
 export interface NatsBackendOptions {
-  /** Server URL(s). Default 'nats://localhost:4222'. */
+  /**
+   * Server URL(s). Default 'nats://localhost:4222'.
+   *
+   * @example
+   * ```ts
+   * new NatsBackend({ servers: 'nats://nats.internal:4222' });
+   * new NatsBackend({ servers: ['nats://n1:4222', 'nats://n2:4222', 'nats://n3:4222'] });
+   * ```
+   */
   servers?: string | string[];
-  /** Your own connection (`await connect(...)` from @nats-io/transport-node). You keep ownership. */
+  /**
+   * Your own connection (`await connect(...)` from @nats-io/transport-node). You keep ownership:
+   * stop() doesn't close it. Takes precedence over `servers`.
+   *
+   * @example
+   * ```ts
+   * const connection = await connect({ servers: process.env.NATS_URL });
+   * new NatsBackend({ connection });
+   * ```
+   */
   connection?: NatsConnectionLike;
-  /** JetStream stream name. Default 'CRON'. */
+  /**
+   * JetStream stream name. Default 'CRON'. Created on start if it doesn't exist.
+   *
+   * @example
+   * ```ts
+   * new NatsBackend({ stream: 'BILLING_CRON', prefix: 'billing.cron.' });
+   * ```
+   */
   stream?: string;
-  /** Subject prefix: subjects are `<prefix><job>.claims` and `<prefix><job>.results`. Default 'cron.'. */
+  /**
+   * Subject prefix: subjects are `<prefix><job>.claims` and `<prefix><job>.results`. Default 'cron.'.
+   *
+   * @example
+   * ```ts
+   * new NatsBackend({ prefix: 'billing.cron.' }); // billing.cron.sync.claims
+   * ```
+   */
   prefix?: string;
-  /** How long JetStream remembers a claimed run (the stream's duplicate window, ms). Default 300000. */
+  /**
+   * How long JetStream remembers a claimed run (the stream's duplicate window, ms). Must be longer
+   * than a job's jitterMs + maxLateMs. Default 300000.
+   *
+   * @example
+   * ```ts
+   * new NatsBackend({ duplicateWindowMs: 15 * 60_000 });
+   * ```
+   */
   duplicateWindowMs?: number;
-  /** Messages kept per subject, i.e. about how many runs per job (stream-wide). Default 1000. */
+  /**
+   * Messages kept per subject, i.e. about how many runs per job (stream-wide; a job's own
+   * historySize doesn't change it). Default 1000.
+   *
+   * @example
+   * ```ts
+   * new NatsBackend({ historySize: 200 });
+   * ```
+   */
   historySize?: number;
-  /** Stream replicas in a NATS cluster. Default 1. */
+  /**
+   * Stream replicas in a NATS cluster. Use 3 so the stream, and its memory of claimed runs,
+   * survives the loss of a server. Default 1.
+   *
+   * @example
+   * ```ts
+   * new NatsBackend({ servers, replicas: 3 });
+   * ```
+   */
   replicas?: number;
 }
 
@@ -59,6 +115,7 @@ export interface NatsBackendOptions {
  */
 export class NatsBackend implements Backend {
   readonly name = 'nats';
+  /** duplicateWindowMs: how long the stream recognizes a repeated message ID. */
   readonly dedupeWindowMs: number;
 
   private readonly servers: string | string[];
@@ -69,6 +126,7 @@ export class NatsBackend implements Backend {
   private readonly replicas: number;
   private state: Promise<{ nc: NatsConnection; js: JetStreamClient; jsm: JetStreamManager }> | undefined;
 
+  /** Validates the options. Nothing connects until init(). */
   constructor(options: NatsBackendOptions = {}) {
     this.servers = options.servers ?? 'nats://localhost:4222';
     this.userConnection = options.connection;
@@ -79,16 +137,23 @@ export class NatsBackend implements Backend {
     this.replicas = positiveInt('replicas', options.replicas ?? 1);
   }
 
+  /** Job names become subjects: letters, digits, '_' and '-' only. */
   checkJob(job: JobLimits): void {
     assertSimpleName('NATS', job.name);
   }
 
+  /** Connects, and creates the stream or brings its duplicate window and limits up to date. */
   async init(): Promise<void> {
     await this.getState();
   }
 
+  /** Nothing per job: all jobs share the stream. */
   async prepareJob(): Promise<void> {}
 
+  /**
+   * Publishes the claim with the message ID `<job>:<slot>`. Won unless the ack says duplicate; a
+   * duplicate carrying our own token is our own retry.
+   */
   async claim(input: ClaimInput): Promise<boolean> {
     const { js, jsm } = await this.getState();
     const ack = await js.publish(this.subject(input.job, 'claims'), JSON.stringify(claimPayload(input, false)), {
@@ -104,16 +169,19 @@ export class NatsBackend implements Backend {
     }
   }
 
+  /** Publishes a runNow() run without a message ID, so it is never deduplicated. */
   async recordManualRun(input: ClaimInput): Promise<void> {
     const { js } = await this.getState();
     await js.publish(this.subject(input.job, 'claims'), JSON.stringify(claimPayload(input, true)));
   }
 
+  /** Publishes the result to the job's results subject. */
   async saveResult(job: string, result: StoredResult): Promise<void> {
     const { js } = await this.getState();
     await js.publish(this.subject(job, 'results'), JSON.stringify({ type: 'result', ...result }));
   }
 
+  /** Reads the job's claims and results from the stream and joins them. */
   async history(job: string, limit: number): Promise<RunRecord[]> {
     const { js, jsm } = await this.getState();
     const filter = `${this.prefix}${job}.*`;
@@ -149,6 +217,7 @@ export class NatsBackend implements Backend {
     return mergeRuns(job, claims, results, limit);
   }
 
+  /** Closes the connection if this backend opened it. One that was passed in stays open. */
   async close(): Promise<void> {
     const state = this.state;
     this.state = undefined;

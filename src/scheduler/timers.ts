@@ -20,6 +20,7 @@ export class JobTimers {
     this.sleepUntil(job, slot + randomJitter(job), () => this.onDue(job, slot));
   }
 
+  /** Cancels the job's pending timer, if any (stop() and remove()). */
   disarm(job: Job): void {
     if (job.timer) clearTimeout(job.timer);
     job.timer = undefined;

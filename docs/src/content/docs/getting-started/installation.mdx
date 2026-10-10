@@ -1,0 +1,97 @@
+---
+title: Installation
+description: Install anarchon and the driver for the store you use.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+anarchon needs **Node.js 20 or newer**.
+
+Install anarchon and the driver for your store. Drivers are optional peer dependencies, so you only install the one you use.
+
+<Tabs syncKey="backend">
+  <TabItem label="Redis / Valkey">
+    ```sh
+    pnpm add anarchon ioredis
+    ```
+    Works with Redis 5 or newer and with Valkey. `ioredis` is only needed if anarchon opens the
+    connection for you. You can pass a client your app already has instead: ioredis, iovalkey,
+    node-redis or Valkey GLIDE.
+  </TabItem>
+  <TabItem label="PostgreSQL">
+    ```sh
+    pnpm add anarchon pg
+    ```
+    PostgreSQL 9.5 or newer. You can pass your own `pg` Pool or Client, or a `postgres.js`
+    instance, instead of a connection string.
+  </TabItem>
+  <TabItem label="SQLite">
+    ```sh
+    pnpm add anarchon
+    ```
+    Nothing else is needed on Node 22.5 or newer, which has `node:sqlite` built in. On older Node
+    versions add `better-sqlite3`. For a libSQL server or Turso add `@libsql/client`.
+    SQLite 3.35 or newer.
+  </TabItem>
+  <TabItem label="RabbitMQ">
+    ```sh
+    pnpm add anarchon amqplib
+    ```
+    RabbitMQ 3.9 or newer.
+  </TabItem>
+  <TabItem label="NATS">
+    ```sh
+    pnpm add anarchon @nats-io/transport-node @nats-io/jetstream
+    ```
+    JetStream must be enabled on the server.
+  </TabItem>
+</Tabs>
+
+`npm install` and `yarn add` work the same way.
+
+## Which store should I pick?
+
+Use the one your service already has. If you have a choice:
+
+| You have | Use | Why |
+| --- | --- | --- |
+| Redis or Valkey | The default, `lease` strategy | The full feature set, and the least latency |
+| PostgreSQL, no Redis | `PostgresBackend` | The full feature set, with no new infrastructure |
+| One machine, several processes | `SqliteBackend` on a file | No server at all |
+| Only RabbitMQ or NATS | `RabbitMQBackend` / `NatsBackend` | One winner per run, but no backups, overlap protection or catch-up |
+
+[Backends overview](../../backends/overview/) compares them in detail.
+
+## TypeScript
+
+anarchon is written in TypeScript and ships its own types. There is nothing extra to install.
+
+```ts
+import { Scheduler, type JobContext, type RunRecord } from 'anarchon';
+```
+
+It also works from plain JavaScript, with `require` or `import`:
+
+```js
+const { Scheduler } = require('anarchon');
+```
+
+## Check that it works
+
+Save this as `check.mjs` and run `node check.mjs`. It uses a SQLite file, so it needs no server (Node 22.5 or newer).
+
+```js
+import { Scheduler, SqliteBackend } from 'anarchon';
+
+const scheduler = new Scheduler({ backend: new SqliteBackend({ database: './anarchon.db' }) });
+scheduler.every('hello', '2s', (ctx) => console.log('hello at', ctx.scheduledAt.toISOString()));
+
+await scheduler.start();
+setTimeout(() => scheduler.stop(), 7_000);
+```
+
+You should see a line every two seconds, then the process exits.
+
+## Next
+
+[Quick start](../quick-start/) builds a small scheduler and runs it as three instances.

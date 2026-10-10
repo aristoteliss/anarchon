@@ -4,7 +4,9 @@
  */
 
 export interface StreamEntry {
+  /** The entry ID, e.g. '1791633610000-0'. */
   id: string;
+  /** The entry's field-value pairs as an object. */
   fields: Record<string, string>;
 }
 

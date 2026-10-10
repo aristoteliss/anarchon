@@ -3,13 +3,17 @@ import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlRow, type S
 
 /** A synchronous SQLite database: `node:sqlite` DatabaseSync or `better-sqlite3`. */
 export interface SqliteDatabaseLike {
+  /** Compiles a statement. `reader` (better-sqlite3) says whether it returns rows. */
   prepare(sql: string): { all(...params: any[]): unknown[]; run(...params: any[]): unknown; reader?: boolean };
+  /** Runs statements that return nothing (PRAGMA, BEGIN, COMMIT). */
   exec(sql: string): unknown;
 }
 
 /** A `@libsql/client` client: a local file, or a remote libSQL server (sqld / Turso). */
 export interface LibsqlClientLike {
+  /** Runs one statement. */
   execute(statement: { sql: string; args: any[] }): Promise<{ rows: ArrayLike<unknown> }>;
+  /** Opens a write transaction. On a remote server it holds the database's write lock until commit, rollback or the server's timeout. */
   transaction(mode: 'write'): Promise<{
     execute(statement: { sql: string; args: any[] }): Promise<{ rows: ArrayLike<unknown> }>;
     commit(): Promise<void>;
@@ -24,11 +28,33 @@ export interface SqliteBackendOptions {
    * A file path (default './anarchon.db'), your own node:sqlite / better-sqlite3 database, a
    * `@libsql/client` client (local file or remote libSQL server), or `{ all, transaction }`.
    * All instances must use the same database. Databases you pass in are not closed on stop.
+   *
+   * @example
+   * ```ts
+   * new SqliteBackend({ database: '/var/lib/myapp/jobs.db' });
+   * new SqliteBackend({ database: new DatabaseSync('./app.db') });           // node:sqlite
+   * new SqliteBackend({ database: createClient({ url: process.env.LIBSQL_URL, authToken }) }); // libSQL / Turso
+   * ```
    */
   database?: string | SqliteDatabaseLike | LibsqlClientLike | SqlClient;
-  /** Table name. Default 'anarchon_runs'. Tables are created on start. */
+  /**
+   * Table name. Default 'anarchon_runs'. This table and `<table>_attempts` are created on start.
+   *
+   * @example
+   * ```ts
+   * new SqliteBackend({ database: db, table: 'cron_runs' });
+   * ```
+   */
   table?: string;
-  /** How long to wait for another process's write before failing (ms, PRAGMA busy_timeout). Default 5000. */
+  /**
+   * How long to wait for another process's write before failing (ms, PRAGMA busy_timeout).
+   * Raise it if other writers hold the file for long. Default 5000.
+   *
+   * @example
+   * ```ts
+   * new SqliteBackend({ database: './jobs.db', busyTimeoutMs: 15_000 });
+   * ```
+   */
   busyTimeoutMs?: number;
 }
 
@@ -87,6 +113,7 @@ export class SqliteBackend extends SqlBackend {
   private readonly input: SqliteBackendOptions['database'];
   private readonly busyTimeoutMs: number;
 
+  /** Validates the table name. Nothing is opened until init(). */
   constructor(options: SqliteBackendOptions = {}) {
     super(options.table ?? 'anarchon_runs');
     this.input = options.database ?? './anarchon.db';

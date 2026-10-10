@@ -1,0 +1,20 @@
+/* Diagrams: centered, and scrollable sideways on narrow screens instead of shrinking to unreadable. */
+.sl-markdown-content pre.mermaid {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  background: transparent;
+  border: 0;
+  padding: 0.5rem 0;
+}
+
+/* Wide option tables keep their columns readable. */
+.sl-markdown-content table {
+  display: block;
+  overflow-x: auto;
+}
+
+.sl-markdown-content td code,
+.sl-markdown-content th code {
+  white-space: nowrap;
+}

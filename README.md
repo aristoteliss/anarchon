@@ -235,6 +235,17 @@ Notes:
 - **Keep clocks in sync (NTP).** Run times come from each instance's clock; leases use the Redis server's clock.
 - **`every()` runs on a UTC grid.** For wall-clock times in a time zone, use `cron()` with `timezone`.
 
+## Documentation
+
+The full documentation is a site in [`docs/`](docs/): guides for every option and method, the claim
+and lease algorithms step by step with diagrams, one page per backend, and recipes (Express, NestJS,
+Kubernetes, long-running jobs).
+
+```sh
+pnpm docs:dev     # http://localhost:4321
+pnpm docs:build   # static site in docs/dist
+```
+
 ## Examples
 
 ```sh

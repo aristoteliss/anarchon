@@ -3,34 +3,46 @@
  * Any client can be adapted to this, so the package is not tied to one client library.
  */
 export interface RedisCommandClient {
+  /** Sends one command, e.g. `send('XADD', [key, '*', 'slot', 1])`, and resolves with the raw reply. Rejects with the server's error. */
   send(command: string, args: ReadonlyArray<string | number>): Promise<unknown>;
   /** Called on stop() only when the backend opened the connection itself. */
   close?(): Promise<void>;
 }
 
 export interface RedisConnectionOptions {
+  /** Default 'localhost'. */
   host?: string;
+  /** Default 6379. */
   port?: number;
+  /** ACL user (Redis 6+). Omit for the default user. */
   username?: string;
+  /** Read it from the environment; don't put it in code. */
   password?: string;
+  /** Database number. Default 0. */
   db?: number;
 }
 
 /** An ioredis or iovalkey `Redis`/`Cluster` instance. */
 export interface IORedisLike {
+  /** Sends a raw command. Used for every command, so no command needs its own method. */
   call(command: string, args: Array<string | number>): Promise<unknown>;
+  /** The connection state ('ready', 'connecting'...). Only used to recognize the client. */
   status: string;
+  /** Closes the connection. Only called on clients anarchon created. */
   quit(): Promise<unknown>;
 }
 
 /** A node-redis client created with `createClient()` (v4 or newer), already connected. */
 export interface NodeRedisLike {
+  /** Sends a raw command; node-redis wants every argument as a string. */
   sendCommand(args: string[]): Promise<unknown>;
+  /** node-redis doesn't connect by itself: pass a client that is already connected. */
   isOpen: boolean;
 }
 
 /** A Valkey GLIDE client (`GlideClient` / `GlideClusterClient`). */
 export interface ValkeyGlideLike {
+  /** Sends a raw command, command name first. */
   customCommand(args: string[]): Promise<unknown>;
 }
 

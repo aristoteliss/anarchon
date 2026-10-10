@@ -6,6 +6,7 @@ export type SqlRow = Record<string, unknown>;
 
 /** Runs one statement and returns its rows. Statements are written with `?` placeholders. */
 export interface SqlQuery {
+  /** Runs one statement and resolves with its rows ([] for a statement that returns none). */
   all(sql: string, params: ReadonlyArray<SqlValue>): Promise<SqlRow[]>;
 }
 
@@ -47,6 +48,7 @@ export function isIdentifier(name: string): boolean {
 export class Mutex {
   private tail: Promise<unknown> = Promise.resolve();
 
+  /** Runs fn after everything queued before it, whether those succeeded or failed. */
   run<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.tail.then(fn, fn);
     this.tail = result.catch(() => {});
@@ -92,9 +94,11 @@ interface RunRow {
  *   <table>_attempts  one row per attempt: who, why, when, and how it ended (history)
  */
 export abstract class SqlBackend implements Backend, RunStore {
+  /** 'postgres' or 'sqlite'. */
   abstract readonly name: string;
   /** Runs are never forgotten while a late claim could still ask for them, so no time limit. */
   readonly dedupeWindowMs = Infinity;
+  /** The backend is its own RunStore: leases are always available. */
   readonly runs: RunStore = this;
 
   protected readonly table: string;
@@ -114,14 +118,17 @@ export abstract class SqlBackend implements Backend, RunStore {
   /** Throws if the server is too old. */
   protected abstract checkServer(client: SqlClient): Promise<void>;
 
+  /** Connects, checks the server version and creates the tables. */
   init(): Promise<void> {
     return this.getReady().then(() => undefined);
   }
 
+  /** Nothing per job: all jobs share the tables. */
   async prepareJob(): Promise<void> {}
 
   // ---------------------------------------------------------------- RunStore (leases)
 
+  /** With a RunClaim: the lease state machine. With a plain ClaimInput (no scheduler): one winner, a long lease, no backups. */
   async claim(input: ClaimInput): Promise<boolean>;
   async claim(input: RunClaim): Promise<ClaimOutcome>;
   async claim(input: ClaimInput | RunClaim): Promise<boolean | ClaimOutcome> {
@@ -140,6 +147,7 @@ export abstract class SqlBackend implements Backend, RunStore {
     return this.claimRun(input);
   }
 
+  /** One UPDATE: sets lease_until to now + leaseMs where the token matches and the run is still running. */
   async heartbeat(job: string, slot: number, token: string, leaseMs: number): Promise<boolean> {
     const rows = await this.run(
       `UPDATE ${this.table} SET lease_until = ${this.dialect.nowMs} + ? WHERE job = ? AND slot = ? AND token = ? AND status = 'running' RETURNING slot`,
@@ -148,6 +156,7 @@ export abstract class SqlBackend implements Backend, RunStore {
     return rows.length > 0;
   }
 
+  /** One UPDATE: sets the status where the token matches. */
   async finish(job: string, slot: number, token: string, status: 'success' | 'failed' | 'interrupted'): Promise<boolean> {
     const rows = await this.run(
       `UPDATE ${this.table} SET status = ?, lease_until = 0 WHERE job = ? AND slot = ? AND token = ? RETURNING slot`,
@@ -156,6 +165,7 @@ export abstract class SqlBackend implements Backend, RunStore {
     return rows.length > 0;
   }
 
+  /** One UPDATE: ends a live lease now and counts a hand-over, where the token matches. */
   async release(job: string, slot: number, token: string): Promise<boolean> {
     // Only a live lease can be released; a runner whose lease already ran out counts as having died.
     const rows = await this.run(
@@ -166,6 +176,7 @@ export abstract class SqlBackend implements Backend, RunStore {
     return rows.length > 0;
   }
 
+  /** The job's rows with status 'running', each with whether lease_until is still ahead of the database's clock. */
   async active(job: string): Promise<Array<{ slot: number; attempt: number; alive: boolean }>> {
     const rows = await this.run(
       `SELECT slot, attempt, CASE WHEN lease_until >= ${this.dialect.nowMs} THEN 1 ELSE 0 END AS alive
@@ -177,6 +188,8 @@ export abstract class SqlBackend implements Backend, RunStore {
 
   // ---------------------------------------------------------------- Backend
 
+  /** Claims a run of its own for runNow(), at the first free millisecond from input.slot. Returns the slot it used. */
+  /** Claims a run of its own for runNow(), at the first free millisecond from input.slot. Returns the slot it used. */
   async recordManualRun(input: ClaimInput): Promise<number> {
     for (let slot = input.slot; slot < input.slot + 10; slot++) {
       const outcome = await this.claimRun({
@@ -193,6 +206,7 @@ export abstract class SqlBackend implements Backend, RunStore {
     throw new Error(`Could not record a manual run of "${input.job}"`);
   }
 
+  /** Writes how the attempt ended on its row in <table>_attempts. */
   async saveResult(job: string, result: StoredResult, _historySize: number, historyTtlMs?: number): Promise<void> {
     await this.run(
       `UPDATE ${this.attempts} SET status = ?, started_at = ?, finished_at = ?, duration_ms = ?, error = ?
@@ -213,6 +227,10 @@ export abstract class SqlBackend implements Backend, RunStore {
       await this.run(`DELETE FROM ${this.attempts} WHERE job = ? AND claimed_at < ?`, [job, result.finishedAt - historyTtlMs]);
   }
 
+  /**
+   * Reads <table>_attempts, newest first. An attempt without an end is 'running' only while it is the
+   * current attempt with a live lease.
+   */
   async history(job: string, limit: number): Promise<RunRecord[]> {
     const rows = await this.run(
       `SELECT a.slot, a.attempt, a.instance_id, a.reason, a.manual, a.claimed_at, a.status, a.started_at, a.finished_at,
@@ -261,6 +279,7 @@ export abstract class SqlBackend implements Backend, RunStore {
     return mergeRuns(job, claims, results, limit, (claim) => pending.get(`${claim.slot}|${claim.attempt}`) ?? 'interrupted');
   }
 
+  /** Closes the connection if this backend opened it. A client that was passed in stays open. */
   async close(): Promise<void> {
     const connection = this.connection;
     this.connection = undefined;

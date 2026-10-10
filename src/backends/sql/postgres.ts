@@ -2,19 +2,25 @@ import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlQuery, type
 
 /** A node-postgres (`pg`) Pool. */
 export interface PgPoolLike {
+  /** Runs one statement on any free connection. */
   query(text: string, values?: unknown[]): Promise<{ rows: SqlRow[] }>;
+  /** Checks out one connection: a claim's transaction runs on it, then releases it. */
   connect(): Promise<{ query(text: string, values?: unknown[]): Promise<{ rows: SqlRow[] }>; release(error?: unknown): void }>;
+  /** Only used to tell a Pool from a Client. */
   readonly idleCount: number;
 }
 
 /** A single node-postgres (`pg`) Client (already connected). */
 export interface PgClientLike {
+  /** Runs one statement. A Client has one connection, so anarchon queues its statements on it. */
   query(text: string, values?: unknown[]): Promise<{ rows: SqlRow[] }>;
 }
 
 /** A postgres.js (`postgres`) sql instance. */
 export interface PostgresJsLike {
+  /** Runs a statement given as text with parameters (anarchon's SQL is built from a validated table name). */
   unsafe(query: string, params?: any[]): PromiseLike<ArrayLike<SqlRow>>;
+  /** Runs fn in one transaction: commits when it resolves, rolls back when it rejects. */
   begin<T>(fn: (sql: { unsafe(query: string, params?: any[]): PromiseLike<ArrayLike<SqlRow>> }) => Promise<T>): PromiseLike<T>;
 }
 
@@ -24,9 +30,26 @@ export interface PostgresBackendOptions {
    * A connection string (default: `postgres://localhost:5432/postgres`, with PG* environment variables
    * filling the gaps), or your own `pg` Pool or Client, `postgres.js` sql instance, or
    * `{ all, transaction }`. Connections you pass in are not closed on stop.
+   *
+   * @example
+   * ```ts
+   * new PostgresBackend({ connection: process.env.DATABASE_URL });
+   * new PostgresBackend({ connection: new Pool({ connectionString: process.env.DATABASE_URL }) });
+   * new PostgresBackend({ connection: postgres(process.env.DATABASE_URL) }); // postgres.js
+   * ```
    */
   connection?: string | PgPoolLike | PgClientLike | PostgresJsLike | SqlClient;
-  /** Table name, may include a schema. Default 'anarchon_runs'. Tables are created on start. */
+  /**
+   * Table name, may include a schema (which must exist). Default 'anarchon_runs'. This table and
+   * `<table>_attempts` and `<table>_jobs` are created on start. Services sharing a database need
+   * different names.
+   *
+   * @example
+   * ```ts
+   * new PostgresBackend({ connection: pool, table: 'billing_cron_runs' });
+   * new PostgresBackend({ connection: pool, table: 'jobs.cron_runs' }); // in schema "jobs"
+   * ```
+   */
   table?: string;
 }
 
@@ -86,6 +109,7 @@ export class PostgresBackend extends SqlBackend {
   protected readonly dialect = dialect;
   private readonly input: PostgresBackendOptions['connection'];
 
+  /** Validates the table name. Nothing connects until init(). */
   constructor(options: PostgresBackendOptions = {}) {
     super(options.table ?? 'anarchon_runs');
     this.input = options.connection;

@@ -47,6 +47,7 @@
     "LICENSE",
     "COMMERCIAL_LICENSE.txt"
   ],
+  "packageManager": "pnpm@11.18.0",
   "engines": {
     "node": ">=20"
   },
@@ -73,6 +74,10 @@
     "test:release": "pnpm rebuild && node scripts/release-check.mjs",
     "verify:all": "pnpm lint && pnpm check && pnpm test:all && pnpm test:release",
     "scenarios": "tsx test/e2e/scenarios/report.ts stream-id lease postgres sqlite",
+    "docs:dev": "pnpm --filter anarchon-docs dev",
+    "docs:build": "pnpm --filter anarchon-docs build",
+    "docs:preview": "pnpm --filter anarchon-docs preview",
+    "docs:check": "pnpm --filter anarchon-docs check:diagrams",
     "example": "tsx examples/basic.ts",
     "example:api": "tsx examples/http-api.ts",
     "example:walkthrough": "tsx examples/walkthrough.ts",

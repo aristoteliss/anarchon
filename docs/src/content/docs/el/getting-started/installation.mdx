@@ -1,0 +1,97 @@
+---
+title: Εγκατάσταση
+description: Εγκαταστήστε το anarchon και τον driver για το store που χρησιμοποιείτε.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Το anarchon απαιτεί **Node.js 20 ή νεότερο**.
+
+Εγκαταστήστε το anarchon και τον driver για το store σας. Οι drivers είναι προαιρετικά peer dependencies, επομένως εγκαθιστάτε μόνο αυτόν που χρησιμοποιείτε.
+
+<Tabs syncKey="backend">
+  <TabItem label="Redis / Valkey">
+    ```sh
+    pnpm add anarchon ioredis
+    ```
+    Λειτουργεί με Redis 5 ή νεότερο και με Valkey. Το `ioredis` χρειάζεται μόνο αν το anarchon ανοίγει τη
+    σύνδεση για εσάς. Μπορείτε να περάσετε έναν client που διαθέτει ήδη η εφαρμογή σας: ioredis, iovalkey,
+    node-redis ή Valkey GLIDE.
+  </TabItem>
+  <TabItem label="PostgreSQL">
+    ```sh
+    pnpm add anarchon pg
+    ```
+    PostgreSQL 9.5 ή νεότερο. Μπορείτε να περάσετε το δικό σας `pg` Pool ή Client, ή ένα `postgres.js`
+    instance, αντί για ένα connection string.
+  </TabItem>
+  <TabItem label="SQLite">
+    ```sh
+    pnpm add anarchon
+    ```
+    Δεν χρειάζεται τίποτα άλλο στο Node 22.5 ή νεότερο, το οποίο περιλαμβάνει ενσωματωμένο το `node:sqlite`. Σε παλαιότερες
+    εκδόσεις του Node προσθέστε το `better-sqlite3`. Για έναν libSQL server ή Turso προσθέστε το `@libsql/client`.
+    SQLite 3.35 ή νεότερο.
+  </TabItem>
+  <TabItem label="RabbitMQ">
+    ```sh
+    pnpm add anarchon amqplib
+    ```
+    RabbitMQ 3.9 ή νεότερο.
+  </TabItem>
+  <TabItem label="NATS">
+    ```sh
+    pnpm add anarchon @nats-io/transport-node @nats-io/jetstream
+    ```
+    Το JetStream πρέπει να είναι ενεργοποιημένο στον server.
+  </TabItem>
+</Tabs>
+
+Οι εντολές `npm install` και `yarn add` λειτουργούν με τον ίδιο τρόπο.
+
+## Ποιο store να επιλέξω;
+
+Χρησιμοποιήστε αυτό που διαθέτει ήδη η υπηρεσία σας. Αν έχετε επιλογή:
+
+| Έχετε | Χρήση | Γιατί |
+| --- | --- | --- |
+| Redis ή Valkey | Την προεπιλογή, στρατηγική `lease` | Το πλήρες σύνολο δυνατοτήτων και η χαμηλότερη καθυστέρηση (latency) |
+| PostgreSQL, χωρίς Redis | `PostgresBackend` | Το πλήρες σύνολο δυνατοτήτων, χωρίς νέα υποδομή |
+| Ένα μηχάνημα, πολλαπλές διεργασίες | `SqliteBackend` σε αρχείο | Κανένας server απολύτως |
+| Μόνο RabbitMQ ή NATS | `RabbitMQBackend` / `NatsBackend` | Ένας νικητής ανά εκτέλεση, αλλά χωρίς backups, προστασία επικάλυψης ή ανάκτηση (catch-up) |
+
+Η [Επισκόπηση backends](../../backends/overview/) τα συγκρίνει αναλυτικά.
+
+## Ρύθμιση TypeScript
+
+Το anarchon είναι γραμμένο σε TypeScript και παρέχει τους δικούς του τύπους. Δεν χρειάζεται να εγκαταστήσετε τίποτα επιπλέον.
+
+```ts
+import { Scheduler, type JobContext, type RunRecord } from 'anarchon';
+```
+
+Λειτουργεί επίσης από απλή JavaScript, με `require` ή `import`:
+
+```js
+const { Scheduler } = require('anarchon');
+```
+
+## Έλεγχος ότι λειτουργεί
+
+Αποθηκεύστε αυτό ως `check.mjs` και εκτελέστε `node check.mjs`. Χρησιμοποιεί ένα αρχείο SQLite, επομένως δεν χρειάζεται server (Node 22.5 ή νεότερο).
+
+```js
+import { Scheduler, SqliteBackend } from 'anarchon';
+
+const scheduler = new Scheduler({ backend: new SqliteBackend({ database: './anarchon.db' }) });
+scheduler.every('hello', '2s', (ctx) => console.log('hello at', ctx.scheduledAt.toISOString()));
+
+await scheduler.start();
+setTimeout(() => scheduler.stop(), 7_000);
+```
+
+Θα πρέπει να δείτε μία γραμμή κάθε δύο δευτερόλεπτα, και στη συνέχεια η διεργασία τερματίζεται.
+
+## Επόμενα βήματα
+
+Η [Γρήγορη εκκίνηση](../quick-start/) δημιουργεί έναν μικρό scheduler και τον εκτελεί ως τρία instances.

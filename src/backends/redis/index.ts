@@ -21,26 +21,56 @@ import { type ClaimStrategy, claimFields, IdmpStrategy, ScriptStrategy, StreamId
 export interface RedisBackendOptions {
   /**
    * Where Redis is: a URL (`redis://`, or `rediss://` for TLS), `{ host, port, ... }`, or a client
-   * your app already has (ioredis, node-redis, Valkey GLIDE, or anything with `send(command, args)`).
-   * A client you pass in is never closed by stop(). Default: localhost:6379 via ioredis.
+   * your app already has (ioredis, iovalkey, node-redis, Valkey GLIDE, or anything with
+   * `send(command, args)`). A client you pass in is never closed by stop().
+   * Default: localhost:6379 via ioredis.
+   *
+   * @example
+   * ```ts
+   * new RedisBackend({ redis: 'redis://cache.internal:6379' });
+   * new RedisBackend({ redis: { host: 'cache', port: 6379, password: process.env.REDIS_PASSWORD, db: 1 } });
+   * new RedisBackend({ redis: new Redis(process.env.REDIS_URL) });
+   * ```
    */
   redis?: RedisInput;
   /**
    * How the single runner of each run is chosen (see the table on {@link RedisBackend}).
    * Default 'lease': also gives no overlapping runs, backup runners, catch-up and retries (Redis 5+,
    * Valkey). The simpler 'stream-id', 'idmp' (Redis 8.6+) and 'script' only decide who runs each time.
+   *
+   * @example
+   * ```ts
+   * new RedisBackend({ strategy: 'stream-id' });
+   * ```
    */
   strategy?: RedisStrategyName;
   /**
-   * Prefix for every key. Default 'cron:'. Give each app (or environment) sharing a Redis its own,
-   * e.g. `'billing:cron:'`; instances that should share jobs must use the same one.
+   * Prefix for every key. Default 'cron:'. Give each app (or environment) sharing a Redis its own;
+   * instances that should share jobs must use the same one.
+   *
+   * @example
+   * ```ts
+   * new RedisBackend({ prefix: 'billing:cron:' }); // keys such as {billing:cron:sync}:state
+   * ```
    */
   prefix?: string;
-  /** Settings for the 'idmp' strategy. */
+  /**
+   * Settings for the 'idmp' strategy.
+   *
+   * @example
+   * ```ts
+   * new RedisBackend({ strategy: 'idmp', idmp: { durationSec: 900 } });
+   * ```
+   */
   idmp?: IdmpOptions;
   /**
    * 'script' strategy: how long a claimed run is remembered (ms). Must be longer than a job's
    * jitterMs + maxLateMs, or a late instance could run it again. Default 300000 (5 min).
+   *
+   * @example
+   * ```ts
+   * new RedisBackend({ strategy: 'script', scriptWindowMs: 10 * 60_000 });
+   * ```
    */
   scriptWindowMs?: number;
 }
@@ -93,8 +123,14 @@ export interface RedisBackendOptions {
  * ```
  */
 export class RedisBackend implements Backend {
+  /** 'redis:' and the strategy, e.g. 'redis:lease'. */
   readonly name: string;
+  /** How one winner is picked. See the table above. */
   readonly strategy: RedisStrategyName;
+  /**
+   * How long a claimed run is remembered: Infinity for 'lease' and 'stream-id', idmp.durationSec for
+   * 'idmp', scriptWindowMs for 'script'.
+   */
   readonly dedupeWindowMs: number;
   /** Set with the 'lease' strategy: lets the scheduler use leases, backups and catch-up. */
   readonly runs?: RunStore;
@@ -107,6 +143,7 @@ export class RedisBackend implements Backend {
   private connection: Promise<{ client: RedisCommandClient; owned: boolean }> | undefined;
   private ready: Promise<ClaimStrategy> | undefined;
 
+  /** Validates the options. Nothing connects until init(). */
   constructor(options: RedisBackendOptions = {}) {
     this.strategy = options.strategy ?? 'lease';
     if (!['lease', 'stream-id', 'idmp', 'script'].includes(this.strategy)) {
@@ -128,6 +165,7 @@ export class RedisBackend implements Backend {
     }
   }
 
+  /** 'idmp' and 'script' remember a limited number of runs: refuses a job whose late claims could outlive that memory. */
   checkJob(job: JobLimits): void {
     const needed = job.jitterMs + job.maxLateMs;
     // The server must still remember a run while late instances may try to claim it.
@@ -149,6 +187,7 @@ export class RedisBackend implements Backend {
     }
   }
 
+  /** Connects and checks the server version against the strategy. */
   async init(): Promise<void> {
     if (this.lease) {
       // Streams (XADD) arrived in Redis 5; Valkey reports redis_version 7.2.4.
@@ -160,11 +199,13 @@ export class RedisBackend implements Backend {
     await this.getStrategy();
   }
 
+  /** 'idmp' configures the job's stream here; the other strategies need nothing. */
   async prepareJob(job: string): Promise<void> {
     if (this.lease) return;
     await (await this.getStrategy()).prepareStream(this.streamKey(job));
   }
 
+  /** The plain one-winner claim. (With 'lease' the scheduler claims through `runs` instead.) */
   async claim(input: ClaimInput): Promise<boolean> {
     if (this.lease) {
       // Used only without the scheduler's lease handling: a long lease, no backups.
@@ -181,6 +222,10 @@ export class RedisBackend implements Backend {
     return (await this.getStrategy()).claim({ ...input, key: this.streamKey(input.job) });
   }
 
+  /**
+   * Records a runNow() run. 'lease': claims a run of its own at the first free millisecond and returns
+   * that slot. Other strategies: appends an entry marked manual, so it never counts as a scheduled claim.
+   */
   async recordManualRun(input: ClaimInput): Promise<number | void> {
     // (lease strategy: the scheduler claims manual runs itself, through runs.claim)
     if (this.lease) {
@@ -202,6 +247,7 @@ export class RedisBackend implements Backend {
     await client.send('XADD', [this.streamKey(input.job), 'MAXLEN', '~', input.historySize, '*', ...claimFields(input, true)]);
   }
 
+  /** Adds the result to the job's sorted set and trims it by count and age. */
   async saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void> {
     if (this.lease) return this.lease.saveResult(job, result, historySize, historyTtlMs);
     const { client } = await this.getConnection();
@@ -215,6 +261,7 @@ export class RedisBackend implements Backend {
     }
   }
 
+  /** Joins the claims in the stream with the results in the sorted set. */
   async history(job: string, limit: number): Promise<RunRecord[]> {
     if (this.lease) return this.lease.history(job, limit);
     const { client } = await this.getConnection();
@@ -232,6 +279,7 @@ export class RedisBackend implements Backend {
     return mergeRuns(job, claims, results, limit);
   }
 
+  /** Closes the connection if this backend opened it. A client that was passed in stays open. */
   async close(): Promise<void> {
     const connection = this.connection;
     this.connection = undefined;

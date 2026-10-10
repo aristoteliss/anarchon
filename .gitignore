@@ -4,3 +4,4 @@ dist/
 anarchon.db*
 coverage/
 data/
+.astro/

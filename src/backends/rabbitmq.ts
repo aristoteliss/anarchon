@@ -6,24 +6,59 @@ import { assertSimpleName, positiveInt, versionAtLeast } from '../util';
 
 /** The parts of an amqplib connection this backend uses. */
 export interface RabbitMQConnectionLike {
+  /** A channel for reading history. */
   createChannel(): Promise<unknown>;
+  /** A channel in confirm mode: the broker acks or nacks every publish, which is how a claim learns whether it was first. */
   createConfirmChannel(): Promise<unknown>;
+  /** Only called on connections anarchon opened. */
   close(): Promise<void>;
+  /** Listens for 'error' and 'close', to reconnect on the next call. */
   on(event: string, listener: (...args: any[]) => void): unknown;
+  /** Where amqplib keeps what the server said about itself. Used to check the version. */
   readonly connection: { readonly serverProperties: { version?: string; product?: string } };
 }
 
 /** Options of {@link RabbitMQBackend}. */
 export interface RabbitMQBackendOptions {
-  /** AMQP URL. Default 'amqp://localhost'. */
+  /**
+   * AMQP URL. Default 'amqp://localhost'.
+   *
+   * @example
+   * ```ts
+   * new RabbitMQBackend({ url: process.env.AMQP_URL }); // amqps://user:secret@rabbit.internal/vhost
+   * ```
+   */
   url?: string;
-  /** Your own amqplib connection (`await amqplib.connect(...)`). You keep ownership. */
+  /**
+   * Your own amqplib connection (`await amqplib.connect(...)`). You keep ownership: stop() doesn't
+   * close it. Takes precedence over `url`.
+   *
+   * @example
+   * ```ts
+   * const connection = await amqplib.connect(process.env.AMQP_URL);
+   * new RabbitMQBackend({ connection });
+   * ```
+   */
   connection?: RabbitMQConnectionLike;
-  /** Prefix for queue names. Default 'cron.'. */
+  /**
+   * Prefix for queue names. Default 'cron.'. Gate queues are `<prefix><job>.slot.<slot>`, and
+   * history is `<prefix><job>.history`.
+   *
+   * @example
+   * ```ts
+   * new RabbitMQBackend({ prefix: 'billing.cron.' });
+   * ```
+   */
   prefix?: string;
   /**
    * How long each run's gate queue lives after the last instance touched it (ms). This is how long
-   * RabbitMQ remembers that a run was taken. Default 300000.
+   * RabbitMQ remembers that a run was taken, so it must be longer than a job's jitterMs + maxLateMs.
+   * Default 300000.
+   *
+   * @example
+   * ```ts
+   * new RabbitMQBackend({ slotTtlMs: 15 * 60_000 }); // allows maxLateMs up to about 14 minutes
+   * ```
    */
   slotTtlMs?: number;
 }
@@ -63,6 +98,7 @@ const BYTES_PER_RUN = 1_024; // claim + result records, with room to spare
  */
 export class RabbitMQBackend implements Backend {
   readonly name = 'rabbitmq';
+  /** slotTtlMs: a gate queue, and with it the memory of a claimed run, expires this long after its last use. */
   readonly dedupeWindowMs: number;
 
   private readonly url: string;
@@ -73,6 +109,7 @@ export class RabbitMQBackend implements Backend {
   /** Gate queue -> token of the claims this instance won recently. */
   private readonly won = new Map<string, string>();
 
+  /** Validates the options. Nothing connects until init(). */
   constructor(options: RabbitMQBackendOptions = {}) {
     this.url = options.url ?? 'amqp://localhost';
     this.prefix = options.prefix ?? 'cron.';
@@ -80,10 +117,12 @@ export class RabbitMQBackend implements Backend {
     this.dedupeWindowMs = positiveInt('slotTtlMs', options.slotTtlMs ?? 300_000);
   }
 
+  /** Job names become queue names: letters, digits, '_' and '-' only. */
   checkJob(job: JobLimits): void {
     assertSimpleName('RabbitMQ', job.name);
   }
 
+  /** Connects and checks for RabbitMQ 3.9+, the first version with stream queues. */
   async init(): Promise<void> {
     const connection = await this.getConnection();
     const { product = 'RabbitMQ', version = '0' } = connection.connection.serverProperties ?? {};
@@ -92,6 +131,7 @@ export class RabbitMQBackend implements Backend {
     }
   }
 
+  /** Declares the job's history stream queue, sized from historySize. */
   async prepareJob(job: string, historySize: number): Promise<void> {
     const bytes = Math.max(historySize * BYTES_PER_RUN, 100_000);
     const channel = await this.getConfirmChannel();
@@ -105,6 +145,7 @@ export class RabbitMQBackend implements Backend {
     });
   }
 
+  /** Declares the run's gate queue and publishes to it. Won on ack (the queue was empty), lost on nack (it was full). */
   async claim(input: ClaimInput): Promise<boolean> {
     const queue = this.slotQueue(input.job, input.slot);
     // The same claim sent again (same token) is still ours. Remembered here, because the gate's
@@ -131,18 +172,22 @@ export class RabbitMQBackend implements Backend {
     return won;
   }
 
+  /** Appends the won claim to the history stream. (The gate queue only decides the winner.) */
   async recordClaim(input: ClaimInput): Promise<void> {
     await this.append(input.job, claimPayload(input, false));
   }
 
+  /** Appends a runNow() run to the history stream. No gate: manual runs are not deduplicated. */
   async recordManualRun(input: ClaimInput): Promise<void> {
     await this.append(input.job, claimPayload(input, true));
   }
 
+  /** Appends the result to the history stream. */
   async saveResult(job: string, result: StoredResult): Promise<void> {
     await this.append(job, { type: 'result', ...result });
   }
 
+  /** Reads the newest entries of the job's history stream and joins claims with results. */
   async history(job: string, limit: number): Promise<RunRecord[]> {
     const connection = await this.getConnection();
     const channel = (await connection.createChannel()) as Channel;
@@ -173,6 +218,7 @@ export class RabbitMQBackend implements Backend {
     }
   }
 
+  /** Closes the connection if this backend opened it. One that was passed in stays open. */
   async close(): Promise<void> {
     const confirm = this.confirm;
     const connection = this.connection;

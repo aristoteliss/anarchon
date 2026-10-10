@@ -5,7 +5,9 @@ import { Cron } from 'croner';
  * from the same schedule, so a run time ("slot") identifies one run across the whole cluster.
  */
 export interface Schedule {
+  /** Which method made it: cron(), every() or at(). */
   readonly type: 'cron' | 'every' | 'once';
+  /** For people: 'every 10s', 'cron "0 8 * * 1-5" (Europe/Athens)'. Shown by jobs(). */
   readonly description: string;
   /** Smallest gap between two runs, in ms (Infinity if it can't be known). */
   readonly minGapMs: number;

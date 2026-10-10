@@ -2,11 +2,17 @@ import type { RunReason, RunRecord, RunStatus, StoredResult } from './types';
 
 /** What every backend stores when a run is claimed. */
 export interface ClaimRecord {
+  /** Scheduled time of the run (ms). */
   slot: number;
+  /** The instance that claimed it. */
   by: string;
+  /** When it was claimed (ms): the record's startedAt until a result says otherwise. */
   at: number;
+  /** true for a runNow() run. */
   manual: boolean;
+  /** Lease strategy: which attempt this claim is. Missing means 1. */
   attempt?: number;
+  /** Lease strategy: why the attempt started. */
   reason?: RunReason;
 }
 

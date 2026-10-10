@@ -5,7 +5,9 @@ import type { Job } from './job';
 
 /** How one execution is tracked while it runs. */
 export interface Execution {
+  /** 1 for the first try; 2+ when this execution is a backup's takeover. */
   attempt: number;
+  /** Why this execution started. Passed to the handler as ctx.reason. */
   reason: RunReason;
   /** Its abort() is ctx.signal's. */
   controller: AbortController;
@@ -46,12 +48,17 @@ export class Executor {
     return run;
   }
 
+  /** Aborts the run's signal and remembers why. Later calls do nothing, so the first reason wins. */
   abortRun(run: Execution, by: 'stop' | 'lost' | 'timeout', reason: Error): void {
     if (run.controller.signal.aborted) return;
     run.abortedBy = by;
     run.controller.abort(reason);
   }
 
+  /**
+   * Runs the handler to its end and returns the run's record. Never rejects: a throwing handler becomes
+   * a 'failed' or 'interrupted' record.
+   */
   async execute(job: Job, slot: number, run: Execution): Promise<RunRecord> {
     const { core } = this;
     const scheduledAt = new Date(slot);

@@ -12,32 +12,53 @@ export const CLOCK_TOLERANCE_MS = 10_000;
 
 /** A registered job: its settings after validation, and what this instance knows about it right now. */
 export interface Job {
+  /** Unique per scheduler, and the job's identity in the backend: the same on every instance. */
   readonly name: string;
+  /** Turns "now" into the next and previous run time. Every instance gets the same answers from it. */
   readonly schedule: Schedule;
+  /** The user's function. Called by the Executor on the instance that wins a run. */
   readonly handler: JobHandler;
+  /** This instance waits a random 0..jitterMs after a slot before claiming it. Always under half the time between runs. */
   readonly jitterMs: number;
+  /** A run reached later than this after its slot is skipped as 'late'. Always bigger than jitterMs. */
   readonly maxLateMs: number;
+  /** About how many runs of this job the backend keeps. */
   readonly historySize: number;
+  /** Also drop history older than this (ms). undefined: keep by count only. */
   readonly historyTtlMs: number | undefined;
+  /** Lease strategy: 'skip' refuses a new run while an earlier one holds a live lease; 'allow' runs both. */
   readonly overlap: 'skip' | 'allow';
+  /** The handler's time limit. undefined: none. */
   readonly timeoutMs: number | undefined;
+  /** Lease strategy: how many times one run may be started when runners die (1 to 100). */
   readonly maxAttempts: number;
+  /** Lease strategy: on start, the latest slot is run if nobody ran it and it was due at most this long ago. 0: never. */
   readonly catchUpMs: number;
   /** Lease strategy: how long the server must remember a run, so a late claim can't run it twice. */
   readonly keepMs: number;
+  /** The pending timer for nextSlot on this instance, if any. Cleared by disarm(). */
   timer: NodeJS.Timeout | undefined;
+  /** The slot the timer is waiting for; null when the schedule has no more runs. What nextRun() reports while running. */
   nextSlot: number | null;
+  /** How many runs of this job are executing on this instance right now (more than 1 only with overlap 'allow' or runNow()). */
   runningHere: number;
+  /** The backend's one-time setup for this job, started once and shared; reset when the backend is closed. */
   prepared: Promise<void> | undefined;
+  /** Set by remove(). Timers and backup checks that fire afterwards see it and do nothing. */
   removed: boolean;
 }
 
 /** The scheduler-wide defaults a job falls back to. */
 export interface JobDefaults {
+  /** Used when a job sets no jitterMs, capped at a quarter of the time between its runs. */
   jitterMs: number;
+  /** Used when a job sets no maxLateMs, raised to at least jitterMs + 1 s. */
   maxLateMs: number;
+  /** Used when a job sets no historySize. */
   historySize: number;
+  /** Used when a job sets no historyTtlMs. Missing: history is kept by count only. */
   historyTtlMs?: number;
+  /** IANA time zone for cron jobs that set none. Missing: the server's local zone. */
   timezone?: string;
 }
 

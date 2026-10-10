@@ -35,6 +35,8 @@ Use these scripts. Use pnpm only, never npm or yarn.
 | Pack, install and load the published tarball | `pnpm test:release` |
 | Everything before a release | `pnpm verify:all` |
 | Failure scenarios, side by side | `pnpm scenarios` |
+| Documentation site (Astro Starlight, in `docs/`) | `pnpm docs:dev`, `pnpm docs:build` |
+| Check that every docs diagram parses | `pnpm docs:check` |
 
 Run the narrowest relevant test file first, then `pnpm lint`, `pnpm check` and the full
 `pnpm test` before reporting work as done.
