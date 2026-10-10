@@ -238,9 +238,19 @@ Notes:
 ## Examples
 
 ```sh
-npx tsx examples/basic.ts       # run it in 3 terminals, then kill one (BACKEND=postgres or sqlite for those)
-npx tsx examples/http-api.ts    # GET /jobs, /jobs/:name/runs, POST /jobs/:name/run
+npx tsx examples/basic.ts               # run it in 3 terminals, then kill one (BACKEND=postgres or sqlite for those)
+npx tsx examples/http-api.ts            # Express: GET /jobs, /jobs/:name/runs, POST /jobs/:name/run
+                                        # examples/http-api.http has every request, for the VS Code REST Client
+npx tsx examples/walkthrough.ts         # one run from the timer to history, made for stepping through in a debugger
+npx tsx examples/failover.ts            # 3 instances in one process: a graceful hand-over, then a crash and takeover
+npx tsx examples/options-and-events.ts  # every job option and every event
+npx tsx examples/own-clients.ts         # pass in your own ioredis client or pg Pool
 ```
+
+All but `basic.ts` need no server: they use a SQLite file in the temp folder unless `BACKEND=redis` or
+`BACKEND=postgres` is set (`own-clients.ts` always needs Redis or Postgres). `.vscode/launch.json`
+has a debug configuration for each; start with "Example: walkthrough", which pauses before `start()`
+and lists where to step.
 
 ## Tests
 

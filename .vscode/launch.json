@@ -1,0 +1,83 @@
+{
+  "version": "0.2.0",
+  "inputs": [
+    {
+      "id": "backend",
+      "type": "pickString",
+      "description": "Backend (redis and postgres read REDIS_URL / POSTGRES_URL from your environment)",
+      "options": ["sqlite", "redis", "postgres"],
+      "default": "sqlite"
+    }
+  ],
+  "configurations": [
+    {
+      "name": "Example: walkthrough (step through one run)",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/walkthrough.ts",
+      "env": { "BACKEND": "sqlite" },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: failover",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/failover.ts",
+      "env": { "BACKEND": "${input:backend}" },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: options and events",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/options-and-events.ts",
+      "env": { "BACKEND": "${input:backend}" },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: HTTP API (Express)",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/http-api.ts",
+      "env": { "BACKEND": "${input:backend}" },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: basic (SQLite)",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/basic.ts",
+      "env": { "BACKEND": "sqlite" },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Debug the open file (tsx)",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Test: the open test file",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
+      "args": ["run", "${relativeFile}", "--testTimeout=0", "--hookTimeout=0"],
+      "autoAttachChildProcesses": true,
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    }
+  ]
+}

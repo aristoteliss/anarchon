@@ -1,52 +1,73 @@
 /**
- * A small HTTP API on top of the scheduler (plain node:http, no framework):
+ * An Express API on top of the scheduler: list the jobs, read their history, run one now.
  *
- *   GET  /jobs                    jobs on this instance and their next run
- *   GET  /jobs/:name/runs?limit=  latest runs from all instances: who, when, finished, status
- *   GET  /jobs/:name/last         the latest run
- *   POST /jobs/:name/run          run a job now on this instance
+ *   npx tsx examples/http-api.ts                 # SQLite file in the temp folder
+ *   BACKEND=redis npx tsx examples/http-api.ts   # see examples/shared.ts
  *
- *   npx tsx examples/http-api.ts
- *   curl localhost:3000/jobs/sync/runs?limit=5
+ *   curl localhost:3000/jobs                      jobs on this instance and their next run
+ *   curl localhost:3000/jobs/sync/runs?limit=5    latest runs from all instances
+ *   curl localhost:3000/jobs/sync/last            the latest run
+ *   curl -X POST localhost:3000/jobs/sync/run     run it now, on this instance
+ *
+ * Start it twice (PORT=3001 for the second) to see runs spread over both instances in /runs.
+ * Every request is also in examples/http-api.http, to send from VS Code with the REST Client extension.
  */
-import { createServer } from 'node:http';
+import express, { type NextFunction, type Request, type Response } from 'express';
 
 import { Scheduler } from '../src';
+import { backendFromEnv, say, sleep } from './shared';
 
-const scheduler = new Scheduler({ redis: process.env.REDIS_URL ?? 'redis://localhost:6379' });
-scheduler.every('sync', '10s', async () => {}).cron('digest', '0 */2 * * *', async () => {}, { timezone: 'Europe/Athens' });
+const PORT = Number(process.env.PORT ?? 3000);
 
-const server = createServer(async (req, res) => {
-  const url = new URL(req.url ?? '/', 'http://localhost');
-  const send = (status: number, body: unknown) => {
-    res.writeHead(status, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(body, null, 2));
-  };
-  try {
-    const [, root, name, action] = url.pathname.split('/');
-    if (root !== 'jobs') return send(404, { error: 'not found' });
-    if (req.method === 'GET' && !name) return send(200, scheduler.jobs());
-    if (req.method === 'GET' && name && action === 'runs') {
-      return send(200, await scheduler.history(name, Number(url.searchParams.get('limit') ?? 20)));
-    }
-    if (req.method === 'GET' && name && action === 'last') return send(200, await scheduler.lastRun(name));
-    if (req.method === 'POST' && name && action === 'run') return send(200, await scheduler.runNow(name));
-    return send(404, { error: 'not found' });
-  } catch (error) {
-    return send(400, { error: error instanceof Error ? error.message : String(error) });
-  }
-});
+const scheduler = new Scheduler({ backend: backendFromEnv('http'), instanceId: `api-${PORT}` });
 
 scheduler
-  .start()
-  .then(() => server.listen(3000, () => console.log('API on http://localhost:3000/jobs')))
-  .catch((error: unknown) => {
-    console.error(error);
-    process.exit(1);
-  });
+  .every('sync', '10s', async () => {
+    await sleep(300);
+  })
+  .cron('digest', '0 */2 * * *', async () => {}, { timezone: 'Europe/Athens' });
 
-process.on('SIGINT', async () => {
-  server.close();
-  await scheduler.stop();
-  process.exit(0);
+scheduler.on('success', (run) => say(`${run.job} ran here in ${run.durationMs} ms`));
+
+const app = express();
+
+app.get('/jobs', (_req, res) => {
+  res.json(scheduler.jobs());
+});
+
+app.get('/jobs/:name/runs', async (req, res) => {
+  const limit = Number(req.query.limit ?? 20);
+  res.json(await scheduler.history(req.params.name, limit));
+});
+
+app.get('/jobs/:name/last', async (req, res) => {
+  res.json(await scheduler.lastRun(req.params.name));
+});
+
+app.post('/jobs/:name/run', async (req, res) => {
+  // Resolves when the job has finished, with its record
+  res.json(await scheduler.runNow(req.params.name));
+});
+
+// An unknown job name or a bad limit throws: answer 400 with the message
+app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+});
+
+async function main() {
+  await scheduler.start();
+  const server = app.listen(PORT, () => say(`API on http://localhost:${PORT}/jobs (${scheduler.backend.name})`));
+
+  const shutdown = async () => {
+    server.close();
+    await scheduler.stop();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+main().catch((error: unknown) => {
+  console.error(error);
+  process.exit(1);
 });
