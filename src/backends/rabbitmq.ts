@@ -15,7 +15,7 @@ export interface RabbitMQConnectionLike {
   /** Only called on connections anarchon opened. */
   close(): Promise<void>;
   /** Listens for 'error' and 'close', to reconnect on the next call. */
-  on(event: string, listener: (...args: any[]) => void): unknown;
+  on(event: string, listener: (...args: never[]) => void): unknown;
   /** Where amqplib keeps what the server said about itself. Used to check the version. */
   readonly connection: { readonly serverProperties: { version?: string; product?: string } };
 }
@@ -169,7 +169,8 @@ export class RabbitMQBackend implements Backend {
     const won = await this.publish(channel, queue, claimPayload(input, false));
     if (won) {
       this.won.set(queue, input.token);
-      if (this.won.size > 1_000) this.won.delete(this.won.keys().next().value!);
+      const oldest = this.won.keys().next().value;
+      if (this.won.size > 1_000 && oldest !== undefined) this.won.delete(oldest);
     }
     return won;
   }
@@ -180,7 +181,7 @@ export class RabbitMQBackend implements Backend {
   }
 
   /** Appends a runNow() run to the history stream. No gate: manual runs are not deduplicated. */
-  async recordManualRun(input: ClaimInput): Promise<void> {
+  async recordManualRun(input: ClaimInput): Promise<undefined> {
     await this.append(input.job, claimPayload(input, true));
   }
 
@@ -236,9 +237,9 @@ export class RabbitMQBackend implements Backend {
     if (this.connection) return this.connection;
     const pending: Promise<ChannelModel> = (async () => {
       if (this.userConnection) return this.userConnection as unknown as ChannelModel;
-      let amqp: any;
+      let amqp: typeof import('amqplib') & { default: { connect: typeof import('amqplib').connect } };
       try {
-        amqp = await import('amqplib');
+        amqp = (await import('amqplib')) as typeof amqp;
       } catch {
         throw new Error('The RabbitMQ backend needs "amqplib": run `npm install amqplib`.');
       }

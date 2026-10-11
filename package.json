@@ -72,7 +72,7 @@
     "test:last:log": "less -R test-run.log",
     "test:last:fails": "node scripts/test-log.mjs fails",
     "test:release": "pnpm rebuild && node scripts/release-check.mjs",
-    "verify:all": "pnpm lint && pnpm check && pnpm test:all && pnpm test:release",
+    "verify:all": "pnpm test:servers && pnpm lint && pnpm check && pnpm test:all && pnpm test:release",
     "scenarios": "tsx test/e2e/scenarios/report.ts stream-id lease postgres sqlite",
     "docs:dev": "pnpm --filter anarchon-docs dev",
     "docs:build": "pnpm --filter anarchon-docs build",

@@ -21,9 +21,9 @@ export interface PgClientLike {
 /** A postgres.js (`postgres`) sql instance. */
 export interface PostgresJsLike {
   /** Runs a statement given as text with parameters (anarchon's SQL is built from a validated table name). */
-  unsafe(query: string, params?: any[]): PromiseLike<ArrayLike<SqlRow>>;
+  unsafe(query: string, params?: unknown[]): PromiseLike<ArrayLike<SqlRow>>;
   /** Runs fn in one transaction: commits when it resolves, rolls back when it rejects. */
-  begin<T>(fn: (sql: { unsafe(query: string, params?: any[]): PromiseLike<ArrayLike<SqlRow>> }) => Promise<T>): PromiseLike<T>;
+  begin<T>(fn: (sql: { unsafe(query: string, params?: unknown[]): PromiseLike<ArrayLike<SqlRow>> }) => Promise<T>): PromiseLike<T>;
 }
 
 /** Options of {@link PostgresBackend}. */
@@ -120,13 +120,14 @@ export class PostgresBackend extends SqlBackend {
   protected async connect(): Promise<{ client: SqlClient; owned: boolean }> {
     const input = this.input;
     if (input !== undefined && typeof input !== 'string') return { client: toSqlClient(input), owned: false };
-    let pg: any;
+    let pg: { Pool?: typeof import('pg').Pool; default?: { Pool: typeof import('pg').Pool } };
     try {
       pg = await import('pg');
     } catch {
       throw new Error('The Postgres backend needs "pg": run `npm install pg`, or pass your own client as connection.');
     }
     const Pool = pg.Pool ?? pg.default?.Pool;
+    if (!Pool) throw new Error('"pg" was loaded but exports no Pool class.');
     const pool = new Pool(input ? { connectionString: input } : {});
     pool.on('error', () => {}); // idle client errors; the next query reconnects
     return { client: { ...fromPgPool(pool), close: () => pool.end() }, owned: true };

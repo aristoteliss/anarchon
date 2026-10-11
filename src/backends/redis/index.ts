@@ -228,7 +228,7 @@ export class RedisBackend implements Backend {
    * Records a runNow() run. 'lease': claims a run of its own at the first free millisecond and returns
    * that slot. Other strategies: appends an entry marked manual, so it never counts as a scheduled claim.
    */
-  async recordManualRun(input: ClaimInput): Promise<number | void> {
+  async recordManualRun(input: ClaimInput): Promise<number | undefined> {
     // (lease strategy: the scheduler claims manual runs itself, through runs.claim)
     if (this.lease) {
       for (let slot = input.slot; slot < input.slot + 10; slot++) {

@@ -172,7 +172,7 @@ export class NatsBackend implements Backend {
   }
 
   /** Publishes a runNow() run without a message ID, so it is never deduplicated. */
-  async recordManualRun(input: ClaimInput): Promise<void> {
+  async recordManualRun(input: ClaimInput): Promise<undefined> {
     const { js } = await this.getState();
     await js.publish(this.subject(input.job, 'claims'), JSON.stringify(claimPayload(input, true)));
   }
@@ -235,8 +235,8 @@ export class NatsBackend implements Backend {
 
   private getState(): Promise<{ nc: NatsConnection; js: JetStreamClient; jsm: JetStreamManager }> {
     this.state ??= (async () => {
-      let transport: any;
-      let jetstreamModule: any;
+      let transport: typeof import('@nats-io/transport-node');
+      let jetstreamModule: typeof import('@nats-io/jetstream');
       try {
         transport = await import('@nats-io/transport-node');
         jetstreamModule = await import('@nats-io/jetstream');

@@ -6,7 +6,7 @@ import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlRow, type S
 /** A synchronous SQLite database: `node:sqlite` DatabaseSync or `better-sqlite3`. */
 export interface SqliteDatabaseLike {
   /** Compiles a statement. `reader` (better-sqlite3) says whether it returns rows. */
-  prepare(sql: string): { all(...params: any[]): unknown[]; run(...params: any[]): unknown; reader?: boolean };
+  prepare(sql: string): { all(...params: unknown[]): unknown[]; run(...params: unknown[]): unknown; reader?: boolean };
   /** Runs statements that return nothing (PRAGMA, BEGIN, COMMIT). */
   exec(sql: string): unknown;
 }
@@ -14,10 +14,10 @@ export interface SqliteDatabaseLike {
 /** A `@libsql/client` client: a local file, or a remote libSQL server (sqld / Turso). */
 export interface LibsqlClientLike {
   /** Runs one statement. */
-  execute(statement: { sql: string; args: any[] }): Promise<{ rows: ArrayLike<unknown> }>;
+  execute(statement: { sql: string; args: SqlValue[] }): Promise<{ rows: ArrayLike<unknown> }>;
   /** Opens a write transaction. On a remote server it holds the database's write lock until commit, rollback or the server's timeout. */
   transaction(mode: 'write'): Promise<{
-    execute(statement: { sql: string; args: any[] }): Promise<{ rows: ArrayLike<unknown> }>;
+    execute(statement: { sql: string; args: SqlValue[] }): Promise<{ rows: ArrayLike<unknown> }>;
     commit(): Promise<void>;
     rollback(): Promise<void>;
     close(): void;
@@ -112,7 +112,7 @@ const dialect: SqlDialect = {
 export class SqliteBackend extends SqlBackend {
   readonly name = 'sqlite';
   protected readonly dialect = dialect;
-  private readonly input: SqliteBackendOptions['database'];
+  private readonly input: Exclude<SqliteBackendOptions['database'], undefined>;
   private readonly busyTimeoutMs: number;
 
   /** Validates the table name. Nothing is opened until init(). */
@@ -124,7 +124,7 @@ export class SqliteBackend extends SqlBackend {
 
   protected async connect(): Promise<{ client: SqlClient; owned: boolean }> {
     const input = this.input;
-    if (typeof input !== 'string') return { client: toSqlClient(input!), owned: false };
+    if (typeof input !== 'string') return { client: toSqlClient(input), owned: false };
     const db = await openFile(input);
     // WAL lets readers work while one process writes; busy_timeout makes writers wait their turn.
     db.exec(`PRAGMA busy_timeout = ${Math.floor(this.busyTimeoutMs)}`);
@@ -239,7 +239,8 @@ async function openFile(path: string): Promise<SqliteDatabaseLike> {
   } catch (builtinError) {
     try {
       const optional = 'better-sqlite3'; // optional dependency
-      const mod: any = await import(optional);
+      type DatabaseConstructor = new (path: string) => SqliteDatabaseLike;
+      const mod = (await import(optional)) as { default?: DatabaseConstructor } & DatabaseConstructor;
       const Database = mod.default ?? mod;
       return new Database(path);
     } catch {

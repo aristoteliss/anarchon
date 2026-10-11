@@ -36,7 +36,7 @@ export function parseDuration(value: number | string): number {
   }
   let total = 0;
   for (const [, amount, unit] of text.matchAll(/(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)/g)) {
-    total += Number(amount) * UNIT_MS[unit as string]!;
+    total += Number(amount) * (UNIT_MS[unit as string] ?? 0);
   }
   return parseDuration(Math.round(total));
 }
@@ -101,8 +101,11 @@ export function cronSchedule(expression: string, timezone?: string): Schedule {
   const runs = cron.nextRuns(64, new Date());
   if (runs.length === 0) throw new RangeError(`Cron expression "${expression}" never runs in the future`);
   let minGapMs = Infinity;
-  for (let i = 1; i < runs.length; i++) {
-    minGapMs = Math.min(minGapMs, runs[i]!.getTime() - runs[i - 1]!.getTime());
+  let previous: number | undefined;
+  for (const run of runs) {
+    const time = run.getTime();
+    if (previous !== undefined) minGapMs = Math.min(minGapMs, time - previous);
+    previous = time;
   }
   return {
     type: 'cron',

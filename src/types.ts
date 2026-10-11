@@ -472,7 +472,7 @@ export interface Backend {
   /** Called after a won claim, for backends whose claim isn't already a history record. */
   recordClaim?(input: ClaimInput): Promise<void>;
   /** Records a manual run (runNow), not deduplicated. May return the slot it actually used. */
-  recordManualRun(input: ClaimInput): Promise<number | void>;
+  recordManualRun(input: ClaimInput): Promise<number | undefined>;
   /** Stores how an attempt ended, and trims the job's history to historySize and historyTtlMs. */
   saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void>;
   /** Latest runs of a job from all instances, newest first. */

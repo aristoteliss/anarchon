@@ -92,15 +92,18 @@ export function fromValkeyGlide(client: ValkeyGlideLike): RedisCommandClient {
 }
 
 async function createIORedis(input: string | RedisConnectionOptions | undefined): Promise<RedisCommandClient> {
-  let mod: any;
+  type IORedisConstructor = new (target: string | RedisConnectionOptions) => IORedisLike;
+  let mod: { Redis?: IORedisConstructor; default?: IORedisConstructor & { Redis?: IORedisConstructor } };
   try {
-    mod = await import('ioredis');
+    // ioredis's typings describe `default` as the module namespace; at runtime it is the Redis class.
+    mod = (await import('ioredis')) as unknown as typeof mod;
   } catch {
     throw new Error(
       'No Redis client was given and "ioredis" is not installed. Run `npm install ioredis`, or pass your own client as redis.',
     );
   }
   const IORedis = mod.Redis ?? mod.default?.Redis ?? mod.default;
+  if (!IORedis) throw new Error('"ioredis" was loaded but exports no Redis class.');
   const client: IORedisLike = typeof input === 'string' ? new IORedis(input) : new IORedis({ host: 'localhost', port: 6379, ...input });
   return fromIORedis(client, true);
 }

@@ -34,8 +34,8 @@ async function tokenAt(redis: RedisCommandClient, key: string, id: string): Prom
 
 async function serverInfo(redis: RedisCommandClient): Promise<{ product: string; version: string }> {
   const info = toStr(await redis.send('INFO', ['server']));
-  const valkey = /valkey_version:([\d.]+)/.exec(info);
-  if (valkey) return { product: 'Valkey', version: valkey[1]! };
+  const valkey = /valkey_version:([\d.]+)/.exec(info)?.[1];
+  if (valkey) return { product: 'Valkey', version: valkey };
   return { product: 'Redis', version: /redis_version:([\d.]+)/.exec(info)?.[1] ?? 'unknown' };
 }
 
