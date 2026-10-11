@@ -1,5 +1,10 @@
 # anarchon
 
+[![npm version](https://img.shields.io/npm/v/anarchon.svg)](https://www.npmjs.com/package/anarchon)
+[![npm downloads](https://img.shields.io/npm/dm/anarchon.svg)](https://www.npmjs.com/package/anarchon)
+[![node](https://img.shields.io/node/v/anarchon.svg)](https://www.npmjs.com/package/anarchon)
+[![license](https://img.shields.io/badge/license-AGPL--3.0%20or%20commercial-blue.svg)](https://github.com/aristoteliss/anarchon#license-and-commercial-use)
+
 [**Documentation**](https://aristoteliss.github.io/anarchon/) · [Quick start](https://aristoteliss.github.io/anarchon/getting-started/quick-start/) · [Guarantees and limits](https://aristoteliss.github.io/anarchon/reference/guarantees/) · [Examples](#examples) · [License](#license-and-commercial-use)
 
 Leaderless scheduling for Node.js clusters. Run the same jobs in every instance; an atomic claim in Redis, Valkey, PostgreSQL or SQLite selects one runner for each scheduled slot. The default `lease` strategy retries after a runner stops renewing its lease. That gives at-least-once execution after failures, not exactly-once side effects: handlers should be idempotent, and a frozen runner can briefly overlap its replacement.
