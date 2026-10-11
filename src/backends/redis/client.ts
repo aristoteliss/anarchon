@@ -50,8 +50,8 @@ export interface ValkeyGlideLike {
 
 /**
  * What you can pass as `redis`:
- * - nothing: connects to localhost:6379 with ioredis (works for Redis and Valkey)
- * - a URL string or `{ host, port, ... }`: connects with ioredis
+ * - nothing: connects to localhost:6379 with node-redis (works for Redis and Valkey)
+ * - a URL string or `{ host, port, ... }`: connects with node-redis
  * - your own ioredis, iovalkey, node-redis or Valkey GLIDE client (you keep ownership)
  * - any object implementing `RedisCommandClient`
  */
@@ -59,13 +59,13 @@ export type RedisInput = RedisCommandClient | IORedisLike | NodeRedisLike | Valk
 
 export async function resolveRedis(input: RedisInput | undefined): Promise<{ client: RedisCommandClient; owned: boolean }> {
   if (input === undefined || typeof input === 'string') {
-    return { client: await createIORedis(input), owned: true };
+    return { client: await createNodeRedis(input), owned: true };
   }
   if (isCommandClient(input)) return { client: input, owned: false };
   if (isGlide(input)) return { client: fromValkeyGlide(input), owned: false };
   if (isNodeRedis(input)) return { client: fromNodeRedis(input), owned: false };
   if (isIORedis(input)) return { client: fromIORedis(input, false), owned: false };
-  if (isPlainObject(input)) return { client: await createIORedis(input), owned: true };
+  if (isPlainObject(input)) return { client: await createNodeRedis(input), owned: true };
   throw new TypeError(
     'redis must be connection options, a URL, an ioredis/iovalkey, node-redis or Valkey GLIDE client, or an object with send(command, args).',
   );
@@ -91,21 +91,35 @@ export function fromValkeyGlide(client: ValkeyGlideLike): RedisCommandClient {
   return { send: (command, args) => client.customCommand([command, ...args.map(String)]) };
 }
 
-async function createIORedis(input: string | RedisConnectionOptions | undefined): Promise<RedisCommandClient> {
-  type IORedisConstructor = new (target: string | RedisConnectionOptions) => IORedisLike;
-  let mod: { Redis?: IORedisConstructor; default?: IORedisConstructor & { Redis?: IORedisConstructor } };
+/** The parts of a node-redis client that anarchon opens and closes itself. */
+interface NodeRedisClientLike extends NodeRedisLike {
+  connect(): Promise<unknown>;
+  quit(): Promise<unknown>;
+  on(event: 'error', listener: () => void): unknown;
+}
+
+async function createNodeRedis(input: string | RedisConnectionOptions | undefined): Promise<RedisCommandClient> {
+  let mod: { createClient(options: object): NodeRedisClientLike };
   try {
-    // ioredis's typings describe `default` as the module namespace; at runtime it is the Redis class.
-    mod = (await import('ioredis')) as unknown as typeof mod;
+    // node-redis's typings are generic over its modules; only createClient is used here.
+    mod = (await import('redis')) as unknown as typeof mod;
   } catch {
-    throw new Error(
-      'No Redis client was given and "ioredis" is not installed. Run `npm install ioredis`, or pass your own client as redis.',
-    );
+    throw new Error('No Redis client was given and "redis" is not installed. Run `npm install redis`, or pass your own client as redis.');
   }
-  const IORedis = mod.Redis ?? mod.default?.Redis ?? mod.default;
-  if (!IORedis) throw new Error('"ioredis" was loaded but exports no Redis class.');
-  const client: IORedisLike = typeof input === 'string' ? new IORedis(input) : new IORedis({ host: 'localhost', port: 6379, ...input });
-  return fromIORedis(client, true);
+  const options =
+    typeof input === 'string'
+      ? { url: input }
+      : {
+          socket: { host: input?.host ?? 'localhost', port: input?.port ?? 6379 },
+          username: input?.username,
+          password: input?.password,
+          database: input?.db ?? 0,
+        };
+  const client = mod.createClient(options);
+  // node-redis reconnects on its own; without a listener Node would throw on 'error'. Failed commands still reject.
+  client.on('error', () => {});
+  await client.connect();
+  return { ...fromNodeRedis(client), close: async () => void (await client.quit()) };
 }
 
 function isCommandClient(value: object): value is RedisCommandClient {

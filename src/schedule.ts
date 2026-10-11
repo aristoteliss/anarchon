@@ -36,7 +36,9 @@ export function parseDuration(value: number | string): number {
   }
   let total = 0;
   for (const [, amount, unit] of text.matchAll(/(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)/g)) {
-    total += Number(amount) * (UNIT_MS[unit as string] ?? 0);
+    const ms = UNIT_MS[unit as string];
+    if (ms === undefined) throw new RangeError(`Invalid duration unit: "${unit}"`);
+    total += Number(amount) * ms;
   }
   return parseDuration(Math.round(total));
 }

@@ -90,19 +90,14 @@
     "croner": "^10.0.1"
   },
   "peerDependencies": {
-    "@libsql/client": ">=0.5",
     "@nats-io/jetstream": ">=3",
     "@nats-io/transport-node": ">=3",
     "amqplib": ">=0.10",
     "better-sqlite3": ">=9",
-    "ioredis": ">=5",
     "pg": ">=8",
-    "postgres": ">=3"
+    "redis": ">=4"
   },
   "peerDependenciesMeta": {
-    "@libsql/client": {
-      "optional": true
-    },
     "@nats-io/jetstream": {
       "optional": true
     },
@@ -115,13 +110,10 @@
     "better-sqlite3": {
       "optional": true
     },
-    "ioredis": {
-      "optional": true
-    },
     "pg": {
       "optional": true
     },
-    "postgres": {
+    "redis": {
       "optional": true
     }
   },

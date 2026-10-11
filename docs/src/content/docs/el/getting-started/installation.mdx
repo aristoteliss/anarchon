@@ -12,9 +12,9 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 <Tabs syncKey="backend">
   <TabItem label="Redis / Valkey">
     ```sh
-    pnpm add anarchon ioredis
+    pnpm add anarchon redis
     ```
-    Λειτουργεί με Redis 5 ή νεότερο και με Valkey. Το `ioredis` χρειάζεται μόνο αν το anarchon ανοίγει τη
+    Λειτουργεί με Redis 5 ή νεότερο και με Valkey. Το `redis` (node-redis) χρειάζεται μόνο αν το anarchon ανοίγει τη
     σύνδεση για εσάς. Μπορείτε να περάσετε έναν client που διαθέτει ήδη η εφαρμογή σας: ioredis, iovalkey,
     node-redis ή Valkey GLIDE.
   </TabItem>

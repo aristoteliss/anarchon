@@ -43,10 +43,10 @@ Each process connects to `redis://localhost:6379` by default. Watch `sync` run o
 ## Install
 
 ```sh
-pnpm add anarchon ioredis
+pnpm add anarchon redis
 ```
 
-`ioredis` is only needed if you let anarchon open the connection. You can pass your own ioredis, iovalkey, node-redis or Valkey GLIDE client instead. It works with Redis 5+ and Valkey.
+`redis` (node-redis) is only needed if you let anarchon open the connection. You can pass your own ioredis, iovalkey, node-redis or Valkey GLIDE client instead. It works with Redis 5+ and Valkey.
 
 For another backend, install its driver instead (see [Backends](#backends)):
 
@@ -94,7 +94,7 @@ These are real runs with three processes on Redis 8.6, broken on purpose with `k
 - **No overlap.** A new run isn't started while an earlier run of the same job still holds a live lease. Set `overlap: 'allow'` to run them side by side.
 - **Fencing.** Every attempt has its own token. Heartbeats and "finished" only work with the current token, so a runner that was taken over finds out at its next heartbeat. Its `ctx.signal` aborts and it emits `lost`.
 - **Catch-up.** On start, each instance first picks up unfinished runs whose runner is gone. Then, if the latest run was never claimed and was due less than `catchUpMs` ago, it runs it now with `reason: 'catch-up'`.
-- **Late claims.** Redis checks how late a new claim is on its own clock, so a claim that was delayed or queued (ioredis queues commands while it reconnects) can't start a stale run. A run is never trimmed from the state while a late claim could still ask for it, whatever `historySize` is.
+- **Late claims.** Redis checks how late a new claim is on its own clock, so a claim that was delayed or queued (the client queues commands while it reconnects) can't start a stale run. A run is never trimmed from the state while a late claim could still ask for it, whatever `historySize` is.
 
 A lease isn't a lock you hold and release. Every decision is still a single atomic claim, and the lease only says "the runner is still alive". A frozen runner can't know it was taken over until it wakes up, so two attempts can briefly overlap in that case. Check `ctx.signal` before side effects, and keep jobs idempotent.
 

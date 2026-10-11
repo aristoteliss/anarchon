@@ -12,9 +12,9 @@ Install anarchon and the driver for your store. Drivers are optional peer depend
 <Tabs syncKey="backend">
   <TabItem label="Redis / Valkey">
     ```sh
-    pnpm add anarchon ioredis
+    pnpm add anarchon redis
     ```
-    Works with Redis 5 or newer and with Valkey. `ioredis` is only needed if anarchon opens the
+    Works with Redis 5 or newer and with Valkey. `redis` (node-redis) is only needed if anarchon opens the
     connection for you. You can pass a client your app already has instead: ioredis, iovalkey,
     node-redis or Valkey GLIDE.
   </TabItem>

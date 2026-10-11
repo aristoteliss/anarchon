@@ -22,7 +22,7 @@ new Scheduler({ redis: 'rediss://user:secret@host:6380/2' }); // TLS, credential
 new Scheduler({ redis: { host: 'cache', port: 6379, password: process.env.REDIS_PASSWORD, db: 1 } });
 ```
 
-When you pass a URL or options, anarchon opens the connection with `ioredis` and closes it on `stop()`.
+When you pass a URL or options, anarchon opens the connection with `redis` (node-redis) and closes it on `stop()`.
 
 ### Your own client
 
