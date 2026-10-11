@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import { type ClaimRecord, mergeRuns } from '../../history';
 import type { Backend, ClaimInput, ClaimOutcome, RunClaim, RunRecord, RunStatus, RunStore, StoredResult } from '../../types';
 

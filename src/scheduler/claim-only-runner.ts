@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import type { RunRecord } from '../types';
 import type { SchedulerCore } from './core';
 import type { Executor } from './executor';

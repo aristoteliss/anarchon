@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import type { JetStreamClient, JetStreamManager } from '@nats-io/jetstream';
 import type { NatsConnection } from '@nats-io/transport-node';
 

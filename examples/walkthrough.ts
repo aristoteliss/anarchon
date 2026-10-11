@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * For the debugger: one run from the timer to the history record, slowly enough to follow.
  *

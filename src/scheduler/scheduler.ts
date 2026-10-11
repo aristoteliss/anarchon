@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import { EventEmitter } from 'node:events';
 import { hostname } from 'node:os';
 

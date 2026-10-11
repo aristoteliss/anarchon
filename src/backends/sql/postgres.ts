@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlQuery, type SqlRow, type SqlValue } from './base';
 
 /** A node-postgres (`pg`) Pool. */

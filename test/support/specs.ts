@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /** The backends the tests run on: one spec per backend, server and strategy, with a reason to skip the ones that are missing. */
 import { join } from 'node:path';
 

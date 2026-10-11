@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import type { Channel, ChannelModel, ConfirmChannel, ConsumeMessage } from 'amqplib';
 
 import { type ClaimRecord, claimPayload, mergeRuns, parseJson, toClaim, toResult } from '../history';

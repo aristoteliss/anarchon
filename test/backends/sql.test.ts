@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /** What is specific to Postgres and SQLite. (The shared contract is in contract.test.ts, the lease rules in ../leases.) */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

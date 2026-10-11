@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /** What is specific to RabbitMQ and NATS (claim only, no leases). */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * Failure scenarios with real processes (kill -9, freeze, SIGTERM, restart everything) on every
  * backend with leases: Redis 'lease', Postgres and SQLite. `pnpm scenarios` prints the same

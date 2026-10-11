@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /** Where the test servers are, and whether each one answers. The default ports are docker-compose.test.yml's. */
 import { tmpdir } from 'node:os';
 

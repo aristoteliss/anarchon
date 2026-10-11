@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * Using connections your app already has. The scheduler never closes a client you pass in, so
  * stop() leaves it open for the rest of the app.

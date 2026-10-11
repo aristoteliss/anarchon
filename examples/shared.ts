@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * Shared by the examples: the backend comes from the environment, so every example runs on any of them.
  *

@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import type { Logger, SchedulerEvents } from '../types';
 
 type Subscribe = <E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEvents[E]) => void) => unknown;

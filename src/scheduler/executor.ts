@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import type { RunReason, RunRecord, StoredResult } from '../types';
 import { describeError } from '../util';
 import type { SchedulerCore } from './core';

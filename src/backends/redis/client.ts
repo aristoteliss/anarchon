@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * The only thing the Redis/Valkey backend needs from a client: send one raw command and get the reply.
  * Any client can be adapted to this, so the package is not tied to one client library.

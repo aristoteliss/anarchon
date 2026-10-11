@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /** What is specific to Redis and Valkey: server versions, client libraries and strategy limits. */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

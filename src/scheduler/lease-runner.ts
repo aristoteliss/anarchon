@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import { randomUUID } from 'node:crypto';
 
 import type { ClaimOutcome, RunReason, RunRecord, RunStore, SkipEvent } from '../types';

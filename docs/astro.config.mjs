@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 import mermaid from 'astro-mermaid';

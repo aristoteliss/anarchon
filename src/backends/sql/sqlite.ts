@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import { sleep } from '../../util';
 import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlRow, type SqlValue } from './base';
 

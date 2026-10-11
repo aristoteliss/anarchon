@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * For every backend: starts three separate processes with the same jobs and checks that every
  * scheduled run happened exactly once, that the work was spread, and that history names the

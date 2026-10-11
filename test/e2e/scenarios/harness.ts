@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * Runs real processes against Redis and breaks them on purpose (kill -9, pause, restart all),
  * then reports what happened to each scheduled run.

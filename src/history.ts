@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import type { RunReason, RunRecord, RunStatus, StoredResult } from './types';
 
 /** What every backend stores when a run is claimed. */

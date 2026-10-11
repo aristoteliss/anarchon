@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 export type { NatsBackendOptions, NatsConnectionLike } from './backends/nats';
 export { NatsBackend } from './backends/nats';
 export type { RabbitMQBackendOptions, RabbitMQConnectionLike } from './backends/rabbitmq';

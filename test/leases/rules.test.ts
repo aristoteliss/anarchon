@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * The lease rules, step by step, on every backend that has leases: Redis 'lease' (Redis 8.6, 7.0,
  * Valkey), Postgres, and SQLite with each driver. The scheduler on top of them is in scheduler.test.ts.

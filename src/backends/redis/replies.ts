@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * Reads Redis/Valkey replies the same way whatever the client or protocol:
  * RESP2 flat arrays, RESP3 objects/Maps, or Valkey GLIDE's `{ key, value }` records.

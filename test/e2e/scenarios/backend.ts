@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /** The backend a scenario runs on: a Redis strategy ('lease', 'stream-id'...), 'postgres', 'sqlite' or 'libsql' (a server). */
 import { type Backend, RedisBackend } from '../../../src';
 import { LIBSQL_URL, makeBackend, POSTGRES_URL, SQLITE_DIR } from '../../support';

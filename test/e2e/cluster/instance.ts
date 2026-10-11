@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * One "service instance" for the cluster test. The test starts three of these at once with the same
  * jobs and the same backend, like three copies of one app.

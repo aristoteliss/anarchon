@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * One instance for the failure scenarios: a single job ("job") that runs for jobMs every intervalMs.
  * Every event is logged as a JSON line with a timestamp so the test can rebuild what happened.

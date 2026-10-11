@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import { mergeRuns, parseJson, toClaim, toResult } from '../../history';
 import type { Backend, ClaimInput, IdmpOptions, JobLimits, RedisStrategyName, RunRecord, RunStore, StoredResult } from '../../types';
 import { intInRange, positiveInt, versionAtLeast } from '../../util';

@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 // Packs anarchon, installs the tarball into a fresh consumer outside the checkout, and checks
 // that it is complete, type-checks, and runs a job through require(), import and Bun.
 // Run through `pnpm test:release`, which rebuilds dist first.

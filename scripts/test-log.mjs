@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 // Reads test-run.log, written by `pnpm test:all:full`.
 //   node scripts/test-log.mjs review   summary and verdict
 //   node scripts/test-log.mjs fails    failures and their stack traces only

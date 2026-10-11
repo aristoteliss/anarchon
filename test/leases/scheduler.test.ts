@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /** The scheduler on every backend with leases: hand-over on stop(), takeover, catch-up and backups. */
 import assert from 'node:assert/strict';
 import { getEventListeners } from 'node:events';

@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import { mergeRuns, parseJson, toResult } from '../../history';
 import type { ClaimOutcome, RunClaim, RunRecord, RunStore, StoredResult } from '../../types';
 import { errorMessage } from '../../util';

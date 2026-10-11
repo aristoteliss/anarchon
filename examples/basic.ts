@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * Start this file 3 times (3 terminals) to see it work like 3 instances of one service:
  *

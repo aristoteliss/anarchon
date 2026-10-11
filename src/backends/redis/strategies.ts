@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import type { ClaimInput, IdmpOptions, RedisStrategyName } from '../../types';
 import { errorMessage } from '../../util';
 import type { RedisCommandClient } from './client';

@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import assert from 'node:assert/strict';
 import { Redis } from 'ioredis';
 import { beforeAll, test } from 'vitest';

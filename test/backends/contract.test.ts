@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * The contract every backend must meet, run against real servers:
  * one winner per run, retry-safe claims, and history that names the winner.

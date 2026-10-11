@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * Every job option and every event, on one instance. Runs for 30 s, then prints what happened.
  *

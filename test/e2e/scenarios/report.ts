@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * Runs every failure scenario for the given strategies and prints what happened.
  *

@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * An Express API on top of the scheduler: list the jobs, read their history, run one now.
  *

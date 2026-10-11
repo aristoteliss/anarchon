@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 import type { SchedulerCore } from './core';
 import { type Job, randomJitter } from './job';
 

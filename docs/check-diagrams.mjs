@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 // Parses every ```mermaid block in the docs, so a diagram with a syntax error fails here instead of
 // rendering as an error box in the browser. Run with: pnpm check:diagrams
 import { readdirSync, readFileSync } from 'node:fs';

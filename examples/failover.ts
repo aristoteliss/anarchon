@@ -1,3 +1,5 @@
+/* Copyright (C) 2026-present Aristotelis — see repository license. */
+
 /**
  * Failover, in one process and with no server: three instances share one job, and the instance
  * running it is taken away twice.
