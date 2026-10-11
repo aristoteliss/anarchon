@@ -61,7 +61,33 @@ Yes. They are scheduled at once.
 
 ### How do I pass data to a job?
 
-Handlers are ordinary functions: close over what they need. There is no per-run payload, because a run is defined by its time, not by a message.
+Handlers are ordinary functions, so they can close over what they need. For data you decide where the job or the scheduler is defined, such as a permission, a tenant or a fresh token, give a [`data`](../../guides/run-data/) and read it as `ctx.data`. There is no per-run payload from another instance, because a run is defined by its time, not by a message.
+
+### Can I declare jobs with decorators, as in NestJS?
+
+Yes, with `@Every`, `@Cron` and `@At` on the methods of any class, with or without a framework. An object adds its jobs to the scheduler when it is created, so there is nothing to register. See [Decorators](../../guides/decorators/).
+
+### Do I have to create a scheduler to use the decorators?
+
+No. Give the settings once with `Scheduler.configure({ redis: url, autoStart: true })`, and the scheduler is created and started when the first decorated object is. A backend must be in the settings; none is assumed. See [Decorators](../../guides/decorators/#two-ways-to-have-a-scheduler).
+
+### Can different jobs use different schedulers?
+
+Yes. A decorator names one with `{ scheduler: 'billing' }`, and jobs with the same name share it. See [Choosing a scheduler for a job](../../guides/decorators/#choosing-a-scheduler-for-a-job).
+
+### Can I have several objects of one decorated class?
+
+Yes, each with a prefix of its own: `scheduler.register(new Reports(), { prefix: 'acme:' })`. See [Several objects of one class](../../guides/decorators/#several-objects-of-one-class).
+
+### Why does my decorated job never run?
+
+Look for a warning that starts with `[anarchon] @Every ... is not scheduled` in the output of `start()`: the scheduler gives one for every declared job that no object has added, and it says why.
+
+Most often the project compiles with legacy decorators (`"experimentalDecorators": true`) and the class has no `@Scheduled()`. In that style a method decorator can't act when an object is created, so add `@Scheduled()` to the class or call `scheduler.register(object)`. The other cause is that no object of the class is created at all. `scheduler.jobs()` lists what was added.
+
+### Why is there no `@Timeout` decorator?
+
+A timeout counts from the start of each process, so every instance would compute a different time and run the job. `@At` takes an absolute time that all instances agree on.
 
 ## Timing
 

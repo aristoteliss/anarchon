@@ -24,9 +24,11 @@ const sidebar = [
     translations: { el: 'Οδηγοί' },
     items: [
       'guides/defining-jobs',
+      'guides/decorators',
       'guides/job-options',
       'guides/scheduler-options',
       'guides/writing-handlers',
+      'guides/run-data',
       'guides/lifecycle',
       'guides/events-and-logging',
       'guides/history',
@@ -76,6 +78,7 @@ const sidebar = [
     translations: { el: 'Αναφορά' },
     items: [
       'reference/scheduler',
+      'reference/decorators',
       'reference/options',
       'reference/events',
       'reference/types',

@@ -10,12 +10,12 @@ import { Scheduler } from 'anarchon';
 ## Κατασκευαστής (Constructor)
 
 ```ts
-new Scheduler(options?: SchedulerOptions)
+new Scheduler(options: SchedulerOptions)
 ```
 
-Δημιουργεί έναν scheduler. Τίποτα δεν συνδέεται μέχρι το `start()`. Δείτε [Επιλογές](../options/#επιλογές-scheduler).
+Δημιουργεί έναν scheduler. Τίποτα δεν συνδέεται μέχρι το `start()`. Ένα από τα `backend` και `redis` είναι υποχρεωτικό: δεν υποτίθεται κανένα store. Δείτε [Επιλογές](../options/#επιλογές-scheduler).
 
-**Ρίχνει** `TypeError` όταν παρέχονται ταυτόχρονα το `backend` και μια συντόμευση Redis, ή το `instanceId` είναι κενό· `RangeError` όταν ένας αριθμός είναι εκτός ορίων, ή το `heartbeatMs` δεν είναι μικρότερο από το μισό του `leaseMs`.
+**Ρίχνει** `TypeError` όταν δεν δίνεται ούτε `backend` ούτε `redis`, όταν παρέχονται ταυτόχρονα το `backend` και μια συντόμευση Redis, ή το `instanceId` είναι κενό· `RangeError` όταν ένας αριθμός είναι εκτός ορίων, ή το `heartbeatMs` δεν είναι μικρότερο από το μισό του `leaseMs`.
 
 ## Ιδιότητες
 
@@ -23,6 +23,7 @@ new Scheduler(options?: SchedulerOptions)
 | --- | --- | --- |
 | `instanceId` | `string` | Το όνομα αυτού του instance στο ιστορικό και στα συμβάντα |
 | `backend` | `Backend` | Το backend σε χρήση. Το `backend.name` είναι π.χ. `'redis:lease'` ή `'postgres'` |
+| `name` | `string \| undefined` | Το όνομα με το οποίο οι εργασίες με decorators επιλέγουν αυτόν τον scheduler, αν έχει |
 
 ## Ορισμός εργασιών
 
@@ -58,6 +59,20 @@ at(name: string, when: Date | number | string, handler: JobHandler, options?: Jo
 
 **Ρίχνει** `RangeError` για μη έγκυρη ημερομηνία.
 
+### `register(target, options?)`
+
+```ts
+register(target: object, options?: { prefix?: string; defaults?: JobOptions & { timezone?: string } }): this
+```
+
+Τοποθετεί σε αυτόν τον scheduler κάθε εργασία που έχει δηλωθεί με τα `@Cron`, `@Every` και `@At` στην κλάση του αντικειμένου, όποιον scheduler κι αν ονομάζει κάθε decorator. Κάθε εργασία καλεί τη μέθοδό της πάνω σε αυτό το αντικείμενο και ονομάζεται `Class-method`, εκτός αν ο decorator δίνει όνομα. Προσθέτει όλες τις εργασίες ή καμία.
+
+Ένα αντικείμενο με decorators προσθέτει μόνο του τις εργασίες του όταν δημιουργείται, οπότε το καλείτε για να αποφασίσετε κάτι για ένα αντικείμενο: το `prefix` μπαίνει μπροστά από κάθε όνομα εργασίας, ώστε να συνυπάρχουν πολλά αντικείμενα μιας κλάσης, και τα `defaults` είναι επιλογές εργασίας για κάθε εργασία του αντικειμένου. Έτσι προστίθεται επίσης ένα αντικείμενο με legacy decorators σε κλάση χωρίς `@Scheduled()`. Η καταχώριση ενός αντικειμένου ξανά με επιλογές αντικαθιστά τις εργασίες του· χωρίς επιλογές δεν αλλάζει τίποτα.
+
+**Ρίχνει** `TypeError` εάν η κλάση δεν έχει μεθόδους με decorators· διαφορετικά ό,τι ρίχνουν τα `every()`, `cron()` και `at()`.
+
+Οδηγός: [Decorators](../../guides/decorators/#πολλά-αντικείμενα-μιας-κλάσης). Αναφορά: [Decorators](../decorators/).
+
 ### `remove(name)`
 
 ```ts
@@ -90,17 +105,40 @@ stop(options?: { timeoutMs?: number }): Promise<void>
 
 Σταματά τον προγραμματισμό, ακυρώνει το `ctx.signal` των εκτελούμενων εργασιών, περιμένει έως και `timeoutMs` (προεπιλογή 30000) για αυτές, και κλείνει τις συνδέσεις που άνοιξε το backend. Η εκ νέου κλήση του κατά τη διάρκεια τερματισμού επιστρέφει το ίδιο promise.
 
-### `runNow(name)`
+### `runNow(name, options?)`
 
 ```ts
-runNow(name: string): Promise<RunRecord>
+runNow(name: string, options?: { data?: JobData }): Promise<RunRecord>
 ```
 
-Εκτελεί μια εργασία τώρα σε αυτό το instance. Χωρίς αποδιπλασιασμό, δεν επιχειρείται ποτέ ξανά, καταγράφεται με `manual: true`. Επιλύεται με την εγγραφή της εκτέλεσης όταν ολοκληρωθεί ο handler.
+Εκτελεί μια εργασία τώρα σε αυτό το instance. Χωρίς αποδιπλασιασμό, δεν επιχειρείται ποτέ ξανά, καταγράφεται με `manual: true`. Επιλύεται με την εγγραφή της εκτέλεσης όταν ολοκληρωθεί ο handler. Το `data` είναι δεδομένα για αυτή τη μία εκτέλεση, πάνω από της εργασίας και του scheduler: δείτε [Δεδομένα εκτέλεσης](../../guides/run-data/).
 
 **Ρίχνει** `Error` εάν η εργασία δεν είναι καταχωρημένη εδώ ή ο scheduler δεν έχει ξεκινήσει.
 
 Οδηγός: [Κύκλος ζωής](../../guides/lifecycle/).
+
+### `setData(data)`
+
+```ts
+setData(data: JobData | undefined): this
+```
+
+Αντικαθιστά το `data` του scheduler, τα δεδομένα που δίνονται σε κάθε handler ως `ctx.data` κάτω από τα δεδομένα κάθε εργασίας. Οι εκτελέσεις που ξεκινούν μετά παίρνουν τα νέα· όσες βρίσκονται σε εξέλιξη κρατούν τα δικά τους. Το `undefined` το αφαιρεί.
+
+Οδηγός: [Δεδομένα εκτέλεσης](../../guides/run-data/).
+
+## Schedulers για εργασίες με decorators
+
+Στατικές μέθοδοι που δημιουργούν, βρίσκουν, ξεκινούν και σταματούν τους schedulers στους οποίους πηγαίνουν οι εργασίες με decorators. Περιγράφονται στην [αναφορά των Decorators](../decorators/#schedulers-για-εργασίες-με-decorators).
+
+| Μέθοδος | Τι κάνει |
+| --- | --- |
+| `Scheduler.configure(options)`, `Scheduler.configure(name, options)` | Αποθηκεύει τις ρυθμίσεις από τις οποίες δημιουργείται ένας scheduler όταν τον χρειαστεί μια εργασία. Το backend είναι υποχρεωτικό |
+| `Scheduler.get(name?)` | Ο προεπιλεγμένος scheduler ή ένας ονομασμένος, που δημιουργείται από τις ρυθμίσεις του αν δεν υπάρχει |
+| `Scheduler.all()` | Ο προεπιλεγμένος scheduler και κάθε ονομασμένος |
+| `Scheduler.startAll()`, `Scheduler.stopAll(options?)` | Ξεκινούν ή σταματούν όλους |
+| `Scheduler.setDefault(scheduler)` | Επιλέγει τον προεπιλεγμένο scheduler |
+| `Scheduler.reset()` | Ξεχνά schedulers, ονόματα και ρυθμίσεις. Για tests |
 
 ## Ανάγνωση
 
@@ -166,6 +204,8 @@ off<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEven
 | `NatsBackend` | class | [NATS](../../backends/nats/) |
 | `SqlBackend` | αφηρημένη κλάση (abstract class) | Βάση των δύο SQL backends |
 | `LeaseStore` | class | Η υλοποίηση μίσθωσης (lease) του Redis |
+| `Cron`, `Every`, `At` | decorators | [Δήλωση εργασιών στις μεθόδους μιας κλάσης](../../guides/decorators/) |
+| `Scheduled` | decorator | Για κλάσεις που γίνονται compile με [legacy decorators](../../guides/decorators/#οι-legacy-decorators-χρειάζονται-το-scheduled) |
 | `parseDuration`, `formatDuration` | functions | `'1h30m'` σε ms, και αντίστροφα |
 | `fromIORedis`, `fromNodeRedis`, `fromValkeyGlide` | functions | Προσαρμογή ενός Redis client σε `{ send }` |
 | `fromPgPool`, `fromPgClient`, `fromPostgresJs` | functions | Προσαρμογή ενός Postgres client σε `{ all, transaction }` |

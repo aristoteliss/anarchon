@@ -151,11 +151,17 @@ npx tsx examples/walkthrough.ts
 
 | Παράδειγμα | Τι δείχνει |
 | --- | --- |
-| `examples/failover.ts` | Τρία instances: ομαλή παράδοση (hand-over), και στη συνέχεια κατάρρευση και ανάληψη (takeover) |
-| `examples/options-and-events.ts` | Κάθε επιλογή εργασίας και κάθε συμβάν |
-| `examples/http-api.ts` | Το [Express API](../express/) |
-| `examples/own-clients.ts` | Χρήση του δικού σας Redis client ή Postgres pool |
-| `examples/basic.ts` | Εκτέλεση σε τρία τερματικά και τερματισμός του ενός |
+| [`examples/failover.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/failover.ts) | Τρία instances: ομαλή παράδοση (hand-over), και στη συνέχεια κατάρρευση και ανάληψη (takeover) |
+| [`examples/options-and-events.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/options-and-events.ts) | Κάθε επιλογή εργασίας και κάθε συμβάν |
+| [`examples/http-api.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/http-api.ts) | Το [Express API](../express/) |
+| [`examples/own-clients.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/own-clients.ts) | Χρήση του δικού σας Redis client ή Postgres pool |
+| [`examples/basic.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/basic.ts) | Εκτέλεση σε τρία τερματικά και τερματισμός του ενός |
+| [`examples/decorators.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/decorators.ts) | Εργασίες που δηλώνονται με τα [`@Every`, `@Cron` και `@At`](../../guides/decorators/) σε μια κλάση, με standard decorators |
+| [`examples/decorators-legacy.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/decorators-legacy.ts) | Το ίδιο με legacy decorators (`experimentalDecorators`): `@Scheduled()` και `register()` |
+| [`examples/decorators-startup.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/decorators-startup.ts) | Οι τρεις τρόποι εκκίνησης εργασιών με decorators: `autoStart`, `Scheduler.startAll()`, ή scheduler που δημιουργείται με το χέρι |
+| [`examples/decorators-options.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/decorators-options.ts) | Schedulers που δημιουργούνται από ρυθμίσεις, scheduler ανά εργασία, πολλά αντικείμενα μιας κλάσης, και δεδομένα εκτέλεσης |
+| [`examples/run-data.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/run-data.ts) | [Δεδομένα εκτέλεσης](../../guides/run-data/): του scheduler, μιας εργασίας, μια συνάρτηση που διαβάζεται σε κάθε εκτέλεση, `runNow()` και `setData()` |
+| [`examples/nestjs`](https://github.com/aristoteliss/anarchon/tree/main/examples/nestjs) | Μια μικρή εφαρμογή [NestJS](../nestjs/#δήλωση-εργασιών-με-decorators) της οποίας οι providers δηλώνουν εργασίες με decorators. Ελεγμένη σε NestJS 11 και 12 |
 
 ## Παρακολούθηση της λειτουργίας ενός instance
 

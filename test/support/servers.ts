@@ -1,13 +1,13 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-/** Where the test servers are, and whether each one answers. The default ports are docker-compose.test.yml's. */
+/** Where the test servers are, and whether each one answers. The default ports are test/docker-compose.test.yml's. */
 import { tmpdir } from 'node:os';
 
 import { createClient as createLibsqlClient } from '@libsql/client';
 import { Redis } from 'ioredis';
 import { Pool } from 'pg';
 
-/** Redis 8.6+ (the only server with IDMP). The default ports below are docker-compose.test.yml's. */
+/** Redis 8.6+ (the only server with IDMP). The default ports below are test/docker-compose.test.yml's. */
 export const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6381';
 /** Optional older Redis (e.g. 7.x). */
 export const REDIS_OLD_URL = process.env.REDIS_OLD_URL ?? 'redis://localhost:6380';

@@ -14,7 +14,7 @@ import type { JobContext, JobHandler, RunRecord, SchedulerOptions } from 'anarch
 ### `JobHandler`
 
 ```ts
-type JobHandler = (ctx: JobContext) => unknown;
+type JobHandler<Data = unknown> = (ctx: JobContext<Data>) => unknown;
 ```
 
 Η συνάρτηση που εκτελεί μια εργασία. Σύγχρονη ή ασύγχρονη. Η επιστροφή τιμής σημαίνει επιτυχία· η ρίψη σφάλματος σημαίνει αποτυχία, ή `interrupted` όταν το `ctx.signal` ακυρώθηκε προηγουμένως από το `stop()` ή από μια ανάληψη.
@@ -22,12 +22,13 @@ type JobHandler = (ctx: JobContext) => unknown;
 ### `JobContext`
 
 ```ts
-interface JobContext {
+interface JobContext<Data = unknown> {
   name: string;
   slot: number;
   scheduledAt: Date;
   instanceId: string;
   manual: boolean;
+  data: Data;
   signal: AbortSignal;
   attempt: number;
   reason: RunReason;
@@ -35,6 +36,15 @@ interface JobContext {
 ```
 
 Οδηγός: [Συγγραφή handlers](../../guides/writing-handlers/#το-context-ctx).
+
+### `JobData`, `JobDataProvider`
+
+```ts
+type JobData = object | string | number | boolean | null | JobDataProvider;
+type JobDataProvider = (run: Omit<JobContext, 'data'>) => unknown; // μπορεί να επιστρέψει promise
+```
+
+Αυτό που δέχεται η επιλογή `data` ενός scheduler, μιας εργασίας και του `runNow()`: μια τιμή, ή μια συνάρτηση που καλείται όταν ξεκινά μια εκτέλεση. Οδηγός: [Δεδομένα εκτέλεσης](../../guides/run-data/).
 
 ### `RunReason`
 
@@ -73,6 +83,35 @@ interface CronJobOptions extends JobOptions {
 ```
 
 Δείτε [Επιλογές](../options/#επιλογές-εργασιών).
+
+### Τύποι των decorators
+
+```ts
+type DecoratedJobOptions<Options> = Options & {
+  name?: string;                  // προεπιλογή: Class-method
+  scheduler?: string | Scheduler; // προεπιλογή: ο προεπιλεγμένος scheduler
+};
+
+interface RegisterOptions {
+  prefix?: string;
+  defaults?: JobOptions & { timezone?: string };
+}
+
+interface ConfigureOptions extends Omit<SchedulerOptions, 'backend' | 'name'> {
+  backend?: Backend | ((name: string) => Backend);
+  autoStart?: boolean;
+}
+```
+
+| Τύπος | Τι είναι |
+| --- | --- |
+| `DecoratedJobOptions` | Αυτό που δέχονται τα `@Every`, `@Cron` και `@At` όταν το όνομα δεν είναι το πρώτο όρισμα |
+| `JobPlacement` | Το `{ scheduler? }`, το μέρος του που δέχεται και η μορφή με το όνομα πρώτο |
+| `JobDecorator`, `ScheduledDecorator` | Αυτό που επιστρέφουν οι decorators μεθόδων και το `@Scheduled()`: decorators τόσο στο standard όσο και στο legacy στυλ |
+| `RegisterOptions` | Οι επιλογές του `scheduler.register()` |
+| `ConfigureOptions` | Οι ρυθμίσεις που δέχεται το `Scheduler.configure()` |
+
+Δείτε [Decorators](../decorators/).
 
 ### `JobInfo`
 

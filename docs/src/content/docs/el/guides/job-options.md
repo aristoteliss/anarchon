@@ -26,6 +26,7 @@ scheduler.every('report', '35m', buildReport, {
 | [`historyTtlMs`](#historysize-και-historyttlms) | του scheduler (κανένα) | όχι | Για πόσο χρονικό διάστημα διατηρούνται |
 | `offsetMs` | `0` | όχι | Μόνο για `every()`: [μετατοπίζει το πλέγμα](../defining-jobs/#μετατόπιση-του-πλέγματος-offsetms) |
 | `timezone` | του scheduler | όχι | Μόνο για `cron()`: [τη ζώνη ώρας](../defining-jobs/#ζώνες-ώρας) |
+| [`data`](../run-data/) | κανένα | όχι | Δεδομένα για τις εκτελέσεις της εργασίας, που διαβάζονται στον handler ως `ctx.data` |
 
 «Του scheduler» σημαίνει την επιλογή με το ίδιο όνομα στο `new Scheduler()`. Δείτε τις [Επιλογές scheduler](../scheduler-options/).
 

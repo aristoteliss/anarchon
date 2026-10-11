@@ -5,3 +5,20 @@ anarchon.db*
 coverage/
 data/
 .astro/
+test/test-run.log
+
+# local settings and secrets: values belong in the environment, never in the repository
+.env
+.env.*
+!.env.example
+
+# databases written by the examples and by local runs
+*.db
+*.db-shm
+*.db-wal
+
+# packed tarballs, build caches and editor or system files
+*.tgz
+*.tsbuildinfo
+.DS_Store
+.idea/

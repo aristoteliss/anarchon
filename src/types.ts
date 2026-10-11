@@ -59,7 +59,7 @@ export interface Logger {
  * });
  * ```
  */
-export interface JobContext {
+export interface JobContext<Data = unknown> {
   /** Job name. */
   name: string;
   /** Scheduled run time in ms since epoch. Same value on every instance. */
@@ -70,6 +70,12 @@ export interface JobContext {
   instanceId: string;
   /** true when started with `runNow()`. */
   manual: boolean;
+  /**
+   * The data you gave for this run: the scheduler's `data`, then the job's, then the one passed
+   * to `runNow()`, each on top of the one before. `undefined` when none was given. Name its type in
+   * your handler: `async (ctx: JobContext<{ tenant: string }>) => ...`.
+   */
+  data: Data;
   /**
    * Aborted when `stop()` is called, when the run times out, or (lease strategy) when this instance
    * lost the run to a backup because it stopped renewing its lease. Check it before side effects.
@@ -107,7 +113,21 @@ export type RunReason = 'scheduled' | 'manual' | 'catch-up' | 'takeover';
  * scheduler.every('sync', '10s', sync);
  * ```
  */
-export type JobHandler = (ctx: JobContext) => unknown;
+export type JobHandler<Data = unknown> = (ctx: JobContext<Data>) => unknown;
+
+/**
+ * Gives a run its data when the run starts, so the value can be read at that moment: a fresh
+ * token, the permissions as they are now, a tenant's current settings. It may be async. If it
+ * throws, the run fails with that error, like a handler that throws.
+ */
+export type JobDataProvider = (run: Omit<JobContext, 'data'>) => unknown;
+
+/**
+ * Data for a job's runs, handed to the handler as `ctx.data`: a value, or a function that
+ * returns it when a run starts. A function is always called; to pass a function as the data, put
+ * it in an object.
+ */
+export type JobData = object | string | number | boolean | null | JobDataProvider;
 
 /**
  * Per-job settings, for `cron()`, `every()` and `at()`. Each one falls back to the scheduler's
@@ -176,6 +196,19 @@ export interface JobOptions {
    * ```
    */
   historyTtlMs?: number;
+  /**
+   * Data for this job's runs, handed to the handler as `ctx.data`: what the job needs and can't
+   * take from its surroundings, such as the permission it runs with or the user it runs for. It
+   * goes on top of the scheduler's `data`: two plain objects are merged, with this job's keys
+   * winning, and any other value replaces the scheduler's.
+   *
+   * @example
+   * ```ts
+   * scheduler.every('export', '1h', exportData, { data: { permission: 'reports:export' } });
+   * scheduler.every('sync', '5m', sync, { data: async () => ({ token: await freshToken() }) }); // read at each run
+   * ```
+   */
+  data?: JobData;
   /**
    * Lease strategy: what to do when a run is due while the previous one is still running somewhere.
    * 'skip' (default) skips it, with a 'skip' event of reason 'overlap'; skipped runs are not queued.
@@ -486,7 +519,7 @@ export interface Backend {
 // ------------------------------------------------------------------ scheduler
 
 /**
- * Options of `new Scheduler()`. All optional: `new Scheduler()` uses Redis on localhost:6379.
+ * Options of `new Scheduler()`. One of `backend` and `redis` is required: no store is assumed.
  *
  * Pass either `backend`, or the Redis shortcuts (`redis`, `strategy`, `prefix`, `idmp`), not both.
  * Give every instance of a service the same options, apart from `instanceId`.
@@ -516,8 +549,31 @@ export interface Backend {
  */
 export interface SchedulerOptions {
   /**
+   * A name for this scheduler, unique in the process. Jobs declared with decorators choose a
+   * scheduler by it: `@Cron('close', '0 6 1 * *', { scheduler: 'billing' })`. A scheduler without a
+   * name can be the default one, which takes the decorated jobs that name none.
+   *
+   * @example
+   * ```ts
+   * new Scheduler({ name: 'billing', backend: new PostgresBackend({ connection: pool }) });
+   * ```
+   */
+  name?: string;
+  /**
+   * Data for the runs of every job of this scheduler, handed to each handler as `ctx.data`: a
+   * value, or a function called when a run starts. A job's own `data` goes on top of it, and
+   * `setData()` replaces it while the scheduler runs.
+   *
+   * @example
+   * ```ts
+   * new Scheduler({ redis, data: { tenant: 'acme', db } });
+   * new Scheduler({ redis, data: async (run) => ({ permissions: await permissionsFor(run.name) }) });
+   * ```
+   */
+  data?: JobData;
+  /**
    * Where runs are claimed and recorded. Use it for every store but Redis, or for Redis settings the
-   * shortcuts below don't cover. Default: a RedisBackend built from `redis`, `strategy`, `prefix`
+   * shortcuts below don't cover. Without it, a RedisBackend is built from `redis`, `strategy`, `prefix`
    * and `idmp`. Passing `backend` together with any of those four throws.
    *
    * @example
@@ -530,7 +586,7 @@ export interface SchedulerOptions {
   backend?: Backend;
   /**
    * Shortcut for the default Redis/Valkey backend: where the server is. A URL, `{ host, port, ... }`,
-   * or a client your app already has (never closed by stop()). Default localhost:6379.
+   * or a client your app already has (never closed by stop()). Required when `backend` isn't given.
    *
    * @example
    * ```ts

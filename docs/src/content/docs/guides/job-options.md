@@ -26,6 +26,7 @@ scheduler.every('report', '35m', buildReport, {
 | [`historyTtlMs`](#historysize-and-historyttlms) | scheduler's (none) | no | How long to remember them |
 | `offsetMs` | `0` | no | `every()` only: [shifts the grid](../defining-jobs/#shifting-the-grid-offsetms) |
 | `timezone` | scheduler's | no | `cron()` only: [the time zone](../defining-jobs/#time-zones) |
+| [`data`](../run-data/) | none | no | Data for the job's runs, read in the handler as `ctx.data` |
 
 "Scheduler's" means the option of the same name on `new Scheduler()`. See [Scheduler options](../scheduler-options/).
 

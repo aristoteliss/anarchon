@@ -157,4 +157,5 @@ const scheduler = new Scheduler({
 
 - [Core concepts](../core-concepts/): slot, claim, jitter and lease, defined
 - [Defining jobs](../../guides/defining-jobs/): cron expressions, intervals and one-off jobs
+- [Decorators](../../guides/decorators/): declare the same jobs on the methods of a class
 - [Writing handlers](../../guides/writing-handlers/): what `ctx` holds and why `ctx.signal` matters

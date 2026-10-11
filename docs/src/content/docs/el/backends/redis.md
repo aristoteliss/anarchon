@@ -8,7 +8,7 @@ description: Το προεπιλεγμένο backend, οι τέσσερις στ
 ```ts
 import { Scheduler } from 'anarchon';
 
-new Scheduler();                                           // redis://localhost:6379
+new Scheduler({ redis: 'redis://localhost:6379' });
 new Scheduler({ redis: 'redis://cache.internal:6379' });
 new Scheduler({ redis: { host: 'localhost', port: 6390 } }); // Valkey
 ```
@@ -41,7 +41,7 @@ const scheduler = new Scheduler({ redis }); // το stop() τον αφήνει �
 
 | Επιλογή | Προεπιλογή | Σημασία |
 | --- | --- | --- |
-| `redis` | `localhost:6379` | Σύνδεση ή client |
+| `redis` | none | Σύνδεση ή client. Υποχρεωτικό, εκτός αν δημιουργείτε εσείς το backend |
 | `strategy` | `'lease'` | Πώς επιλέγεται ένας νικητής (παρακάτω) |
 | `prefix` | `'cron:'` | Πρόθεμα κάθε κλειδιού |
 | `idmp` | `{ durationSec: 300, maxSize: 1000 }` | Μόνο για τη στρατηγική `'idmp'` |

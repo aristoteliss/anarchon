@@ -15,10 +15,8 @@ beforeAll(async () => {
   assert.ok(main, `No Redis at ${REDIS_URL}`);
 });
 
-test('defaults to localhost:6379 and reports jobs and next runs', async (t) => {
-  // The library's own default, not the test Redis: skipped when nothing listens there.
-  if (!(await probeRedis('redis://localhost:6379'))) return t.skip('nothing at redis://localhost:6379');
-  const scheduler = new Scheduler({ prefix: uniquePrefix('defaults') });
+test('connects with the redis shortcut and reports jobs and next runs', async () => {
+  const scheduler = new Scheduler({ redis: REDIS_URL, prefix: uniquePrefix('shortcut') });
   scheduler.every('sync', '10s', () => {}).cron('report', '0 */2 * * *', () => {}, { timezone: 'Europe/Athens' });
   await scheduler.start();
   try {
@@ -170,7 +168,7 @@ test('validation errors are clear', () => {
   const idmp = new Scheduler({ redis: REDIS_URL, strategy: 'idmp', idmp: { durationSec: 30 } });
   assert.throws(() => idmp.every('x', '10m', () => {}), /shorter than how long redis:idmp remembers a run/);
   assert.throws(() => new Scheduler({ backend: new RedisBackend(), redis: REDIS_URL }), /either backend/);
-  assert.throws(() => new Scheduler({ strategy: 'nope' as never }), /Unknown strategy/);
+  assert.throws(() => new Scheduler({ redis: REDIS_URL, strategy: 'nope' as never }), /Unknown strategy/);
 });
 
 test('idmp scheduler refuses to start on Redis < 8.6, and works on 8.6+', async (t) => {

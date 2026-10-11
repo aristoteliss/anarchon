@@ -7,16 +7,18 @@ All options at a glance. Each links to the guide that explains it.
 
 ## Scheduler options
 
-`new Scheduler(options)`. Guide: [Scheduler options](../../guides/scheduler-options/).
+`new Scheduler(options)`. One of `backend` and `redis` is required: no store is assumed. Guide: [Scheduler options](../../guides/scheduler-options/).
 
 | Option | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `backend` | `Backend` | a `RedisBackend` | Where runs are claimed and recorded. Not together with the Redis shortcuts |
-| `redis` | URL, options or client | `localhost:6379` | Redis shortcut: the connection |
+| `backend` | `Backend` | none | Where runs are claimed and recorded. Required unless `redis` is given. Not together with the Redis shortcuts |
+| `redis` | URL, options or client | none | Redis shortcut: the connection. Required unless `backend` is given |
 | `strategy` | `'lease' \| 'stream-id' \| 'idmp' \| 'script'` | `'lease'` | Redis shortcut: how one winner is picked |
 | `prefix` | `string` | `'cron:'` | Redis shortcut: key prefix |
 | `idmp` | `{ durationSec?, maxSize? }` | `{ 300, 1000 }` | Redis shortcut: `'idmp'` settings |
 | `instanceId` | `string` | `hostname:pid` | Name of this instance in history |
+| `name` | `string` | none | Name decorated jobs choose this scheduler by |
+| `data` | value or function | none | Data for the runs of every job, read as `ctx.data` |
 | `jitterMs` | `number` | `2000` | Default maximum random delay before claiming |
 | `maxLateMs` | `number` | `60000` | Default lateness limit |
 | `historySize` | `number` | `1000` | Default runs kept per job |
@@ -42,6 +44,7 @@ The last argument of `every()`, `cron()` and `at()`. Guide: [Job options](../../
 | `catchUpMs` | `number` | `300000` | yes | On start, run the latest slot if missed and due less than this ago. `0` = never |
 | `historySize` | `number` | scheduler's | | Runs kept for this job |
 | `historyTtlMs` | `number` | scheduler's | | Maximum age of this job's history |
+| `data` | value or function | none | | Data for this job's runs, read as `ctx.data`. On top of the scheduler's |
 | `offsetMs` | `number` | `0` | | `every()` only: shifts the grid |
 | `timezone` | `string` | scheduler's | | `cron()` only: IANA time zone |
 
@@ -54,6 +57,33 @@ The last argument of `every()`, `cron()` and `at()`. Guide: [Job options](../../
 | `jitterMs + maxLateMs` < how long the backend remembers a run | The job is added |
 | `heartbeatMs` < half of `leaseMs` | The scheduler is created |
 | Interval of `every()` at least 1 second | The job is added |
+
+## Decorator options
+
+The options of `@Every`, `@Cron` and `@At` are the job options above, plus these. Guide: [Decorators](../../guides/decorators/).
+
+| Option | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `name` | `string` | `Class-method` | The job's name, when it isn't the first argument |
+| `scheduler` | `string` or `Scheduler` | the default scheduler | The scheduler the job goes to. A named one is created from its settings if it doesn't exist |
+
+## `register()` options
+
+`scheduler.register(object, options)`.
+
+| Option | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `prefix` | `string` | none | Put in front of every job name of the object |
+| `defaults` | job options, with `timezone` | none | Job options for every job of the object. A decorator's own options win |
+
+## `Scheduler.configure()` options
+
+The scheduler options above, with these differences. Reference: [Decorators](../decorators/#schedulerconfigureoptions).
+
+| Option | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `backend` | `Backend` or `(name) => Backend` | required unless `redis` is given | The backend, or a function that returns one for a scheduler's name |
+| `autoStart` | `boolean` | `false` | Start the scheduler when it is created |
 
 ## `stop()` options
 

@@ -33,7 +33,7 @@ const BACKENDS = [
 ];
 
 // Every scenario has its own keys, tables and processes, and mostly waits on the clock, so they run
-// side by side (up to maxConcurrency in vitest.config.mts).
+// side by side (up to maxConcurrency in test/vitest.config.mts).
 describe.concurrent('failure scenarios', () => {
   for (const backend of BACKENDS) {
     const config = (name: string): ScenarioConfig => ({

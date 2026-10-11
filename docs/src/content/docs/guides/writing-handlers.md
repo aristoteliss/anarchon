@@ -34,6 +34,7 @@ Every handler receives one argument.
 | `reason` | `string` | Why this run started: `'scheduled'`, `'manual'`, `'catch-up'` or `'takeover'` |
 | `manual` | `boolean` | `true` when started with `runNow()` |
 | `signal` | `AbortSignal` | Aborts when the run should stop |
+| `data` | what you gave | The data you gave as `data` to the scheduler, the job or `runNow()`. See [Run data](../run-data/) |
 
 ## Stopping when asked
 

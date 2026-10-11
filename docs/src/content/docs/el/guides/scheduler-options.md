@@ -3,7 +3,7 @@ title: Επιλογές scheduler
 description: Κάθε επιλογή του new Scheduler(), με παραδείγματα.
 ---
 
-Το `new Scheduler(options)` δέχεται ένα αντικείμενο. Όλα σε αυτό είναι προαιρετικά: το `new Scheduler()` συνδέεται στο Redis στο `localhost:6379`.
+Το `new Scheduler(options)` δέχεται ένα αντικείμενο. Ένα πράγμα σε αυτό είναι υποχρεωτικό: πού αποθηκεύονται οι εκτελέσεις, ως `redis` ή ως `backend`. Δεν υποτίθεται κανένα store, οπότε το `new Scheduler()` ρίχνει σφάλμα. Όλα τα υπόλοιπα είναι προαιρετικά.
 
 Δώστε σε κάθε instance μιας υπηρεσίας τις ίδιες επιλογές, εκτός από το `instanceId`.
 
@@ -16,7 +16,7 @@ description: Κάθε επιλογή του new Scheduler(), με παραδεί
 Για το Redis και το Valkey μπορείτε να περάσετε τη σύνδεση απευθείας:
 
 ```ts
-new Scheduler();                                              // redis://localhost:6379
+new Scheduler({ redis: 'redis://localhost:6379' });
 new Scheduler({ redis: 'redis://cache.internal:6379' });
 new Scheduler({ redis: 'rediss://user:secret@host:6380/2' }); // TLS, χρήστης, κωδικός πρόσβασης, βάση δεδομένων 2
 new Scheduler({ redis: { host: 'localhost', port: 6390 } });  // το Valkey λειτουργεί με τον ίδιο τρόπο
@@ -25,7 +25,7 @@ new Scheduler({ redis: existingIoredisClient });              // δικός σα
 
 | Επιλογή | Προεπιλογή | Σημασία |
 | --- | --- | --- |
-| `redis` | `localhost:6379` | Ένα URL, `{ host, port, password, db }`, ή ένας client που έχετε ήδη (ioredis, iovalkey, node-redis, Valkey GLIDE, ή οποιοδήποτε αντικείμενο με μέθοδο `send(command, args)`) |
+| `redis` | κανένα | Υποχρεωτικό, εκτός αν δοθεί `backend`. Ένα URL, `{ host, port, password, db }`, ή ένας client που έχετε ήδη (ioredis, iovalkey, node-redis, Valkey GLIDE, ή οποιοδήποτε αντικείμενο με μέθοδο `send(command, args)`) |
 | `strategy` | `'lease'` | Πώς επιλέγεται ο νικητής. Δείτε το [Redis και Valkey](../../backends/redis/) |
 | `prefix` | `'cron:'` | Πρόθεμα κάθε κλειδιού |
 | `idmp` | | Ρυθμίσεις για τη στρατηγική `'idmp'` |
@@ -77,6 +77,13 @@ new Scheduler({
 :::tip
 Ορίζετε πάντα το `timezone` αν χρησιμοποιείτε `cron()`. Η προεπιλογή είναι η τοπική ζώνη του διακομιστή, η οποία μπορεί να διαφέρει μεταξύ του φορητού σας υπολογιστή, του περιβάλλοντος CI και του production.
 :::
+
+## Όνομα και δεδομένα
+
+| Επιλογή | Προεπιλογή | Σημασία |
+| --- | --- | --- |
+| `name` | κανένα | Ένα όνομα για τον scheduler, μοναδικό μέσα στη διεργασία. Οι εργασίες που δηλώνονται με decorators επιλέγουν scheduler με αυτό: δείτε [Decorators](../decorators/#επιλογή-scheduler-για-μια-εργασία) |
+| `data` | κανένα | Δεδομένα για τις εκτελέσεις κάθε εργασίας, που διαβάζονται στον handler ως `ctx.data`: μια τιμή, ή μια συνάρτηση που καλείται όταν ξεκινά μια εκτέλεση. Δείτε [Δεδομένα εκτέλεσης](../run-data/) |
 
 ## Χρονισμός μίσθωσης
 

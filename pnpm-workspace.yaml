@@ -1,6 +1,7 @@
 packages:
   - '.'
   - 'docs'
+  - 'examples/nestjs'
 
 allowBuilds:
   better-sqlite3: true

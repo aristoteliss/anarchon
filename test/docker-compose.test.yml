@@ -1,4 +1,4 @@
-# Every server the tests use, on the ports test/helpers.ts expects by default. The ports
+# Every server the tests use, on the ports test/support/servers.ts expects by default. The ports
 # differ from the usual 6379 and 5432 so a Redis or Postgres you already run is never
 # touched. Nothing is kept: `pnpm test:servers:down` removes the containers and their data.
 #

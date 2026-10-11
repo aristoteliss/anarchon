@@ -1,8 +1,9 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import type { RunReason, RunRecord, StoredResult } from '../types';
+import type { JobContext, RunReason, RunRecord, StoredResult } from '../types';
 import { describeError } from '../util';
 import type { SchedulerCore } from './core';
+import { resolveData } from './data';
 import type { Job } from './job';
 
 /** How one execution is tracked while it runs. */
@@ -13,6 +14,8 @@ export interface Execution {
   reason: RunReason;
   /** Its abort() is ctx.signal's. */
   controller: AbortController;
+  /** The data given to runNow() for this one run. */
+  data?: unknown;
   /** Why ctx.signal was aborted, if it was (the first reason wins). */
   abortedBy?: 'stop' | 'lost' | 'timeout';
   /** Cleans up when the run ends (removes its stop listener). */
@@ -127,17 +130,19 @@ export class Executor {
   private async callHandler(job: Job, slot: number, scheduledAt: Date, run: Execution): Promise<{ cause: unknown } | undefined> {
     let timer: NodeJS.Timeout | undefined;
     try {
-      const work = Promise.resolve().then(() =>
-        job.handler({
-          name: job.name,
-          slot,
-          scheduledAt,
-          instanceId: this.core.instanceId,
-          manual: run.reason === 'manual',
-          signal: run.controller.signal,
-          attempt: run.attempt,
-          reason: run.reason,
-        }),
+      const info: Omit<JobContext, 'data'> = {
+        name: job.name,
+        slot,
+        scheduledAt,
+        instanceId: this.core.instanceId,
+        manual: run.reason === 'manual',
+        signal: run.controller.signal,
+        attempt: run.attempt,
+        reason: run.reason,
+      };
+      // Inside the run, so a data function that throws or is slow fails or times out the run.
+      const work = Promise.resolve().then(async () =>
+        job.handler({ ...info, data: await resolveData([this.core.schedulerData(), job.data, run.data], info) }),
       );
       if (job.timeoutMs === undefined) {
         await work;

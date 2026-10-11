@@ -5,7 +5,7 @@ description: "Ένας scheduler μέσα σε μια υπηρεσία Express, 
 
 Μια συνηθισμένη διάταξη: η υπηρεσία που εξυπηρετεί HTTP εκτελεί επίσης τις προγραμματισμένες εργασίες, και εκθέτει μερικά admin endpoints για αυτές.
 
-Μια εκτελέσιμη έκδοση αυτής της συνταγής βρίσκεται στο αποθετήριο ως `examples/http-api.ts`, με κάθε αίτημα στο `examples/http-api.http` για το VS Code REST Client.
+Μια εκτελέσιμη έκδοση αυτής της συνταγής βρίσκεται στο αποθετήριο ως [`examples/http-api.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/http-api.ts), με κάθε αίτημα στο [`examples/http-api.http`](https://github.com/aristoteliss/anarchon/blob/main/examples/http-api.http) για το VS Code REST Client.
 
 ## Η υπηρεσία
 

@@ -5,7 +5,7 @@ description: A scheduler inside an Express service, with endpoints to list jobs,
 
 A common setup: the service that serves HTTP also runs the scheduled jobs, and exposes a few admin endpoints for them.
 
-A runnable version of this recipe is in the repository as `examples/http-api.ts`, with every request in `examples/http-api.http` for the VS Code REST Client.
+A runnable version of this recipe is in the repository as [`examples/http-api.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/http-api.ts), with every request in [`examples/http-api.http`](https://github.com/aristoteliss/anarchon/blob/main/examples/http-api.http) for the VS Code REST Client.
 
 ## The service
 

@@ -18,6 +18,8 @@ export interface SchedulerCore {
   readonly heartbeatMs: number;
   /** true: the scheduler's timers are unref()'d, so they don't keep the process alive. */
   readonly unrefTimers: boolean;
+  /** The scheduler's `data` as it is now: a value, or a function to call when a run starts. */
+  schedulerData(): unknown;
   /** Between start() and stop(). Timers and background checks do nothing outside it. */
   isRunning(): boolean;
   /** stop() has returned (or start() was never called): nothing is written to the backend any more. */

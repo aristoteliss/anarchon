@@ -34,6 +34,7 @@ scheduler.every('sync', '10s', async (ctx) => {
 | `reason` | `string` | Γιατί ξεκίνησε αυτή η εκτέλεση: `'scheduled'`, `'manual'`, `'catch-up'` ή `'takeover'` |
 | `manual` | `boolean` | `true` όταν ξεκίνησε με `runNow()` |
 | `signal` | `AbortSignal` | Ακυρώνεται όταν η εκτέλεση πρέπει να σταματήσει |
+| `data` | ό,τι δώσατε | Τα δεδομένα που δώσατε ως `data` στον scheduler, στην εργασία ή στο `runNow()`. Δείτε [Δεδομένα εκτέλεσης](../run-data/) |
 
 ## Διακοπή όταν ζητηθεί
 

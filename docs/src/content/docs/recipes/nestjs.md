@@ -9,6 +9,8 @@ In NestJS the scheduler fits naturally as a provider. One module creates it and 
 `@nestjs/schedule` runs every `@Cron()` method in **every** instance. anarchon is what you reach for when the app runs as more than one instance and a job must run once.
 :::
 
+A runnable NestJS app is in the repository as [`examples/nestjs`](https://github.com/aristoteliss/anarchon/tree/main/examples/nestjs), checked on NestJS 11 and 12. See [Declaring jobs with decorators](#declaring-jobs-with-decorators).
+
 ## The module
 
 ```ts
@@ -87,6 +89,83 @@ export class InvoicesService implements OnModuleInit {
 ```
 
 Use an arrow function, as above, so `this` stays the service inside the handler.
+
+## Declaring jobs with decorators
+
+A provider can declare its jobs with anarchon's [decorators](../../guides/decorators/) instead of calling `cron()` and `every()`. Each job calls its method on the provider, so no arrow function is needed.
+
+NestJS compiles with legacy decorators (`experimentalDecorators`). In that style a method decorator can't act when the provider is created, so the provider gets its jobs onto the scheduler in one of two ways.
+
+**With `@Scheduled()`.** The provider adds its jobs when Nest creates it, and doesn't need the scheduler injected:
+
+```ts
+// reports/reports.service.ts
+import { Injectable } from '@nestjs/common';
+import { Every, type JobContext, Scheduled } from 'anarchon';
+
+@Injectable()
+@Scheduled()
+export class ReportsService {
+  constructor(private readonly mailer: MailerService) {}
+
+  @Every('sync-reports', '10s', { timeoutMs: 8_000 })
+  async sync(ctx: JobContext): Promise<void> {
+    // ...
+  }
+}
+```
+
+**With `register(this)`.** The provider registers itself in `onModuleInit`:
+
+```ts
+// invoices/invoices.service.ts
+import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { Cron, type JobContext, Scheduler } from 'anarchon';
+
+@Injectable()
+export class InvoicesService implements OnModuleInit {
+  constructor(private readonly scheduler: Scheduler) {}
+
+  onModuleInit(): void {
+    this.scheduler.register(this);
+  }
+
+  @Cron('monthly-invoices', '0 6 1 * *', { timeoutMs: 30 * 60_000, catchUpMs: 6 * 60 * 60_000 })
+  async buildInvoices(ctx: JobContext): Promise<void> {
+    // ...
+  }
+}
+```
+
+| | `@Scheduled()` | `register(this)` |
+| --- | --- | --- |
+| The provider needs the `Scheduler` injected | No | Yes |
+| The scheduler that gets the jobs | The default one: the first scheduler created | The one you inject |
+| The class Nest sees | A subclass with the same name | The class as you wrote it |
+
+Both ways run in the example app of the repository, [`examples/nestjs`](https://github.com/aristoteliss/anarchon/tree/main/examples/nestjs), and its check passes on NestJS 11 and 12. anarchon has no NestJS-specific code and needs no adapter package: the app uses only the public API. Constructor injection works with `@Scheduled()` above or below `@Injectable()`.
+
+| Command | What it does |
+| --- | --- |
+| `pnpm --filter anarchon-example-nestjs start` | Runs the app on the installed NestJS (12) |
+| `pnpm --filter anarchon-example-nestjs start:nest11` | Runs the same source on NestJS 11 |
+| `pnpm --filter anarchon-example-nestjs test` | Checks the app on both versions |
+
+Things to know:
+
+- **The order of creation doesn't matter.** Nest may create a provider before the scheduler. Its jobs are then added when the scheduler starts, in `onApplicationBootstrap`.
+- **Forgetting both is reported.** A provider with neither `@Scheduled()` nor `register(this)` adds no jobs, and the scheduler warns when it starts:
+
+  ```
+  [anarchon] @Every "sync-reports" on ReportsService.sync is not scheduled: with legacy decorators, add @Scheduled() to the class or call scheduler.register(object)
+  ```
+
+- **Singleton providers only.** Each object of a decorated class adds the same jobs, so a second one throws `Job "..." is already registered`. Don't decorate request-scoped or transient providers.
+- **Import injected classes as values.** Nest reads the types of constructor parameters at run time. A lint rule that rewrites `import { Scheduler }` to `import type { Scheduler }` breaks the injection.
+
+:::caution[Import `Cron` from `anarchon`]
+`@nestjs/schedule` exports a decorator with the same name, and that one runs the method in every instance.
+:::
 
 ## Enable shutdown hooks
 

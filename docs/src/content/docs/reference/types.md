@@ -14,7 +14,7 @@ import type { JobContext, JobHandler, RunRecord, SchedulerOptions } from 'anarch
 ### `JobHandler`
 
 ```ts
-type JobHandler = (ctx: JobContext) => unknown;
+type JobHandler<Data = unknown> = (ctx: JobContext<Data>) => unknown;
 ```
 
 The function a job runs. Sync or async. Returning means success; throwing means failure, or `interrupted` when `ctx.signal` was aborted by `stop()` or a takeover first.
@@ -22,12 +22,13 @@ The function a job runs. Sync or async. Returning means success; throwing means 
 ### `JobContext`
 
 ```ts
-interface JobContext {
+interface JobContext<Data = unknown> {
   name: string;
   slot: number;
   scheduledAt: Date;
   instanceId: string;
   manual: boolean;
+  data: Data;
   signal: AbortSignal;
   attempt: number;
   reason: RunReason;
@@ -35,6 +36,15 @@ interface JobContext {
 ```
 
 Guide: [Writing handlers](../../guides/writing-handlers/#the-context-ctx).
+
+### `JobData`, `JobDataProvider`
+
+```ts
+type JobData = object | string | number | boolean | null | JobDataProvider;
+type JobDataProvider = (run: Omit<JobContext, 'data'>) => unknown; // may return a promise
+```
+
+What the `data` option of a scheduler, a job and `runNow()` takes: a value, or a function called when a run starts. Guide: [Run data](../../guides/run-data/).
 
 ### `RunReason`
 
@@ -73,6 +83,35 @@ interface CronJobOptions extends JobOptions {
 ```
 
 See [Options](../options/#job-options).
+
+### Decorator types
+
+```ts
+type DecoratedJobOptions<Options> = Options & {
+  name?: string;                  // default: Class-method
+  scheduler?: string | Scheduler; // default: the default scheduler
+};
+
+interface RegisterOptions {
+  prefix?: string;
+  defaults?: JobOptions & { timezone?: string };
+}
+
+interface ConfigureOptions extends Omit<SchedulerOptions, 'backend' | 'name'> {
+  backend?: Backend | ((name: string) => Backend);
+  autoStart?: boolean;
+}
+```
+
+| Type | What it is |
+| --- | --- |
+| `DecoratedJobOptions` | What `@Every`, `@Cron` and `@At` accept when the name isn't the first argument |
+| `JobPlacement` | `{ scheduler? }`, the part of it that the form with the name first also accepts |
+| `JobDecorator`, `ScheduledDecorator` | What the method decorators and `@Scheduled()` return: decorators in both the standard and the legacy style |
+| `RegisterOptions` | The options of `scheduler.register()` |
+| `ConfigureOptions` | The settings `Scheduler.configure()` takes |
+
+See [Decorators](../decorators/).
 
 ### `JobInfo`
 

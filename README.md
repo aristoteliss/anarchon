@@ -21,7 +21,7 @@ anarchon also handles what goes wrong in real clusters:
 ```ts
 import { Scheduler } from 'anarchon';
 
-const scheduler = new Scheduler(); // Redis on localhost:6379
+const scheduler = new Scheduler({ redis: 'redis://localhost:6379' }); // a backend is required: none is assumed
 
 scheduler
   .every('sync', '10s', async (ctx) => { /* ... */ })
@@ -43,7 +43,7 @@ pnpm install
 npx tsx examples/basic.ts
 ```
 
-Each process connects to `redis://localhost:6379` by default. Watch `sync` run on one instance per slot; then stop the instance running `report` with Ctrl+C to see a graceful handover. The [examples](#examples) section lists PostgreSQL and SQLite variants too.
+The example connects to `redis://localhost:6379` unless `REDIS_URL` is set. Watch `sync` run on one instance per slot; then stop the instance running `report` with Ctrl+C to see a graceful handover. The [examples](#examples) section lists PostgreSQL and SQLite variants too.
 
 ## Install
 
@@ -105,11 +105,14 @@ A lease isn't a lock you hold and release. Every decision is still a single atom
 
 ## API
 
-### `new Scheduler(options?)`
+### `new Scheduler(options)`
+
+One of `redis` and `backend` is required. No store is assumed: `new Scheduler()` throws.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `redis` | localhost:6379 | `{ host, port, password, db }`, a URL, or your own client: ioredis, iovalkey, node-redis, Valkey GLIDE, or any `{ send(command, args) }`. Clients you pass aren't closed on stop |
+| `redis` | none: required unless `backend` | `{ host, port, password, db }`, a URL, or your own client: ioredis, iovalkey, node-redis, Valkey GLIDE, or any `{ send(command, args) }`. Clients you pass aren't closed on stop |
+| `backend` | none: required unless `redis` | Another store: `new PostgresBackend(...)`, `new SqliteBackend(...)` and the rest. See [Backends](#backends) |
 | `strategy` | `'lease'` | `'lease'`, or one of the simple claims: `'stream-id'`, `'idmp'` (Redis 8.6+), `'script'` |
 | `prefix` | `'cron:'` | Key prefix |
 | `instanceId` | `hostname:pid` | Name shown in history |
@@ -134,7 +137,120 @@ scheduler.cron(name, expression, handler, options?)  // 5 fields, or 6 with seco
 scheduler.at(name, when, handler, options?)          // once, at a Date / ms / ISO string
 ```
 
-`handler(ctx)` receives `{ name, slot, scheduledAt, instanceId, manual, attempt, reason, signal }`:
+#### Decorators
+
+The same jobs can be declared on the methods of a class. There is no framework, no `reflect-metadata` and no register call: an object adds its jobs when it is created, and the scheduler can be created for you from settings you give once.
+
+```ts
+import { At, Cron, Every, type JobContext, Scheduler } from 'anarchon';
+
+Scheduler.configure({ redis: process.env.REDIS_URL, autoStart: true }); // a backend must be given: none is assumed
+
+class Reports {
+  @Cron('weekday-digest', '0 8 * * 1-5', { timezone: 'Europe/Athens' })
+  async digest(ctx: JobContext) {}
+
+  @Every('sync-customers', '10s', { timeoutMs: 8_000 })
+  async sync() {}
+
+  @At('announce-launch', '2026-12-01T09:00:00Z')
+  async announce() {}
+}
+
+new Reports(); // a scheduler is created and started, and has the three jobs
+```
+
+Each decorator takes the arguments of its method without the handler: `@Every(name?, interval, options?)`, `@Cron(name?, expression, options?)`, `@At(name?, when, options?)`. The name can also go in the options (`{ name }`), and every job option can be passed.
+
+**Who creates and starts the scheduler** is your choice:
+
+| | Code |
+|---|---|
+| Settings, started for you | `Scheduler.configure({ redis, autoStart: true })` |
+| Settings, started by you | `Scheduler.configure({ redis })`, then `await Scheduler.startAll()` |
+| By hand | `const scheduler = new Scheduler({ redis })`, then `await scheduler.start()` |
+
+Stop them on shutdown with `await Scheduler.stopAll()`.
+
+**A job can choose its scheduler.** Jobs that give the same name share one, so ten jobs can be on one scheduler, on ten, or anything between. A named scheduler that doesn't exist yet is created from its settings.
+
+```ts
+Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: `cron_${name}` }) });
+Scheduler.configure('billing', { redis: process.env.BILLING_REDIS_URL, leaseMs: 10_000 }); // optional: settings of its own
+
+class Jobs {
+  @Cron('job-1', '*/10 * * * * *')                            // the default scheduler
+  one() {}
+  @Cron('job-2', '*/10 * * * * *', { scheduler: 'billing' })  // the scheduler named 'billing'
+  two() {}
+  @Every('job-3', '5s', { scheduler: 'reports' })             // created from the default settings: table cron_reports
+  three() {}
+}
+```
+
+**Several objects of one class** each get a prefix, and can get job options of their own:
+
+```ts
+for (const tenant of tenants) {
+  scheduler.register(new Reports(), {
+    prefix: `${tenant.id}:`, // 'acme:weekday-digest', 'acme:sync-customers'
+    defaults: { timezone: tenant.timezone, data: { tenant: tenant.id } },
+  });
+}
+```
+
+**Legacy decorators** (`"experimentalDecorators": true`, the style NestJS and Angular use) can't run code when an object is created, so add `@Scheduled()` to the class, or call `scheduler.register(object)`:
+
+```ts
+@Scheduled() // objects of this class add their jobs when they are created
+class Reports {
+  @Every('sync-customers', '10s')
+  async sync() {}
+}
+```
+
+| | Standard | Legacy |
+|---|---|---|
+| `tsconfig.json` | nothing to set | `"experimentalDecorators": true` |
+| An object adds its jobs when created | always | only with `@Scheduled()` on the class |
+| `@Scheduled()` | not needed, harmless | needed, unless you call `register()` |
+
+Things to know:
+
+- **A backend is required in settings.** `Scheduler.configure()` throws without `backend` or `redis`: a scheduler is never created on a store you didn't choose.
+- **The name comes first.** `@Every('1h', 'sync')` and `@Cron('0 8 * * *', 'Europe/Athens')` throw when the class is defined, with the right form in the message. A time zone goes in the options.
+- **Name your jobs.** Without a name a job is called `Class-method`. That changes when the class or the method is renamed, and on every build if a minifier renames classes. A changed name is a new job with a new history.
+- **Legacy style: `@Scheduled()` or `register()`.** With neither, the jobs of a class are not added. A starting scheduler warns about every such job, and about jobs of a class that never got an object.
+- **One object per class, unless each has a prefix.** A second object declares the same job names, and its constructor throws. With prefixes, create each object inside its `register()` call.
+- **Where an invalid job shows up.** `new Reports()` throws if its schedulers exist or have settings. If the object was created first, the `start()` that adds it rejects and the scheduler stays stopped.
+- **`autoStart` hides the start.** A failure to connect arrives as an `'error'` event, not as a rejected promise.
+- **`@At` takes an absolute time.** A delay counted from process start differs on every instance, so each one would run the job. There is no `@Timeout`.
+- **Tests.** Schedulers and settings are shared by the whole process: call `Scheduler.reset()` between tests.
+
+Runnable examples: [examples/decorators.ts](examples/decorators.ts) (standard decorators), [examples/decorators-legacy.ts](examples/decorators-legacy.ts) (legacy decorators), [examples/decorators-startup.ts](examples/decorators-startup.ts) (the three ways to start), [examples/decorators-options.ts](examples/decorators-options.ts) (schedulers from settings, a scheduler per job, several objects of a class, run data) and [examples/nestjs](examples/nestjs) (a NestJS app, checked on NestJS 11 and 12).
+
+More in the [decorators guide](https://aristoteliss.github.io/anarchon/guides/decorators/), the [decorators reference](https://aristoteliss.github.io/anarchon/reference/decorators/) and the [NestJS recipe](https://aristoteliss.github.io/anarchon/recipes/nestjs/#declaring-jobs-with-decorators).
+
+#### Run data
+
+A job often needs something it can't take from its surroundings: the tenant it runs for, the permission it runs with, a token that must be fresh. Give it as `data`, and each run reads it as `ctx.data`.
+
+```ts
+const scheduler = new Scheduler({ redis, data: { tenant: 'acme' } });               // for every job
+
+scheduler.every('export', '1h', async (ctx: JobContext<{ tenant: string; permission: string }>) => {
+  await exportFor(ctx.data.tenant, ctx.data.permission);
+}, { data: { permission: 'reports:export' } });                                     // for this job, on top
+
+scheduler.every('sync', '5m', sync, { data: async () => ({ token: await freshToken() }) }); // read when each run starts
+
+await scheduler.runNow('export', { data: { requestedBy: user.id } });               // for one manual run
+scheduler.setData({ tenant: 'acme', plan: 'pro' });                                 // replace the scheduler's while it runs
+```
+
+The layers are merged from the most general to the most specific: two plain objects are merged, any other value replaces. A function that throws fails the run. The data is not stored and not shared between instances, so it can hold secrets and clients. More in the [run data guide](https://aristoteliss.github.io/anarchon/guides/run-data/); runnable in [examples/run-data.ts](examples/run-data.ts).
+
+`handler(ctx)` receives `{ name, slot, scheduledAt, instanceId, manual, attempt, reason, signal, data }`:
 - `attempt` is 1, or 2+ when a backup took over.
 - `reason` is `'scheduled'`, `'manual'`, `'catch-up'` or `'takeover'`.
 - `signal` aborts on `stop()`, on timeout, and when a backup took the run over. Throw when it aborts (`ctx.signal.throwIfAborted()`) so a stopped run is handed over instead of counting as finished.
@@ -148,6 +264,7 @@ scheduler.at(name, when, handler, options?)          // once, at a Date / ms / I
 | `catchUpMs` | `300000` | On start, run the latest run if it was missed and due less than this ago. `0` turns it off |
 | `offsetMs` | `0` | `every()` only: shift the grid |
 | `timezone` | scheduler's | `cron()` only |
+| `data` | none | Data for this job's runs, read as `ctx.data`. A value, or a function called when a run starts |
 
 ### Lifecycle
 
@@ -160,7 +277,7 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 ```
-- **`runNow(name)`** runs a job immediately on this instance, without deduplication, and records it as a manual run. Manual runs are never retried.
+- **`runNow(name, { data }?)`** runs a job immediately on this instance, without deduplication, and records it as a manual run. Manual runs are never retried. `data` is for that one run.
 - **`remove(name)`** stops scheduling a job on this instance.
 
 ### Who ran it and when it finished
@@ -278,6 +395,15 @@ npx tsx examples/walkthrough.ts         # one run from the timer to history, mad
 npx tsx examples/failover.ts            # 3 instances in one process: a graceful hand-over, then a crash and takeover
 npx tsx examples/options-and-events.ts  # every job option and every event
 npx tsx examples/own-clients.ts         # pass in your own ioredis client or pg Pool
+npx tsx examples/decorators.ts          # jobs declared with @Cron, @Every and @At on a class (standard decorators)
+TSX_TSCONFIG_PATH=examples/tsconfig.legacy.json npx tsx examples/decorators-legacy.ts
+                                        # the same with legacy decorators (experimentalDecorators): @Scheduled() and register()
+npx tsx examples/decorators-startup.ts auto     # the three ways to start: auto (autoStart), manual (startAll) or hand (new Scheduler)
+npx tsx examples/decorators-options.ts  # schedulers from settings, a scheduler per job, several objects of a class, run data
+npx tsx examples/run-data.ts            # run data: the scheduler's, a job's, a function read at each run, runNow() and setData()
+pnpm --filter anarchon-example-nestjs start         # a very small NestJS app whose providers declare jobs with decorators (examples/nestjs)
+pnpm --filter anarchon-example-nestjs start:nest11  # the same source on NestJS 11
+pnpm --filter anarchon-example-nestjs test          # checks the app on NestJS 11 and 12
 ```
 
 All but `basic.ts` need no server: they use a SQLite file in the temp folder unless `BACKEND=redis` or
@@ -287,7 +413,7 @@ and lists where to step.
 
 ## Tests
 
-The tests run against real servers, and any server that isn't running is skipped. `docker-compose.test.yml` starts every one of them on the default URLs below:
+The tests run against real servers, and any server that isn't running is skipped. `test/docker-compose.test.yml` starts every one of them on the default URLs below:
 
 ```sh
 pnpm test:servers                          # Redis 8.6, Redis 7.0, Valkey, PostgreSQL, libSQL
@@ -311,7 +437,7 @@ SQLite needs no server (node:sqlite on Node 22.5+; files go to the temp folder, 
 pnpm test              # everything below except test/e2e
 pnpm test:slow         # test/e2e: the cluster and failure-scenario tests (real processes, real clock)
 pnpm test:all          # every test
-pnpm test:all:full     # the same with coverage, saved to test-run.log
+pnpm test:all:full     # the same with coverage, saved to test/test-run.log
 pnpm test:last:review  # summary of the last full run (test:last:fails: failures only)
 pnpm scenarios         # the failure scenarios: simple claim vs lease on Redis, Postgres, SQLite
 ```

@@ -157,4 +157,5 @@ const scheduler = new Scheduler({
 
 - [Βασικές έννοιες](../core-concepts/): ορισμός των slot, claim, jitter και lease
 - [Ορισμός εργασιών](../../guides/defining-jobs/): εκφράσεις cron, χρονικά διαστήματα και μεμονωμένες εργασίες
+- [Decorators](../../guides/decorators/): δηλώστε τις ίδιες εργασίες πάνω στις μεθόδους μιας κλάσης
 - [Συγγραφή handlers](../../guides/writing-handlers/): τι περιέχει το `ctx` και γιατί έχει σημασία το `ctx.signal`

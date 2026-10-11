@@ -151,11 +151,17 @@ Other examples in the repository:
 
 | Example | Shows |
 | --- | --- |
-| `examples/failover.ts` | Three instances: a graceful hand-over, then a crash and takeover |
-| `examples/options-and-events.ts` | Every job option and every event |
-| `examples/http-api.ts` | The [Express API](../express/) |
-| `examples/own-clients.ts` | Passing in your own Redis client or Postgres pool |
-| `examples/basic.ts` | Run it in three terminals and kill one |
+| [`examples/failover.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/failover.ts) | Three instances: a graceful hand-over, then a crash and takeover |
+| [`examples/options-and-events.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/options-and-events.ts) | Every job option and every event |
+| [`examples/http-api.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/http-api.ts) | The [Express API](../express/) |
+| [`examples/own-clients.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/own-clients.ts) | Passing in your own Redis client or Postgres pool |
+| [`examples/basic.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/basic.ts) | Run it in three terminals and kill one |
+| [`examples/decorators.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/decorators.ts) | Jobs declared with [`@Every`, `@Cron` and `@At`](../../guides/decorators/) on a class, with standard decorators |
+| [`examples/decorators-legacy.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/decorators-legacy.ts) | The same with legacy decorators (`experimentalDecorators`): `@Scheduled()` and `register()` |
+| [`examples/decorators-startup.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/decorators-startup.ts) | The three ways to start decorated jobs: `autoStart`, `Scheduler.startAll()`, or a scheduler created by hand |
+| [`examples/decorators-options.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/decorators-options.ts) | Schedulers created from settings, a scheduler per job, several objects of a class, and run data |
+| [`examples/run-data.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/run-data.ts) | [Run data](../../guides/run-data/): the scheduler's, a job's, a function read at each run, `runNow()` and `setData()` |
+| [`examples/nestjs`](https://github.com/aristoteliss/anarchon/tree/main/examples/nestjs) | A small [NestJS](../nestjs/#declaring-jobs-with-decorators) app whose providers declare jobs with decorators. Checked on NestJS 11 and 12 |
 
 ## Seeing what an instance does
 

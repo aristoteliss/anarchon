@@ -163,5 +163,6 @@ During a rolling deploy that changes a schedule, old and new instances briefly d
 
 ## Next
 
+- [Decorators](../decorators/): declare the same jobs on the methods of a class
 - [Job options](../job-options/): timeouts, overlap, retries and more
 - [Writing handlers](../writing-handlers/): the function a job runs

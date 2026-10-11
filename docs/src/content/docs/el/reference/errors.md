@@ -15,6 +15,7 @@ description: Τα σφάλματα που ρίχνει το anarchon, τι ση�
 
 | Μήνυμα | Αιτία | Διόρθωση |
 | --- | --- | --- |
+| `A scheduler needs a backend: pass backend, or redis for Redis and Valkey. No store is assumed` | Στο `new Scheduler()` δεν δόθηκε ούτε `backend` ούτε `redis`. Συχνά `redis: process.env.REDIS_URL` με τη μεταβλητή μη ορισμένη | Δώστε `redis` ή `backend`, και ελέγξτε τη μεταβλητή |
 | `Pass either backend, or the Redis shortcuts (redis, strategy, prefix, idmp), not both` | Δόθηκαν ταυτόχρονα το `backend` και μια επιλογή Redis | Τοποθετήστε τις επιλογές Redis στο `new RedisBackend()`, ή αφαιρέστε το `backend` |
 | `instanceId must be a non-empty string` | `instanceId: ''`, συχνά μια μη ορισμένη μεταβλητή περιβάλλοντος | Ελέγξτε τη μεταβλητή, ή παραλείψτε την επιλογή |
 | `heartbeatMs (N) must be under half of leaseMs (M), so a lease is renewed at least twice` | Το `heartbeatMs` είναι πολύ κοντά στο `leaseMs` | Μειώστε το `heartbeatMs` ή αυξήστε το `leaseMs` |
@@ -42,6 +43,26 @@ description: Τα σφάλματα που ρίχνει το anarchon, τι ση�
 | `Job "X": overlap must be "skip" or "allow"` | Τυπογραφικό λάθος στο `overlap` | Χρησιμοποιήστε ένα από τα δύο |
 | `Job "X": with RabbitMQ, job names may only contain letters, digits, "_" and "-"` | Το όνομα γίνεται όνομα ουράς ή subject | Μετονομάστε την εργασία |
 | `offsetMs must be a whole number of ms` | Δεκαδικό offset | Χρησιμοποιήστε ακέραια χιλιοστά του δευτερολέπτου |
+
+## Decorators
+
+Μια εργασία που δηλώνεται με decorator προστίθεται όταν δημιουργείται το αντικείμενό της, ή όταν ξεκινά ο scheduler αν το αντικείμενο δημιουργήθηκε πρώτο. Επομένως τα παραπάνω σφάλματα της «Προσθήκης εργασίας» μπορούν να προέλθουν και από το `new YourClass()` και από το `start()`. Δείτε [Decorators](../decorators/#πού-εμφανίζονται-τα-σφάλματα).
+
+| Μήνυμα | Αιτία | Διόρθωση |
+| --- | --- | --- |
+| `@Every can only decorate a public instance method` (επίσης `@Cron`, `@At`) | Ο decorator βρίσκεται σε μέθοδο `static` ή `#private`, ή σε κάτι που δεν είναι μέθοδος | Βάλτε τον σε δημόσια μέθοδο instance |
+| `Job "X" is already registered`, από έναν constructor | Δημιουργήθηκε δεύτερο αντικείμενο της ίδιας κλάσης με decorators, ή δύο μέθοδοι έχουν το ίδιο όνομα | Δημιουργήστε ένα αντικείμενο ανά κλάση· δώστε σε κάθε decorator το δικό του όνομα |
+| `register() needs an object whose class has methods decorated with @Cron, @Every or @At` | Δόθηκε η κλάση αντί για ένα αντικείμενο, ή η κλάση δεν έχει μεθόδους με decorators | Δώστε ένα αντικείμενο: `scheduler.register(new Reports())` |
+| `@Cron("0 8 * * *", "Europe/Athens"): with two strings, the first is the job's name and the second the cron expression...` | Ως δεύτερο string δόθηκε ζώνη ώρας, ή το όνομα | `@Cron('0 8 * * *', { timezone: 'Europe/Athens' })`, ή `@Cron(name, expression)` |
+| `@Every("1h", "sync"): the job's name, a string, comes first and the interval second...` (επίσης `@At`) | Το όνομα και το πρόγραμμα είναι σε λάθος σειρά, ή το όνομα δεν είναι string | `@Every('sync', '1h')` |
+| Προειδοποίηση: `@Every "X" on Reports.sync is not scheduled: with legacy decorators, add @Scheduled() to the class or call scheduler.register(object)` | Legacy decorators (`experimentalDecorators`), χωρίς `@Scheduled()` στην κλάση, και κανένα αντικείμενο καταχωρισμένο όταν ξεκίνησε ο scheduler | Προσθέστε το `@Scheduled()`, ή καλέστε το `scheduler.register(object)` |
+| Προειδοποίηση: `@Cron("...") on the method "X" is not scheduled: no object of its class has been created` | Δεν υπήρχε αντικείμενο της κλάσης όταν ξεκίνησε ο scheduler | Δημιουργήστε το αντικείμενο. Αγνοήστε την αν η κλάση δεν προορίζεται να εκτελείται σε αυτή τη διεργασία |
+| `Job "X" is already registered. To use several objects of one class, register each of them with a prefix of its own...` | Δημιουργήθηκε δεύτερο αντικείμενο μιας κλάσης με decorators | `scheduler.register(new Reports(), { prefix: 'a:' })` για κάθε αντικείμενο, που δημιουργείται μέσα στην κλήση |
+| `Scheduler.configure() needs a backend: pass backend, or redis for Redis and Valkey` | Ρυθμίσεις χωρίς backend. Δεν υποτίθεται κανένα | Προσθέστε `backend` ή `redis` |
+| `The default scheduler already exists: configure it before it is created` (και για ονομασμένο) | Το `configure()` κλήθηκε αφού δημιουργήθηκε ο scheduler | Καλέστε πρώτα το `configure()`, κατά την εκκίνηση |
+| `Scheduler "X" has no settings of its own, and the default settings hold a backend object...` | Μια εργασία ονομάζει τον scheduler `X`, που μπορεί να δημιουργηθεί μόνο από τις προεπιλεγμένες ρυθμίσεις, και αυτές περιέχουν ένα αντικείμενο backend | `Scheduler.configure('X', { ... })`, ή κάντε το προεπιλεγμένο `backend` συνάρτηση του ονόματος |
+| `There is no default scheduler...`, `There is no scheduler named "X"...` | Το `Scheduler.get()` δεν βρήκε scheduler ούτε ρυθμίσεις | Δημιουργήστε τον, ή καλέστε το `configure()` |
+| `A scheduler named "X" already exists` | Δόθηκε το ίδιο `name` σε δύο schedulers | Χρησιμοποιήστε έναν, ή άλλο όνομα |
 
 ## Εκκίνηση
 

@@ -23,7 +23,7 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 ```ts
 import { Scheduler } from 'anarchon';
 
-const scheduler = new Scheduler(); // Redis στο localhost:6379
+const scheduler = new Scheduler({ redis: 'redis://localhost:6379' });
 
 scheduler
   .every('sync', '10s', async (ctx) => { /* ... */ })
@@ -71,6 +71,7 @@ flowchart LR
   <LinkCard title="Εισαγωγή" description="Το πρόβλημα με απλά λόγια και πώς το επιλύει το anarchon." href="getting-started/introduction/" />
   <LinkCard title="Γρήγορη εκκίνηση" description="Ένας λειτουργικός scheduler σε πέντε λεπτά, χωρίς ανάγκη εγκατάστασης server." href="getting-started/quick-start/" />
   <LinkCard title="Οδηγοί" description="Κάθε επιλογή, μέθοδος και βήμα του κύκλου ζωής, με παραδείγματα." href="guides/defining-jobs/" />
+  <LinkCard title="Decorators" description="Δηλώστε εργασίες με τα @Every, @Cron και @At πάνω στις μεθόδους μιας κλάσης." href="guides/decorators/" />
   <LinkCard title="Πώς λειτουργεί" description="Οι αλγόριθμοι claim και lease, βήμα προς βήμα, με διαγράμματα." href="internals/architecture/" />
   <LinkCard title="Backends" description="Redis, Valkey, PostgreSQL, SQLite, RabbitMQ και NATS." href="backends/overview/" />
   <LinkCard title="Συνταγές" description="Express, NestJS, workers, Kubernetes, μακροχρόνιες εργασίες." href="recipes/express/" />

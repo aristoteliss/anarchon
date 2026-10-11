@@ -7,7 +7,10 @@ PostgreSQL, SQLite, RabbitMQ and NATS. The public API is exported from `src/inde
 each backend lives under `src/backends/`. The `Scheduler` class (`src/scheduler/scheduler.ts`) is the
 public API and lifecycle only; its parts are beside it: `job.ts` (validation), `timers.ts` (when a
 run is due), `lease-runner.ts` and `claim-only-runner.ts` (claiming a run), `executor.ts` (running the
-handler and recording the result).
+handler and recording the result). `src/decorators.ts` holds `@Cron`, `@Every`, `@At` and
+`@Scheduled`; `src/registry.ts` holds which schedulers exist (default, named, created from
+`Scheduler.configure()` settings) and where each decorated object's jobs live; `scheduler/data.ts`
+builds `ctx.data` for a run.
 
 ## Commands
 
@@ -24,7 +27,7 @@ Use these scripts. Use pnpm only, never npm or yarn.
 | One test file | `pnpm test test/leases/rules.test.ts` |
 | Tests in watch mode | `pnpm test:watch` |
 | Coverage summary (text and `coverage/coverage-summary.json`) | `pnpm test:coverage` |
-| Full run with coverage, saved to `test-run.log` | `pnpm test:all:full` |
+| Full run with coverage, saved to `test/test-run.log` | `pnpm test:all:full` |
 | Summary of the last full run | `pnpm test:last:review` |
 | Failures of the last full run | `pnpm test:last:fails` |
 | Type checks (src, test, examples) | `pnpm lint` |
@@ -50,17 +53,24 @@ Layout, by what a test needs:
 - `test/backends/`: `contract` (the same checks on every backend), then what is specific to `redis`,
   `sql` (Postgres, SQLite) and `brokers` (RabbitMQ, NATS).
 - `test/leases/`: the lease `rules` on each lease backend, and the `scheduler` on top of them.
-- `test/e2e/`: real child processes, slow. `cluster/` (3 instances per backend) and `scenarios/`
-  (kill, freeze, restart).
+- `test/e2e/`: real child processes, slow. `cluster/` (3 instances per backend), `scenarios/`
+  (kill, freeze, restart) and `decorators/` (decorator syntax compiled in both styles).
 - `test/support/`: `servers` (URLs and probes), `specs` (one spec per backend to test), `util`.
+- `test/vitest.config.mts`, `test/docker-compose.test.yml` and `test/test-run.log` (ignored by git)
+  live in `test/` too. The scripts pass the config; a bare `vitest` needs
+  `--config test/vitest.config.mts`.
+- `examples/nestjs/`: one NestJS app in a workspace package of its own, with its own TypeScript and
+  Biome settings. `pnpm --filter anarchon-example-nestjs test` checks it on NestJS 11 and 12.
+  Nothing specific to NestJS belongs in `src/`, in the root config files or in `test/`. The root
+  type check covers `examples/*.ts` only; a folder under `examples/` is a package with its own config.
 
 - Vitest runs against real servers. A server that is not running makes its tests skip, so
   a green run can still hide skipped backends: read the skip count.
 - The servers, their default URLs and the environment variables that override them are
   listed in the README's Tests section.
-- `docker-compose.test.yml` runs every server on the default URLs; Redis 8.6 and Postgres use
-  6381 and 5433 so a Redis or Postgres on the usual ports is never touched. Only the test
-  "defaults to localhost:6379" uses 6379, and it skips when nothing listens there.
+- `test/docker-compose.test.yml` runs every server on the default URLs; Redis 8.6 and Postgres use
+  6381 and 5433 so a Redis or Postgres on the usual ports is never touched. No test uses 6379 or
+  5432: a scheduler has no default backend, so `backend` or `redis` is always given.
 - `LIBSQL_URL` and `LIBSQL_AUTH_TOKEN` point the libSQL server tests at another server, such as
   Turso. The token is read from the environment only.
 - Each test uses its own Redis key prefix (`test:<id>:`) or table (`t_<id>`); tests never

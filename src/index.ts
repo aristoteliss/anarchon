@@ -20,6 +20,9 @@ export type { PgClientLike, PgPoolLike, PostgresBackendOptions, PostgresJsLike }
 export { fromPgClient, fromPgPool, fromPostgresJs, PostgresBackend } from './backends/sql/postgres';
 export type { LibsqlClientLike, SqliteBackendOptions, SqliteDatabaseLike } from './backends/sql/sqlite';
 export { fromLibsql, fromSqliteDatabase, SqliteBackend } from './backends/sql/sqlite';
+export type { DecoratedJobOptions, JobDecorator, JobPlacement, RegisterOptions, ScheduledDecorator } from './decorators';
+export { At, Cron, Every, Scheduled } from './decorators';
+export type { ConfigureOptions } from './registry';
 export { formatDuration, parseDuration } from './schedule';
 export { Scheduler } from './scheduler';
 export type {
@@ -30,6 +33,8 @@ export type {
   EveryJobOptions,
   IdmpOptions,
   JobContext,
+  JobData,
+  JobDataProvider,
   JobHandler,
   JobInfo,
   JobLimits,

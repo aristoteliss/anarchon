@@ -9,6 +9,8 @@ description: "Ένας scheduler ως NestJS provider, που ξεκινά κα�
 Το `@nestjs/schedule` εκτελεί κάθε μέθοδο `@Cron()` σε **κάθε** instance. Το anarchon είναι αυτό που χρειάζεστε όταν η εφαρμογή εκτελείται σε περισσότερα από ένα instances και μια εργασία πρέπει να εκτελείται μία φορά.
 :::
 
+Μια εκτελέσιμη εφαρμογή NestJS βρίσκεται στο repository ως [`examples/nestjs`](https://github.com/aristoteliss/anarchon/tree/main/examples/nestjs), ελεγμένη σε NestJS 11 και 12. Δείτε [Δήλωση εργασιών με decorators](#δήλωση-εργασιών-με-decorators).
+
 ## Το module
 
 ```ts
@@ -87,6 +89,83 @@ export class InvoicesService implements OnModuleInit {
 ```
 
 Χρησιμοποιήστε μια συνάρτηση-βέλος (arrow function), όπως παραπάνω, ώστε το `this` να παραμένει το service μέσα στον handler.
+
+## Δήλωση εργασιών με decorators
+
+Ένας provider μπορεί να δηλώσει τις εργασίες του με τους [decorators](../../guides/decorators/) του anarchon, αντί να καλεί τα `cron()` και `every()`. Κάθε εργασία καλεί τη μέθοδό της πάνω στον provider, οπότε δεν χρειάζεται συνάρτηση-βέλος.
+
+Το NestJS κάνει compile με legacy decorators (`experimentalDecorators`). Σε αυτό το στυλ ένας decorator μεθόδου δεν μπορεί να ενεργήσει όταν δημιουργείται ο provider, οπότε ο provider φέρνει τις εργασίες του στον scheduler με έναν από δύο τρόπους.
+
+**Με το `@Scheduled()`.** Ο provider προσθέτει τις εργασίες του όταν τον δημιουργεί το Nest, και δεν χρειάζεται να του γίνει inject ο scheduler:
+
+```ts
+// reports/reports.service.ts
+import { Injectable } from '@nestjs/common';
+import { Every, type JobContext, Scheduled } from 'anarchon';
+
+@Injectable()
+@Scheduled()
+export class ReportsService {
+  constructor(private readonly mailer: MailerService) {}
+
+  @Every('sync-reports', '10s', { timeoutMs: 8_000 })
+  async sync(ctx: JobContext): Promise<void> {
+    // ...
+  }
+}
+```
+
+**Με το `register(this)`.** Ο provider καταχωρίζει τον εαυτό του στο `onModuleInit`:
+
+```ts
+// invoices/invoices.service.ts
+import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { Cron, type JobContext, Scheduler } from 'anarchon';
+
+@Injectable()
+export class InvoicesService implements OnModuleInit {
+  constructor(private readonly scheduler: Scheduler) {}
+
+  onModuleInit(): void {
+    this.scheduler.register(this);
+  }
+
+  @Cron('monthly-invoices', '0 6 1 * *', { timeoutMs: 30 * 60_000, catchUpMs: 6 * 60 * 60_000 })
+  async buildInvoices(ctx: JobContext): Promise<void> {
+    // ...
+  }
+}
+```
+
+| | `@Scheduled()` | `register(this)` |
+| --- | --- | --- |
+| Ο provider χρειάζεται inject του `Scheduler` | Όχι | Ναι |
+| Ο scheduler που παίρνει τις εργασίες | Ο προεπιλεγμένος: ο πρώτος scheduler που δημιουργείται | Αυτός που κάνετε inject |
+| Η κλάση που βλέπει το Nest | Μια υποκλάση με το ίδιο όνομα | Η κλάση όπως τη γράψατε |
+
+Και οι δύο τρόποι εκτελούνται στην εφαρμογή-παράδειγμα του repository, [`examples/nestjs`](https://github.com/aristoteliss/anarchon/tree/main/examples/nestjs), και ο έλεγχός της περνά σε NestJS 11 και 12. Το anarchon δεν έχει κώδικα ειδικό για το NestJS και δεν χρειάζεται πακέτο προσαρμογής: η εφαρμογή χρησιμοποιεί μόνο το δημόσιο API. Το constructor injection λειτουργεί με το `@Scheduled()` πάνω ή κάτω από το `@Injectable()`.
+
+| Εντολή | Τι κάνει |
+| --- | --- |
+| `pnpm --filter anarchon-example-nestjs start` | Εκτελεί την εφαρμογή με το εγκατεστημένο NestJS (12) |
+| `pnpm --filter anarchon-example-nestjs start:nest11` | Εκτελεί τον ίδιο κώδικα με NestJS 11 |
+| `pnpm --filter anarchon-example-nestjs test` | Ελέγχει την εφαρμογή και στις δύο εκδόσεις |
+
+Τι να γνωρίζετε:
+
+- **Η σειρά δημιουργίας δεν έχει σημασία.** Το Nest μπορεί να δημιουργήσει έναν provider πριν από τον scheduler. Οι εργασίες του προστίθενται τότε όταν ξεκινά ο scheduler, στο `onApplicationBootstrap`.
+- **Αν ξεχάσετε και τα δύο, αναφέρεται.** Ένας provider χωρίς `@Scheduled()` και χωρίς `register(this)` δεν προσθέτει εργασίες, και ο scheduler προειδοποιεί όταν ξεκινά:
+
+  ```
+  [anarchon] @Every "sync-reports" on ReportsService.sync is not scheduled: with legacy decorators, add @Scheduled() to the class or call scheduler.register(object)
+  ```
+
+- **Μόνο singleton providers.** Κάθε αντικείμενο μιας κλάσης με decorators προσθέτει τις ίδιες εργασίες, οπότε ένα δεύτερο ρίχνει `Job "..." is already registered`. Μην βάζετε decorators σε request-scoped ή transient providers.
+- **Εισαγάγετε τις κλάσεις που γίνονται inject ως τιμές.** Το Nest διαβάζει τους τύπους των παραμέτρων του constructor κατά τον χρόνο εκτέλεσης. Ένας κανόνας lint που μετατρέπει το `import { Scheduler }` σε `import type { Scheduler }` χαλάει το injection.
+
+:::caution[Εισαγάγετε το `Cron` από το `anarchon`]
+Το `@nestjs/schedule` εξάγει έναν decorator με το ίδιο όνομα, και εκείνος εκτελεί τη μέθοδο σε κάθε instance.
+:::
 
 ## Ενεργοποίηση shutdown hooks
 

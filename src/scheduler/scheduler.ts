@@ -4,11 +4,28 @@ import { EventEmitter } from 'node:events';
 import { hostname } from 'node:os';
 
 import { RedisBackend } from '../backends/redis';
+import type { RegisterOptions } from '../decorators';
+import {
+  type ConfigureOptions,
+  configure,
+  getScheduler,
+  hostOf,
+  knownSchedulers,
+  registerOn,
+  resetSchedulers,
+  type SchedulerHost,
+  schedulerCreated,
+  schedulerStarting,
+  schedulerStopped,
+  setDefaultScheduler,
+  setSchedulerFactory,
+} from '../registry';
 import { cronSchedule, everySchedule, onceSchedule, parseDuration, type Schedule } from '../schedule';
 import type {
   Backend,
   CronJobOptions,
   EveryJobOptions,
+  JobData,
   JobHandler,
   JobInfo,
   JobOptions,
@@ -21,6 +38,7 @@ import type {
 import { errorMessage, intInRange, nonNegativeInt, positiveInt } from '../util';
 import { ClaimOnlyRunner } from './claim-only-runner';
 import type { SchedulerCore } from './core';
+import { layerData } from './data';
 import { Executor } from './executor';
 import { createJob, type Job, type JobDefaults } from './job';
 import { LeaseRunner } from './lease-runner';
@@ -87,12 +105,16 @@ export class Scheduler {
   readonly instanceId: string;
   /** Where runs are claimed and recorded. `backend.name` tells which one, e.g. 'redis:lease' or 'postgres'. */
   readonly backend: Backend;
+  /** The name decorated jobs choose this scheduler by (`{ scheduler: 'billing' }`), if it has one. */
+  readonly name: string | undefined;
 
   private readonly defaults: JobDefaults;
   private readonly logger: Logger;
   private readonly registry = new Map<string, Job>();
   private readonly emitter = new EventEmitter();
   private readonly inflight = new Set<Promise<unknown>>();
+  private readonly host: SchedulerHost;
+  private dataSource: unknown;
 
   private readonly timers: JobTimers;
   private readonly executor: Executor;
@@ -108,12 +130,13 @@ export class Scheduler {
   /**
    * Creates a scheduler. Nothing connects and nothing runs until {@link Scheduler.start | start()}.
    *
+   * @throws TypeError when no backend is given: one of `backend` and `redis` is required, and no store is assumed.
    * @throws TypeError when both `backend` and a Redis shortcut (`redis`, `strategy`, `prefix`, `idmp`) are given.
    * @throws RangeError when a number is out of range, or `heartbeatMs` is not under half of `leaseMs`.
    *
    * @example Redis or Valkey, with the shortcuts
    * ```ts
-   * new Scheduler(); // redis://localhost:6379, 'lease' strategy
+   * new Scheduler({ redis: process.env.REDIS_URL }); // the 'lease' strategy
    * new Scheduler({ redis: 'redis://cache.internal:6379', prefix: 'billing:cron:' });
    * new Scheduler({ redis: myIoredisClient }); // your client; never closed by stop()
    * ```
@@ -129,7 +152,16 @@ export class Scheduler {
    * new Scheduler({ redis, leaseMs: 10_000, heartbeatMs: 2_000 });
    * ```
    */
-  constructor(options: SchedulerOptions = {}) {
+  constructor(options: SchedulerOptions) {
+    // Also for callers without types, who can leave the options out altogether.
+    if (!options?.backend && options?.redis === undefined) {
+      throw new TypeError('A scheduler needs a backend: pass `backend`, or `redis` for Redis and Valkey. No store is assumed');
+    }
+    if (options.name !== undefined && (typeof options.name !== 'string' || options.name === '')) {
+      throw new TypeError('name must be a non-empty string');
+    }
+    this.name = options.name;
+    this.dataSource = options.data;
     this.instanceId = options.instanceId ?? `${hostname()}:${process.pid}`;
     if (typeof this.instanceId !== 'string' || this.instanceId === '') throw new TypeError('instanceId must be a non-empty string');
     const redisShortcuts =
@@ -161,6 +193,7 @@ export class Scheduler {
       unrefTimers: options.unrefTimers ?? false,
       isRunning: () => this.state === 'running',
       isIdle: () => this.state === 'idle',
+      schedulerData: () => this.dataSource,
       stopSignal: () => this.abort.signal,
       ensureReady: () => this.ensureReady(),
       prepare: (job) => this.prepare(job),
@@ -172,6 +205,148 @@ export class Scheduler {
     this.leases = this.backend.runs ? new LeaseRunner(core, this.executor, this.backend.runs) : undefined;
     this.timers = new JobTimers(core, (job, slot) => void this.track(this.fire(job, slot)));
     if (options.log) logRuns((event, listener) => this.on(event, listener), this.logger);
+    this.host = {
+      scheduler: this,
+      name: this.name,
+      add: (job, name, { timezone, ...defaults }) => {
+        // The object's data and the job's are two layers, not one replacing the other.
+        const data = layerData(defaults.data, job.options.data) as JobData | undefined;
+        const options = { ...defaults, ...job.options, ...(data === undefined ? {} : { data }) };
+        if (job.type === 'cron') {
+          this.cron(name, job.expression, job.handler, { ...(timezone === undefined ? {} : { timezone }), ...options });
+        } else if (job.type === 'every') {
+          this.every(name, job.interval, job.handler, options);
+        } else {
+          this.at(name, job.when, job.handler, options);
+        }
+      },
+      remove: (name) => this.remove(name),
+      has: (name) => this.registry.has(name),
+      // Not at once: a scheduler is created while an object's jobs are being added, and starting
+      // must see them added. The object is created synchronously, so the next microtask is after it.
+      startInBackground: () => queueMicrotask(() => void this.start().catch((error: unknown) => this.emit('error', { error }))),
+    };
+    schedulerCreated(this.host);
+  }
+
+  /**
+   * Stores the settings a scheduler is created from when a decorated job needs it. With this, a
+   * class with `@Cron`, `@Every` or `@At` is all the code a job takes: no scheduler is created by
+   * hand.
+   *
+   * Without a name, these are the settings of the default scheduler. With a name, of the scheduler
+   * that jobs choose with `{ scheduler: name }`. A named scheduler that has no settings of its own
+   * is created from the default ones: on Redis with its own key prefix (`<prefix><name>:`), and
+   * with any backend when `backend` is a function of the name.
+   *
+   * @param options The options of `new Scheduler()`, plus `autoStart`. One of `backend` and `redis`
+   *   must be given: no backend is assumed.
+   * @throws TypeError when no backend is given.
+   * @throws Error when that scheduler already exists, or when an object that was waiting for it
+   *   can't add its jobs.
+   *
+   * @example The least there is to write
+   * ```ts
+   * Scheduler.configure({ redis: process.env.REDIS_URL, autoStart: true });
+   *
+   * class Reports {
+   *   @Cron('weekday-digest', '0 8 * * 1-5')
+   *   async digest() {}
+   * }
+   * new Reports(); // the default scheduler is created, started, and has the job
+   * ```
+   *
+   * @example Several schedulers, started by you
+   * ```ts
+   * Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: `cron_${name}` }) });
+   * Scheduler.configure('billing', { redis: process.env.BILLING_REDIS_URL, leaseMs: 10_000 });
+   *
+   * class Jobs {
+   *   @Cron('job-1', '*\/10 * * * * *') // the default scheduler
+   *   one() {}
+   *   @Cron('job-2', '*\/10 * * * * *', { scheduler: 'billing' })
+   *   two() {}
+   *   @Every('job-3', '5s', { scheduler: 'reports' }) // created from the default settings, table cron_reports
+   *   three() {}
+   * }
+   * new Jobs();
+   * await Scheduler.startAll();
+   * ```
+   */
+  static configure(options: ConfigureOptions): void;
+  static configure(name: string, options: ConfigureOptions): void;
+  static configure(first: string | ConfigureOptions, second?: ConfigureOptions): void {
+    if (typeof first === 'string' || second !== undefined) configure(first as string, second as ConfigureOptions);
+    else configure(undefined, first);
+  }
+
+  /**
+   * The default scheduler, or the one with that name. It is created from the settings given to
+   * {@link Scheduler.configure} if it doesn't exist yet.
+   *
+   * @throws Error when it doesn't exist and has no settings.
+   *
+   * @example
+   * ```ts
+   * await Scheduler.get().start();
+   * console.table(Scheduler.get('billing').jobs());
+   * ```
+   */
+  static get(name?: string): Scheduler {
+    return getScheduler(name) as Scheduler;
+  }
+
+  /** The default scheduler and every scheduler that has a name. */
+  static all(): Scheduler[] {
+    return knownSchedulers() as Scheduler[];
+  }
+
+  /**
+   * Starts the default scheduler and every scheduler that has a name.
+   *
+   * @throws when one of them can't start; the others are started all the same.
+   */
+  static async startAll(): Promise<void> {
+    const results = await Promise.allSettled(Scheduler.all().map((scheduler) => scheduler.start()));
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed) throw failed.reason;
+  }
+
+  /** Stops the default scheduler and every scheduler that has a name. Same options as `stop()`. */
+  static async stopAll(options: { timeoutMs?: number } = {}): Promise<void> {
+    await Promise.all(Scheduler.all().map((scheduler) => scheduler.stop(options)));
+  }
+
+  /**
+   * Forgets the default scheduler, the names, the settings given to {@link Scheduler.configure} and
+   * the objects waiting for a scheduler. It stops nothing. Meant for tests, between cases.
+   */
+  static reset(): void {
+    resetSchedulers();
+  }
+
+  /**
+   * Chooses the scheduler that receives the jobs of decorated objects (`@Cron`, `@Every`, `@At`).
+   * Without this call it is the first scheduler created; when that one is stopped, the next one
+   * created or started takes its place.
+   *
+   * An object created while there is a default scheduler adds its jobs at once. One created earlier
+   * waits (the newest object of each class), and its jobs are added when the default scheduler
+   * starts, or here.
+   *
+   * @param scheduler `undefined` goes back to the initial state: the next scheduler created or started
+   *   becomes the default, and objects that were waiting are forgotten. Useful between tests.
+   * @throws when the jobs of a waiting object can't be added.
+   *
+   * @example Two schedulers, with the decorated jobs on the second
+   * ```ts
+   * const cache = new Scheduler({ redis: cacheUrl });
+   * const billing = new Scheduler({ backend: new PostgresBackend({ connection: pool }) });
+   * Scheduler.setDefault(billing);
+   * ```
+   */
+  static setDefault(scheduler: Scheduler | undefined): void {
+    setDefaultScheduler(scheduler ? hostOf(scheduler) : undefined);
   }
 
   // ---------------------------------------------------------------- jobs
@@ -193,7 +368,7 @@ export class Scheduler {
    * scheduler.cron('report', '0 0 1 * *', buildReport, { timeoutMs: 30 * 60_000 }); // monthly, at most 30 min
    * ```
    */
-  cron(name: string, expression: string, handler: JobHandler, options: CronJobOptions = {}): this {
+  cron<Data = unknown>(name: string, expression: string, handler: JobHandler<Data>, options: CronJobOptions = {}): this {
     let schedule: Schedule;
     try {
       schedule = cronSchedule(expression, options.timezone ?? this.defaults.timezone);
@@ -231,7 +406,7 @@ export class Scheduler {
    * }, { timeoutMs: 4 * 60_000 });
    * ```
    */
-  every(name: string, interval: number | string, handler: JobHandler, options: EveryJobOptions = {}): this {
+  every<Data = unknown>(name: string, interval: number | string, handler: JobHandler<Data>, options: EveryJobOptions = {}): this {
     const ms = parseDuration(interval);
     if (ms < 1_000) throw new RangeError(`Job "${name}": the interval must be at least 1s (got ${ms} ms)`);
     return this.add(name, everySchedule(ms, options.offsetMs ?? 0), handler, options);
@@ -249,10 +424,64 @@ export class Scheduler {
    * scheduler.at('reminder', new Date(Date.now() + 60 * 60_000), remind); // in one hour
    * ```
    */
-  at(name: string, when: Date | number | string, handler: JobHandler, options: JobOptions = {}): this {
+  at<Data = unknown>(name: string, when: Date | number | string, handler: JobHandler<Data>, options: JobOptions = {}): this {
     const time = when instanceof Date ? when.getTime() : typeof when === 'number' ? when : Date.parse(when);
     if (!Number.isFinite(time)) throw new RangeError(`Job "${name}": invalid date ${String(when)}`);
     return this.add(name, onceSchedule(time), handler, options);
+  }
+
+  /**
+   * Adds the jobs declared with `@Cron`, `@Every` and `@At` on an object's class to this scheduler.
+   * Each job calls its method on that object, so the method can use the object's fields. A job is
+   * named `Class-method` unless the decorator gives a name. Nothing is added when one of the jobs is
+   * invalid.
+   *
+   * A decorated object adds its jobs to their schedulers when it is created, so you call this only
+   * to decide something for one object: a prefix for its job names, job options for all its jobs, or
+   * this scheduler for all of them. It is also how an object is added with legacy decorators on a
+   * class without `@Scheduled()`.
+   *
+   * Every job of the object goes on this scheduler, whatever scheduler a decorator names, and is
+   * taken off the scheduler that had it. Registering the object again with options replaces its
+   * jobs, and without options changes nothing.
+   *
+   * @param options `prefix` goes in front of every job name, so that several objects of one class
+   *   can each have their own jobs. `defaults` are job options for every job of the object; an
+   *   option set in a decorator wins.
+   * @throws TypeError when the object's class has no decorated methods.
+   * @throws Error when a job is invalid or its name is already registered; the object's jobs are
+   *   then left as they were.
+   *
+   * @example
+   * ```ts
+   * class Reports {
+   *   constructor(private readonly mailer: Mailer) {}
+   *
+   *   @Cron('0 8 * * 1-5', { timezone: 'Europe/Athens' })
+   *   async digest(ctx: JobContext) {
+   *     await this.mailer.send(await buildDigest(ctx.scheduledAt));
+   *   }
+   *
+   *   @Every('sync-customers', '10s', { timeoutMs: 8_000 })
+   *   async sync() {}
+   * }
+   *
+   * billing.register(new Reports(mailer)); // adds 'Reports-digest' and 'sync-customers' to `billing`
+   * ```
+   *
+   * @example One object per tenant, each with its own jobs and time zone
+   * ```ts
+   * for (const tenant of tenants) {
+   *   scheduler.register(new Reports(tenant.mailer), {
+   *     prefix: `${tenant.id}:`, // 'acme:Reports-digest', 'acme:sync-customers'
+   *     defaults: { timezone: tenant.timezone, timeoutMs: 60_000 },
+   *   });
+   * }
+   * ```
+   */
+  register(target: object, options: RegisterOptions = {}): this {
+    registerOn(this.host, target, options);
+    return this;
   }
 
   /**
@@ -288,6 +517,8 @@ export class Scheduler {
    * every instance was down.
    *
    * @throws when the backend can't be reached or is too old; the scheduler stays stopped.
+   * @throws when this is the default scheduler and a decorated object that was waiting for one can't
+   *   add its jobs; the scheduler stays stopped.
    *
    * @example
    * ```ts
@@ -301,6 +532,7 @@ export class Scheduler {
    */
   async start(): Promise<void> {
     if (this.state === 'running') return;
+    for (const warning of schedulerStarting(this.host)) this.logger.warn(`[anarchon] ${warning}`);
     if (this.state !== 'idle') throw new Error(`Cannot start while ${this.state}`);
     this.state = 'starting';
     try {
@@ -334,6 +566,7 @@ export class Scheduler {
    * ```
    */
   stop(options: { timeoutMs?: number } = {}): Promise<void> {
+    schedulerStopped(this.host);
     this.stopping ??= this.doStop(options.timeoutMs ?? 30_000).finally(() => {
       this.stopping = undefined;
     });
@@ -355,11 +588,28 @@ export class Scheduler {
    * });
    * ```
    */
-  async runNow(name: string): Promise<RunRecord> {
+  async runNow(name: string, options: { data?: JobData } = {}): Promise<RunRecord> {
     const job = this.getJob(name);
     if (this.state !== 'running') throw new Error('Call start() before runNow()');
     await this.prepare(job);
-    return this.leases ? this.leases.runManual(job) : this.claimOnly.runManual(job);
+    return this.leases ? this.leases.runManual(job, options.data) : this.claimOnly.runManual(job, options.data);
+  }
+
+  /**
+   * Replaces the scheduler's `data`: what is handed to every handler as `ctx.data`, under
+   * each job's own. Runs that start after the call get the new one; runs in progress keep theirs.
+   *
+   * @param data A value, or a function called when a run starts. `undefined` removes it.
+   *
+   * @example
+   * ```ts
+   * scheduler.setData({ tenant: 'acme', features: await loadFeatures() });
+   * events.on('features-changed', (features) => scheduler.setData({ tenant: 'acme', features }));
+   * ```
+   */
+  setData(data: JobData | undefined): this {
+    this.dataSource = data;
+    return this;
   }
 
   // ---------------------------------------------------------------- read API
@@ -475,7 +725,7 @@ export class Scheduler {
 
   // ---------------------------------------------------------------- scheduling
 
-  private add(name: string, schedule: Schedule, handler: JobHandler, options: JobOptions): this {
+  private add(name: string, schedule: Schedule, handler: JobHandler<never>, options: JobOptions): this {
     if (this.registry.has(name)) throw new Error(`Job "${name}" is already registered`);
     const job = createJob(name, schedule, handler, options, this.defaults, this.backend);
     this.registry.set(name, job);
@@ -585,3 +835,5 @@ export class Scheduler {
     return slot === null ? null : new Date(slot);
   }
 }
+
+setSchedulerFactory((options) => new Scheduler(options));

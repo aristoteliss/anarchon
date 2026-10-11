@@ -163,5 +163,6 @@ scheduler.every('sync', '30s', syncCustomers); // το ίδιο όνομα με 
 
 ## Επόμενα βήματα
 
+- [Decorators](../decorators/): δηλώστε τις ίδιες εργασίες στις μεθόδους μιας κλάσης
 - [Επιλογές εργασιών](../job-options/): timeouts, αλληλεπικάλυψη (overlap), επαναλήψεις και πολλά άλλα
 - [Συγγραφή handlers](../writing-handlers/): η συνάρτηση που εκτελεί μια εργασία

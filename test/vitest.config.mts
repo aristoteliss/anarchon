@@ -1,8 +1,12 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
+import { resolve } from 'node:path';
+
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // The repository, whatever folder vitest is started from: the paths below are relative to it.
+  root: resolve(import.meta.dirname, '..'),
   test: {
     include: ['test/**/*.test.ts'],
     // The files share the same servers and measure timing, so they run one at a time.

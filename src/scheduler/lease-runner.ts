@@ -119,7 +119,7 @@ export class LeaseRunner {
   }
 
   /** runNow(): a run of its own, never retried by a backup and allowed to overlap. */
-  async runManual(job: Job): Promise<RunRecord> {
+  async runManual(job: Job, data?: unknown): Promise<RunRecord> {
     const { core } = this;
     const token = randomUUID();
     for (let slot = Date.now(), tries = 0; tries < 10; slot++, tries++) {
@@ -133,7 +133,7 @@ export class LeaseRunner {
         maxAttempts: 1,
         keepMs: job.keepMs,
       });
-      if (outcome.kind === 'won') return core.track(this.executeLeased(job, slot, token, 1, 'manual'));
+      if (outcome.kind === 'won') return core.track(this.executeLeased(job, slot, token, 1, 'manual', data));
     }
     throw new Error(`Could not start a manual run of "${job.name}"`);
   }
@@ -178,9 +178,17 @@ export class LeaseRunner {
   }
 
   /** Runs a job this instance claimed, renewing its lease until it ends. */
-  private async executeLeased(job: Job, slot: number, token: string, attempt: number, reason: RunReason): Promise<RunRecord> {
+  private async executeLeased(
+    job: Job,
+    slot: number,
+    token: string,
+    attempt: number,
+    reason: RunReason,
+    data?: unknown,
+  ): Promise<RunRecord> {
     const { core, runs } = this;
     const run = this.executor.newRun(attempt, reason);
+    run.data = data;
     const key = runKey(job, slot);
     let lost = false;
     const markLost = () => {

@@ -1,12 +1,12 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-// Reads test-run.log, written by `pnpm test:all:full`.
+// Reads test/test-run.log, written by `pnpm test:all:full`.
 //   node scripts/test-log.mjs review   summary and verdict
 //   node scripts/test-log.mjs fails    failures and their stack traces only
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { stripVTControlCharacters } from 'node:util';
 
-const LOG = 'test-run.log';
+const LOG = 'test/test-run.log';
 const RULE = '='.repeat(80);
 const green = (text) => `\x1b[32m${text}\x1b[0m`;
 const red = (text) => `\x1b[31m${text}\x1b[0m`;

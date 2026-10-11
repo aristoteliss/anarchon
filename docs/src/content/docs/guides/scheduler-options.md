@@ -3,7 +3,7 @@ title: Scheduler options
 description: Every option of new Scheduler(), with examples.
 ---
 
-`new Scheduler(options)` takes one object. Everything in it is optional: `new Scheduler()` connects to Redis on `localhost:6379`.
+`new Scheduler(options)` takes one object. One thing in it is required: where runs are stored, given as `redis` or as `backend`. No store is assumed, so `new Scheduler()` throws. Everything else is optional.
 
 Give every instance of a service the same options, apart from `instanceId`.
 
@@ -16,7 +16,7 @@ You choose a store in one of two ways, never both.
 For Redis and Valkey you can pass the connection directly:
 
 ```ts
-new Scheduler();                                              // redis://localhost:6379
+new Scheduler({ redis: 'redis://localhost:6379' });
 new Scheduler({ redis: 'redis://cache.internal:6379' });
 new Scheduler({ redis: 'rediss://user:secret@host:6380/2' }); // TLS, user, password, database 2
 new Scheduler({ redis: { host: 'localhost', port: 6390 } });  // Valkey works the same
@@ -25,7 +25,7 @@ new Scheduler({ redis: existingIoredisClient });              // your client; st
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `redis` | `localhost:6379` | A URL, `{ host, port, password, db }`, or a client you already have (ioredis, iovalkey, node-redis, Valkey GLIDE, or any object with `send(command, args)`) |
+| `redis` | none | Required unless `backend` is given. A URL, `{ host, port, password, db }`, or a client you already have (ioredis, iovalkey, node-redis, Valkey GLIDE, or any object with `send(command, args)`) |
 | `strategy` | `'lease'` | How one winner is picked. See [Redis and Valkey](../../backends/redis/) |
 | `prefix` | `'cron:'` | Prefix of every key |
 | `idmp` | | Settings for the `'idmp'` strategy |
@@ -77,6 +77,13 @@ new Scheduler({
 :::tip
 Always set `timezone` if you use `cron()`. The default is the server's local zone, which can differ between your laptop, your CI and production.
 :::
+
+## Name and data
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `name` | none | A name for the scheduler, unique in the process. Jobs declared with decorators choose a scheduler by it: see [Decorators](../decorators/#choosing-a-scheduler-for-a-job) |
+| `data` | none | Data for the runs of every job, read in the handler as `ctx.data`: a value, or a function called when a run starts. See [Run data](../run-data/) |
 
 ## Lease timing
 

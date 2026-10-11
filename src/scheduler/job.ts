@@ -20,6 +20,8 @@ export interface Job {
   readonly schedule: Schedule;
   /** The user's function. Called by the Executor on the instance that wins a run. */
   readonly handler: JobHandler;
+  /** The job's `data` option: a value, or a function to call when a run starts. */
+  readonly data: unknown;
   /** This instance waits a random 0..jitterMs after a slot before claiming it. Always under half the time between runs. */
   readonly jitterMs: number;
   /** A run reached later than this after its slot is skipped as 'late'. Always bigger than jitterMs. */
@@ -68,7 +70,7 @@ export interface JobDefaults {
 export function createJob(
   name: string,
   schedule: Schedule,
-  handler: JobHandler,
+  handler: JobHandler<never>,
   options: JobOptions,
   defaults: JobDefaults,
   backend: Backend,
@@ -107,7 +109,8 @@ export function createJob(
   return {
     name,
     schedule,
-    handler,
+    handler: handler as JobHandler,
+    data: options.data,
     jitterMs,
     maxLateMs,
     historySize,

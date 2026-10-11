@@ -8,7 +8,7 @@ Redis is the default backend. It works with Redis 5 or newer and with Valkey.
 ```ts
 import { Scheduler } from 'anarchon';
 
-new Scheduler();                                           // redis://localhost:6379
+new Scheduler({ redis: 'redis://localhost:6379' });
 new Scheduler({ redis: 'redis://cache.internal:6379' });
 new Scheduler({ redis: { host: 'localhost', port: 6390 } }); // Valkey
 ```
@@ -41,7 +41,7 @@ Pass them on the scheduler, or create the backend yourself for the ones without 
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `redis` | `localhost:6379` | Connection or client |
+| `redis` | none | Connection or client. Required, unless you create the backend yourself |
 | `strategy` | `'lease'` | How one winner is picked (below) |
 | `prefix` | `'cron:'` | Prefix of every key |
 | `idmp` | `{ durationSec: 300, maxSize: 1000 }` | `'idmp'` strategy only |

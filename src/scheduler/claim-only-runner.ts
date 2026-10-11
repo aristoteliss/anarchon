@@ -40,10 +40,10 @@ export class ClaimOnlyRunner {
   }
 
   /** runNow(): recorded in history, not deduplicated. */
-  async runManual(job: Job): Promise<RunRecord> {
+  async runManual(job: Job, data?: unknown): Promise<RunRecord> {
     const { core } = this;
     const requested = Date.now();
     const slot = (await core.backend.recordManualRun(claimInput(core.instanceId, job, requested))) ?? requested;
-    return core.track(this.executor.execute(job, slot, this.executor.newRun(1, 'manual')));
+    return core.track(this.executor.execute(job, slot, { ...this.executor.newRun(1, 'manual'), data }));
   }
 }
