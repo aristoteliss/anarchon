@@ -1,6 +1,12 @@
 # anarchon
 
-Leaderless cron for Node.js clusters. Run the same jobs in every instance of your service, and each scheduled run happens **once**, on one instance picked at random. There is no leader to elect and no lock to hold: one atomic call to Redis, Valkey, PostgreSQL or SQLite decides who runs each time.
+[**Documentation**](https://aristoteliss.github.io/anarchon/) · [Quick start](https://aristoteliss.github.io/anarchon/getting-started/quick-start/) · [Guarantees and limits](https://aristoteliss.github.io/anarchon/reference/guarantees/) · [Examples](#examples) · [License](#license-and-commercial-use)
+
+Leaderless scheduling for Node.js clusters. Run the same jobs in every instance; an atomic claim in Redis, Valkey, PostgreSQL or SQLite selects one runner for each scheduled slot. The default `lease` strategy retries after a runner stops renewing its lease. That gives at-least-once execution after failures, not exactly-once side effects: handlers should be idempotent, and a frozen runner can briefly overlap its replacement.
+
+<p align="center">
+  <img src="./assets/quick-start.gif" alt="anarchon quick-start: 3 instances, zero leader, instant failover" width="900" />
+</p>
 
 anarchon also handles what goes wrong in real clusters:
 - jobs that run longer than their interval
@@ -22,6 +28,17 @@ await scheduler.start();
 ```
 
 Put the same code in every instance.
+
+## Try it with three instances
+
+For a no-server demo, follow the [five-minute SQLite quick start](https://aristoteliss.github.io/anarchon/getting-started/quick-start/). It runs three processes against one shared SQLite file on the same machine. To try the Redis-backed `examples/basic.ts` demo instead, start Redis, open three terminals in the repository, and run this command in each:
+
+```sh
+pnpm install
+npx tsx examples/basic.ts
+```
+
+Each process connects to `redis://localhost:6379` by default. Watch `sync` run on one instance per slot; then stop the instance running `report` with Ctrl+C to see a graceful handover. The [examples](#examples) section lists PostgreSQL and SQLite variants too.
 
 ## Install
 
@@ -237,7 +254,7 @@ Notes:
 
 ## Documentation
 
-The full documentation is a site in [`docs/`](docs/): guides for every option and method, the claim
+**Read the [hosted documentation](https://aristoteliss.github.io/anarchon/)** for guides to every option and method, the claim
 and lease algorithms step by step with diagrams, one page per backend, and recipes (Express, NestJS,
 Kubernetes, long-running jobs).
 
@@ -308,18 +325,7 @@ The claim-by-unique-record design comes from Meteor's SyncedCron, as do one-off 
 
 This software is **Dual-Licensed**.
 
-By default, this project is licensed under the **GNU AGPLv3** (see the `LICENSE` file). You can use, modify, and distribute it freely, provided your entire application is also open-sourced under the AGPLv3.
+The project offers the **GNU AGPLv3** (see [`LICENSE`](LICENSE)) and a separate commercial license (see [`COMMERCIAL_LICENSE.txt`](COMMERCIAL_LICENSE.txt)). The AGPLv3 is a copyleft license; review its terms to determine how they apply to your use. The commercial license allows commercial integration without AGPL copyleft obligations and sets an annual fee based on the licensee's gross global revenue. Review the full terms and fee schedule in the linked files before adopting either option.
 
-**Commercial License (No AGPL Restrictions)**
-
-If you are using this software commercially and cannot (or do not want to) open-source your application under the AGPLv3, you must use the **Commercial License** (see `COMMERCIAL_LICENSE.txt`).
-
-Revenue-based pricing:
-
-| Annual Gross Revenue | Fee |
-|---|---|
-| Under $500,000 | **Free** |
-| $500,001 — $10,000,000 | 0.1% of gross revenue |
-| $10,000,001 — $50,000,000 | 0.05% of gross revenue |
-| Over $50,000,000 | 0.01% of gross revenue (capped at $50,000/year) |
+For a concise comparison, see the [commercial license terms](COMMERCIAL_LICENSE.txt), including eligibility, annual revenue bands, and fees.
 
