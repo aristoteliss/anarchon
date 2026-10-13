@@ -29,8 +29,8 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
     ```sh
     pnpm add anarchon
     ```
-    Δεν χρειάζεται τίποτα άλλο στο Node 22.5 ή νεότερο, το οποίο περιλαμβάνει ενσωματωμένο το `node:sqlite`. Σε παλαιότερες
-    εκδόσεις του Node προσθέστε το `better-sqlite3`. Για έναν libSQL server ή Turso προσθέστε το `@libsql/client`.
+    Δεν χρειάζεται τίποτα άλλο στο Node 22.13 ή νεότερο, το οποίο περιλαμβάνει ενσωματωμένο το `node:sqlite`. Το Node 22.5 έως 22.12 χρειάζεται το flag `--experimental-sqlite`. Στο Node 20 προσθέστε το `better-sqlite3@12`: η έκδοση 13 απαιτεί Node 22.
+    Για έναν libSQL server ή Turso προσθέστε το `@libsql/client`.
     SQLite 3.35 ή νεότερο.
   </TabItem>
   <TabItem label="RabbitMQ">
@@ -78,7 +78,7 @@ const { Scheduler } = require('anarchon');
 
 ## Έλεγχος ότι λειτουργεί
 
-Αποθηκεύστε αυτό ως `check.mjs` και εκτελέστε `node check.mjs`. Χρησιμοποιεί ένα αρχείο SQLite, επομένως δεν χρειάζεται server (Node 22.5 ή νεότερο).
+Αποθηκεύστε αυτό ως `check.mjs` και εκτελέστε `node check.mjs`. Χρησιμοποιεί ένα αρχείο SQLite, επομένως δεν χρειάζεται server (Node 22.13 ή νεότερο).
 
 ```js
 import { Scheduler, SqliteBackend } from 'anarchon';

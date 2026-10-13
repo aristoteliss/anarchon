@@ -31,7 +31,7 @@ const scheduler = new Scheduler({
 
 | Τι περνάτε | Driver | Σημειώσεις |
 | --- | --- | --- |
-| Μια διαδρομή αρχείου | `node:sqlite` (ενσωματωμένο στο Node 22.5+), ή `better-sqlite3` αν αυτό απουσιάζει | Το anarchon το ανοίγει και το κλείνει |
+| Μια διαδρομή αρχείου | `node:sqlite` (ενσωματωμένο στο Node 22.13+· 22.5 έως 22.12 με `--experimental-sqlite`), ή `better-sqlite3` αν αυτό απουσιάζει | Το anarchon το ανοίγει και το κλείνει |
 | Ένα `DatabaseSync` | `node:sqlite` | Δικό σας· δεν κλείνει στο `stop()` |
 | Ένα `Database` | `better-sqlite3` | Δικό σας· δεν κλείνει στο `stop()` |
 | Έναν client από το `createClient()` | `@libsql/client` | Τοπικό αρχείο ή απομακρυσμένος server |

@@ -3,18 +3,24 @@ title: Quick start
 description: A scheduler running as three instances in five minutes, with no server to install.
 ---
 
-In this guide you write a small scheduler, run it as three instances, and watch each run happen once. Then you kill one instance mid-run and watch another finish its job.
+In this guide you write a small scheduler, run it as three instances, and watch one instance win each run. Then you stop and kill the instance that is running a job, and watch another start that run again.
 
-It uses a SQLite file as the shared store, so there is nothing to install besides Node 22.5 or newer. Switching to Redis or PostgreSQL later is a one-line change.
+It uses a SQLite file as the shared store, so there is nothing to install besides Node 22.13 or newer, which has SQLite built in. The three instances coordinate because they open the same file on the same machine. For instances on several machines, [switch to Redis or PostgreSQL](#switch-to-a-real-store).
 
 ## 1. Create the project
 
 ```sh
 mkdir cron-demo && cd cron-demo
-pnpm init
-pnpm add anarchon
-pnpm add -D tsx
+npm init -y
+npm install anarchon
+npm install --save-dev tsx
 ```
+
+npm comes with Node. With pnpm or yarn, use `pnpm add` or `yarn add` instead of `npm install`.
+
+:::note[Older Node versions]
+On Node 22.5 to 22.12, start each instance with `NODE_OPTIONS=--experimental-sqlite npx tsx app.ts`. For Node 20, see the SQLite tab of [Installation](../installation/).
+:::
 
 ## 2. Write the scheduler
 
@@ -63,13 +69,13 @@ main();
 
 ## 3. Run three instances
 
-Open three terminals in the project folder and run the same command in each:
+Open three terminals **in the project folder** and run the same command in each. The folder matters: `./jobs.db` is a relative path, and the instances only see each other when they open the same file.
 
 ```sh
 npx tsx app.ts
 ```
 
-Each terminal prints its own name, something like `started as my-laptop:41822`.
+Each terminal prints its own name, something like `started as my-laptop:41822`. The number after the colon is the process ID; you need it in step 5. Node also prints `ExperimentalWarning: SQLite is an experimental feature`, which is expected.
 
 Watch the output. Every 10 seconds, exactly **one** terminal prints that it started `sync`, and the other two print that they skipped it:
 
@@ -98,11 +104,17 @@ Within a second or two, another terminal prints:
 [anarchon] report @ 2026-10-10T12:00:30.000Z: started on my-laptop:41907 (attempt 2, takeover)
 ```
 
-The stopped instance *handed the run over*. This is what happens on every rolling deploy.
+The stopped terminal prints that it gave the run up:
+
+```
+[anarchon] report @ 2026-10-10T12:00:30.000Z: interrupted after 5005 ms, handed over to another instance
+```
+
+The stopped instance *handed the run over*. This is what happens on every rolling deploy. Both lines name the same run (`12:00:30`), and the second one is attempt 2: the job starts again from the beginning on the new instance; it doesn't continue where the first one stopped.
 
 ## 5. Crash the runner
 
-Start the stopped instance again. Wait for `report` to start somewhere, then kill that process hard, from a fourth terminal:
+Start the stopped instance again. Wait for `report` to start somewhere, then kill that process hard, from a fourth terminal. On Linux and macOS:
 
 ```sh
 kill -9 <pid>   # the number after the colon in the instance name
@@ -113,6 +125,10 @@ This time nothing is handed over: the process is simply gone. About 6 seconds la
 ```
 [anarchon] report @ 2026-10-10T12:01:00.000Z: started on my-laptop:41822 (attempt 2, takeover)
 ```
+
+Check that the takeover line has the same time as the run you killed and says `attempt 2`. A line with a later time and `attempt 1` is the next scheduled run, not a takeover. The delay is the lease: with the default `leaseMs` of 30 seconds, a takeover comes about 30 seconds after a crash.
+
+The job ran twice for that slot, once in part and once in full. That is why [handlers must be safe to run twice](../../guides/writing-handlers/#make-jobs-safe-to-run-twice).
 
 ## What just happened
 
@@ -140,7 +156,14 @@ sequenceDiagram
 
 ## Switch to a real store
 
-Change one line. Everything else stays the same.
+Install the driver for your store, and have the server running at the URL you pass:
+
+```sh
+npm install redis   # Redis or Valkey
+npm install pg      # PostgreSQL
+```
+
+Then change one line. Everything else stays the same.
 
 ```ts
 // Redis or Valkey

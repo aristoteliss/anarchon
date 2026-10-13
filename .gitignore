@@ -22,3 +22,16 @@ test/test-run.log
 *.tsbuildinfo
 .DS_Store
 .idea/
+
+# agent workspace: instructions, local settings and state stay out, the codebase map and task files are tracked
+AGENTS.md
+CLAUDE.md
+scripts/update-claude-snapshot.py
+scripts/validate-claude-context.py
+.claude/*
+!.claude/codebase-map.md
+!.claude/tasks/
+__pycache__/
+
+# launch drafts and outreach notes: private until the owner publishes them
+marketing/

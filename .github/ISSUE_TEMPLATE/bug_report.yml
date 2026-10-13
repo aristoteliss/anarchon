@@ -1,0 +1,84 @@
+name: Bug report
+description: anarchon behaves differently from its documentation
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove passwords, tokens and connection strings from everything you paste, including logs.
+        For a question about usage, read the [FAQ](https://aristoteliss.github.io/anarchon/reference/faq/) first.
+  - type: input
+    id: version
+    attributes:
+      label: anarchon version
+      placeholder: 0.3.1
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      description: The output of `node --version`
+      placeholder: v24.13.0
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      options:
+        - Redis
+        - Valkey
+        - PostgreSQL
+        - SQLite (node:sqlite)
+        - SQLite (better-sqlite3)
+        - libSQL server or Turso
+        - RabbitMQ
+        - NATS
+        - A backend of my own
+    validations:
+      required: true
+  - type: input
+    id: store
+    attributes:
+      label: Store and driver versions
+      description: The server's version, and the driver package with its version
+      placeholder: Redis 8.6, ioredis 6.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration
+      description: The scheduler options (strategy, leaseMs, heartbeatMs) and the job (schedule and options), without credentials. Say how many instances run.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: 'What happened instead. Logs with `log: true` help, and so does `scheduler.history(name)` for the run.'
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: The smallest script that shows the problem, and the steps to run it (for example which process to stop, and when).
+      render: ts
+    validations:
+      required: true
+  - type: checkboxes
+    id: redacted
+    attributes:
+      label: Credentials
+      options:
+        - label: I removed passwords, tokens and connection strings from this report.
+          required: true

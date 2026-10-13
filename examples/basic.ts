@@ -46,7 +46,7 @@ async function main() {
     .every('cleanup', '35m', () => sleep(1_000))
     .every('backup', '1h30m', () => sleep(1_000))
     .cron('digest', '0 */2 * * *', () => sleep(500)) // 00:00, 02:00, 04:00 ... Athens time
-    .at('welcome', new Date(Date.now() + 15_000), () => console.log('runs once, on one instance'))
+    .at('welcome', new Date(Date.now() + 15_000), () => console.log('a one-off job, on one instance'))
     .every('flaky', '10s', () => {
       if (Math.random() < 0.3) throw new Error('random failure');
     });

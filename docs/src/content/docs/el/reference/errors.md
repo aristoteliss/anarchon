@@ -74,7 +74,7 @@ description: Τα σφάλματα που ρίχνει το anarchon, τι ση�
 | `The Postgres backend needs PostgreSQL 9.5 or newer` | Παλιό PostgreSQL | Αναβαθμίστε |
 | `The Postgres backend needs "pg"...` | Ο driver δεν είναι εγκατεστημένος | `pnpm add pg`, ή περάστε τον δικό σας client |
 | `The SQLite backend needs SQLite 3.35 or newer for RETURNING` | Παλιά βιβλιοθήκη SQLite | Χρησιμοποιήστε νεότερο Node ή το `better-sqlite3` |
-| `Could not open "path": this Node has no node:sqlite (Node 22.5+) and "better-sqlite3" isn't installed` | Δεν υπάρχει διαθέσιμος driver SQLite | Χρησιμοποιήστε Node 22.5+, ή `pnpm add better-sqlite3` |
+| `Could not open "path": this Node has no node:sqlite (Node 22.5+) and "better-sqlite3" isn't installed` | Δεν υπάρχει διαθέσιμος driver SQLite | Χρησιμοποιήστε Node 22.13+ (22.5 έως 22.12 με `--experimental-sqlite`), ή `pnpm add better-sqlite3` |
 | `database is locked` | Άλλη διεργασία διακράτησε το αρχείο SQLite για περισσότερο από το `busyTimeoutMs` | Αυξήστε το `busyTimeoutMs`· ελέγξτε για κάποιον writer μακράς διάρκειας |
 | `The RabbitMQ backend needs RabbitMQ 3.9 or newer for stream queues` | Παλιό RabbitMQ | Αναβαθμίστε |
 | `The RabbitMQ backend needs "amqplib"...` | Ο driver δεν είναι εγκατεστημένος | `pnpm add amqplib` |

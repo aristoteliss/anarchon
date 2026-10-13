@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
+  <title>anarchon: leaderless cron and interval scheduling for Node.js</title>
+  <rect width="1200" height="630" fill="#17181c"/>
+
+  <g transform="translate(80 96)">
+    <rect width="88" height="88" rx="20" fill="#23252d"/>
+    <circle cx="44" cy="26" r="12" fill="#8aa4ff"/>
+    <circle cx="22" cy="62" r="10" fill="none" stroke="#8aa4ff" stroke-width="5"/>
+    <circle cx="66" cy="62" r="10" fill="none" stroke="#8aa4ff" stroke-width="5"/>
+  </g>
+  <text x="196" y="166" font-size="84" font-weight="700" fill="#ffffff">anarchon</text>
+
+  <text x="80" y="300" font-size="44" fill="#e6e8ee">Leaderless cron and interval scheduling</text>
+  <text x="80" y="358" font-size="44" fill="#e6e8ee">for Node.js</text>
+
+  <g font-size="26" text-anchor="middle">
+    <g transform="translate(80 440)">
+      <rect width="200" height="96" rx="14" fill="none" stroke="#5b6072" stroke-width="3"/>
+      <text x="100" y="58" fill="#9aa0b4">instance A</text>
+    </g>
+    <g transform="translate(310 440)">
+      <rect width="200" height="96" rx="14" fill="#8aa4ff"/>
+      <text x="100" y="58" fill="#17181c" font-weight="700">instance B</text>
+    </g>
+    <g transform="translate(540 440)">
+      <rect width="200" height="96" rx="14" fill="none" stroke="#5b6072" stroke-width="3"/>
+      <text x="100" y="58" fill="#9aa0b4">instance C</text>
+    </g>
+
+    <g stroke="#5b6072" stroke-width="3" fill="none">
+      <path d="M740 488 H870"/>
+      <path d="M858 478 L872 488 L858 498"/>
+    </g>
+    <text x="805" y="470" font-size="22" fill="#9aa0b4">claim</text>
+
+    <g transform="translate(890 418)">
+      <path d="M0 24 V116 C0 132 50 142 115 142 C180 142 230 132 230 116 V24" fill="#23252d" stroke="#8aa4ff" stroke-width="3"/>
+      <ellipse cx="115" cy="24" rx="115" ry="24" fill="#23252d" stroke="#8aa4ff" stroke-width="3"/>
+      <text x="115" y="92" fill="#e6e8ee">your datastore</text>
+    </g>
+  </g>
+</svg>

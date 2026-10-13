@@ -1,12 +1,12 @@
 ---
 title: anarchon
-description: Leaderless cron for Node.js clusters. Every job runs once per scheduled time across all instances.
+description: Leaderless cron and interval scheduling for Node.js services, coordinated through your existing datastore.
 template: splash
 hero:
-  tagline: Leaderless cron for Node.js clusters. Put the same jobs in every instance of your service, and each scheduled run happens once, on one instance.
+  tagline: Leaderless cron and interval scheduling for Node.js services. Define the same jobs in every instance; an atomic claim in the store they share selects one runner for each run.
   actions:
-    - text: Get started
-      link: getting-started/introduction/
+    - text: Quick start
+      link: getting-started/quick-start/
       icon: right-arrow
     - text: How it works
       link: internals/architecture/
@@ -32,7 +32,7 @@ scheduler
 await scheduler.start();
 ```
 
-Run that code in three instances, and "sync" still runs once every 10 seconds, not three times.
+Run that code in three instances, and one instance runs "sync" every 10 seconds, not all three.
 
 ```mermaid
 flowchart LR
@@ -51,22 +51,26 @@ flowchart LR
 ```
 
 <CardGrid>
-  <Card title="No leader, no lock" icon="random">
-    Nothing is elected and nothing is held. One atomic call to the store decides who runs each time,
-    and a random delay spreads the work across instances.
+  <Card title="No leader election" icon="random">
+    Nothing is elected. One atomic call to the store decides who runs each time, and a random delay
+    spreads the work across instances.
   </Card>
-  <Card title="Survives crashes" icon="warning">
-    The winner renews a lease while the job runs. If it dies or freezes, another instance takes the
-    run over and finishes it.
+  <Card title="Recovery after a runner fails" icon="warning">
+    On Redis, Valkey, PostgreSQL and SQLite the winner renews a lease while the job runs. If it dies
+    or freezes, another instance starts the run again as a new attempt, so handlers must tolerate
+    retries. RabbitMQ and NATS only select the winner.
   </Card>
-  <Card title="No overlapping runs" icon="seti:clock">
-    A job that takes longer than its interval doesn't pile up: the next run is skipped until the
-    current one ends.
+  <Card title="Long jobs don't pile up" icon="seti:clock">
+    On lease backends, the next run of a job is skipped while the current one holds a live lease. A
+    frozen runner can briefly overlap the instance that replaced it.
   </Card>
-  <Card title="Catches up after downtime" icon="rocket">
-    A run that was due while every instance was down runs when the first one comes back.
+  <Card title="Catch-up after downtime" icon="rocket">
+    On lease backends, the latest run that was due while every instance was down runs when the first
+    one comes back, if it was due within `catchUpMs` (5 minutes by default). Older runs are not replayed.
   </Card>
 </CardGrid>
+
+anarchon does not guarantee exactly-once side effects. [Guarantees and limits](reference/guarantees/) states what is promised on each backend.
 
 ## Where to go next
 

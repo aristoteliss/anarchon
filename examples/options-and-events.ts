@@ -53,7 +53,7 @@ async function main() {
       { maxLateMs: 3_000, maxAttempts: 2 },
     )
     .cron('digest', '*/10 * * * * *', () => sleep(100), { timezone: 'Europe/Athens' })
-    .at('welcome', new Date(Date.now() + 3_000), () => say('welcome: runs once, on one instance'))
+    .at('welcome', new Date(Date.now() + 3_000), () => say('welcome: a one-off job, on one instance'))
     .every('manual', '1h', () => sleep(300), { catchUpMs: 0 });
 
   const counts: Record<string, number> = {};

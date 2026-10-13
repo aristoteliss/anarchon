@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>anarchon</title>
+  <rect width="64" height="64" rx="14" fill="#17181c"/>
+  <circle cx="32" cy="19" r="9" fill="#8aa4ff"/>
+  <circle cx="16" cy="45" r="7.5" fill="none" stroke="#8aa4ff" stroke-width="4"/>
+  <circle cx="48" cy="45" r="7.5" fill="none" stroke="#8aa4ff" stroke-width="4"/>
+</svg>

@@ -9,7 +9,7 @@ This section explains how anarchon works inside. You don't need it to use the li
 
 Every instance computes the same run times from the same schedule. When a run time arrives, each instance waits a random moment and then asks the shared store to record that it is running that run. The store does this as one atomic step, so exactly one instance is told "won". With a lease backend the winner then keeps a lease alive while the job runs, and the other instances watch that lease so one of them can take over if it stops being renewed.
 
-There is no leader, no election and no lock. No instance knows about any other instance; they only talk to the store.
+There is no leader and no election. A lease is not a lock that its holder must release: it only records that the runner is still alive. No instance knows about any other instance; they only talk to the store.
 
 ## The parts
 

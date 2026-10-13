@@ -29,8 +29,9 @@ Install anarchon and the driver for your store. Drivers are optional peer depend
     ```sh
     pnpm add anarchon
     ```
-    Nothing else is needed on Node 22.5 or newer, which has `node:sqlite` built in. On older Node
-    versions add `better-sqlite3`. For a libSQL server or Turso add `@libsql/client`.
+    Nothing else is needed on Node 22.13 or newer, which has `node:sqlite` built in. Node 22.5 to
+    22.12 need the `--experimental-sqlite` flag. On Node 20 add `better-sqlite3@12`: version 13
+    needs Node 22. For a libSQL server or Turso add `@libsql/client`.
     SQLite 3.35 or newer.
   </TabItem>
   <TabItem label="RabbitMQ">
@@ -78,7 +79,7 @@ const { Scheduler } = require('anarchon');
 
 ## Check that it works
 
-Save this as `check.mjs` and run `node check.mjs`. It uses a SQLite file, so it needs no server (Node 22.5 or newer).
+Save this as `check.mjs` and run `node check.mjs`. It uses a SQLite file, so it needs no server (Node 22.13 or newer).
 
 ```js
 import { Scheduler, SqliteBackend } from 'anarchon';

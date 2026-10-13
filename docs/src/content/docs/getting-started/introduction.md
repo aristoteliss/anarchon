@@ -3,7 +3,7 @@ title: Introduction
 description: What problem anarchon solves, explained from the ground up.
 ---
 
-anarchon runs scheduled jobs in a service that has more than one instance, and makes sure each scheduled run happens **once**.
+anarchon runs scheduled jobs in a service that has more than one instance, and selects **one** instance to run each scheduled time.
 
 This page explains the problem from the beginning. If you already know why cron in a cluster is hard, skip to [Quick start](../quick-start/).
 
@@ -41,7 +41,7 @@ Now the job runs three times. For a cache refresh that is wasteful. For "charge 
 
 ## How anarchon does it
 
-anarchon has no leader and holds no lock. It relies on one fact: all your instances already share a database or a message broker, and that store can do one small thing *atomically*, meaning as a single step that can't be interleaved with anyone else's.
+anarchon elects no leader. It relies on one fact: all your instances already share a database or a message broker, and that store can do one small thing *atomically*, meaning as a single step that can't be interleaved with anyone else's.
 
 Three ideas make it work:
 
@@ -77,16 +77,18 @@ Deciding who runs is the easy half. The harder half is what happens after:
 - The job takes **longer than its interval**, so the next run is due before this one ends.
 - **Every instance is down** when a run is due.
 
-anarchon handles these with a **lease**. The winner keeps telling the store "I'm still alive" every few seconds. The other instances become its *backups* and watch that lease. If it stops being renewed, one backup takes the run over.
+On Redis, Valkey, PostgreSQL and SQLite, anarchon handles these with a **lease**. The winner keeps telling the store "I'm still alive" every few seconds. The other instances become its *backups* and watch that lease. If it stops being renewed, one backup takes the run over.
 
 | Situation | What anarchon does |
 | --- | --- |
 | The job runs longer than its interval | Runs due meanwhile are skipped; one runs at a time |
 | The winner is killed mid-run | A backup takes over about one lease later, as attempt 2 |
 | The winner freezes longer than its lease | A backup takes over; the frozen one is told it lost the run when it wakes |
-| The winner is stopped gracefully | It hands the run over at once; a backup continues |
+| The winner is stopped gracefully | It hands the run over at once; a backup starts it again |
 | Every instance restarts mid-run | After the restart, one instance re-runs it |
 | Every instance is down when a run is due | The first one to start runs it, if it was due recently |
+
+A takeover starts the handler again from the beginning, as a new attempt; it doesn't resume where the previous runner stopped. RabbitMQ and NATS have no lease: they only select the winner, and a run whose runner dies is lost.
 
 [Failure scenarios](../../internals/failure-scenarios/) walks through each of these with a diagram.
 
@@ -105,3 +107,4 @@ anarchon handles these with a **lease**. The winner keeps telling the store "I'm
 - [Installation](../installation/)
 - [Quick start](../quick-start/)
 - [Core concepts](../core-concepts/): the handful of words the rest of the docs use
+- [Choosing anarchon](../choosing-anarchon/): when a queue, node-cron or a Kubernetes CronJob fits better

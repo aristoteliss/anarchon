@@ -74,7 +74,7 @@ A job declared with a decorator is added when its object is created, or when the
 | `The Postgres backend needs PostgreSQL 9.5 or newer` | An old PostgreSQL | Upgrade |
 | `The Postgres backend needs "pg"...` | The driver isn't installed | `pnpm add pg`, or pass your own client |
 | `The SQLite backend needs SQLite 3.35 or newer for RETURNING` | An old SQLite library | Use a newer Node or `better-sqlite3` |
-| `Could not open "path": this Node has no node:sqlite (Node 22.5+) and "better-sqlite3" isn't installed` | No SQLite driver available | Use Node 22.5+, or `pnpm add better-sqlite3` |
+| `Could not open "path": this Node has no node:sqlite (Node 22.5+) and "better-sqlite3" isn't installed` | No SQLite driver available | Use Node 22.13+ (22.5 to 22.12 with `--experimental-sqlite`), or `pnpm add better-sqlite3` |
 | `database is locked` | Another process held the SQLite file for longer than `busyTimeoutMs` | Raise `busyTimeoutMs`; check for a long-running writer |
 | `The RabbitMQ backend needs RabbitMQ 3.9 or newer for stream queues` | An old RabbitMQ | Upgrade |
 | `The RabbitMQ backend needs "amqplib"...` | The driver isn't installed | `pnpm add amqplib` |

@@ -9,6 +9,7 @@ export default defineConfig({
   root: resolve(import.meta.dirname, '..'),
   test: {
     include: ['test/**/*.test.ts'],
+    globalSetup: ['test/support/require-servers.ts'],
     // The files share the same servers and measure timing, so they run one at a time.
     fileParallelism: false,
     // Tests marked concurrent (the scenario and cluster files) run up to this many at a time:

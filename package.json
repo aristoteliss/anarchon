@@ -1,7 +1,7 @@
 {
   "name": "anarchon",
-  "version": "0.3.0",
-  "description": "Leaderless cron for Node.js clusters: every job runs once per scheduled time across all instances, with backup runners, no overlapping runs and catch-up after restarts. Redis, Valkey, PostgreSQL or SQLite (RabbitMQ and NATS with the simple claim).",
+  "version": "0.3.1",
+  "description": "Leaderless cron and interval scheduling for Node.js services, coordinated through your existing datastore. An atomic claim selects one runner per attempt; on Redis, Valkey, PostgreSQL and SQLite a lease lets another instance retry a run whose runner failed. RabbitMQ and NATS: claim only.",
   "keywords": [
     "cron",
     "scheduler",
@@ -28,7 +28,7 @@
     "type": "git",
     "url": "git+https://github.com/aristoteliss/anarchon.git"
   },
-  "homepage": "https://github.com/aristoteliss/anarchon#readme",
+  "homepage": "https://aristoteliss.github.io/anarchon/",
   "bugs": {
     "url": "https://github.com/aristoteliss/anarchon/issues"
   },

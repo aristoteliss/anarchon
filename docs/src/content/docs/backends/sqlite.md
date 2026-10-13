@@ -31,7 +31,7 @@ A SQLite file coordinates the processes that open **that same file**.
 
 | You pass | Driver | Notes |
 | --- | --- | --- |
-| A file path | `node:sqlite` (built into Node 22.5+), or `better-sqlite3` if that is missing | anarchon opens and closes it |
+| A file path | `node:sqlite` (built into Node 22.13+; 22.5 to 22.12 with `--experimental-sqlite`), or `better-sqlite3` if that is missing | anarchon opens and closes it |
 | A `DatabaseSync` | `node:sqlite` | Yours; not closed on `stop()` |
 | A `Database` | `better-sqlite3` | Yours; not closed on `stop()` |
 | A client from `createClient()` | `@libsql/client` | A local file or a remote server |

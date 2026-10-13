@@ -10,7 +10,7 @@
 Leaderless scheduling for Node.js clusters. Run the same jobs in every instance; an atomic claim in Redis, Valkey, PostgreSQL or SQLite selects one runner for each scheduled slot. The default `lease` strategy retries after a runner stops renewing its lease. That gives at-least-once execution after failures, not exactly-once side effects: handlers should be idempotent, and a frozen runner can briefly overlap its replacement.
 
 <p align="center">
-  <img src="./assets/quick-start.gif" alt="anarchon quick-start: 3 instances, zero leader, instant failover" width="900" />
+  <img src="https://raw.githubusercontent.com/aristoteliss/anarchon/main/assets/quick-start.gif" alt="Three anarchon processes on one SQLite file: one wins each run; after a graceful stop and after kill -9, another process starts the same run again as attempt 2" width="900" />
 </p>
 
 anarchon also handles what goes wrong in real clusters:
@@ -27,7 +27,7 @@ scheduler
   .every('sync', '10s', async (ctx) => { /* ... */ })
   .every('report', '35m', async (ctx) => { /* ... */ }, { timeoutMs: 20 * 60_000 })
   .cron('digest', '0 */2 * * *', async (ctx) => { /* ... */ }, { timezone: 'Europe/Athens' })
-  .at('migrate', new Date('2026-12-01T03:00:00Z'), async (ctx) => { /* runs once, ever */ });
+  .at('migrate', new Date('2026-12-01T03:00:00Z'), async (ctx) => { /* a one-off job: one slot */ });
 
 await scheduler.start();
 ```
@@ -36,7 +36,15 @@ Put the same code in every instance.
 
 ## Try it with three instances
 
-For a no-server demo, follow the [five-minute SQLite quick start](https://aristoteliss.github.io/anarchon/getting-started/quick-start/). It runs three processes against one shared SQLite file on the same machine. To try the Redis-backed `examples/basic.ts` demo instead, start Redis, open three terminals in the repository, and run this command in each:
+The recording above is `examples/quick-start.ts`: three processes on one machine share a SQLite file and one job that takes 4 seconds. Run it with `npx tsx examples/quick-start.ts` in the repository. In about 23 seconds it shows:
+
+1. **One winner.** One process starts the run; the other two skip it (`taken`).
+2. **A graceful stop.** The runner gets `SIGINT` (Ctrl+C) mid-run and hands the run over. Another process starts the same run again as attempt 2, within two heartbeats.
+3. **A crash.** The next runner gets `SIGKILL` (`kill -9`). Nothing is handed over, so the others wait for its lease to run out, and one starts the same run again as attempt 2 about 3 seconds after the kill.
+
+The demo sets the lease to 3 seconds and the heartbeat to 0.5 seconds so the takeover is quick to watch. With the defaults (30 s and 5 s) a takeover comes about 30 seconds after a crash. A takeover starts the handler from the beginning, which is why handlers must be idempotent.
+
+For a no-server demo you build yourself, follow the [five-minute SQLite quick start](https://aristoteliss.github.io/anarchon/getting-started/quick-start/). It runs three processes against one shared SQLite file on the same machine. To try the Redis-backed `examples/basic.ts` demo instead, start Redis, open three terminals in the repository, and run this command in each:
 
 ```sh
 pnpm install
@@ -51,13 +59,15 @@ The example connects to `redis://localhost:6379` unless `REDIS_URL` is set. Watc
 pnpm add anarchon redis
 ```
 
+`npm install` and `yarn add` work the same way.
+
 `redis` (node-redis) is only needed if you let anarchon open the connection. You can pass your own ioredis, iovalkey, node-redis or Valkey GLIDE client instead. It works with Redis 5+ and Valkey.
 
 For another backend, install its driver instead (see [Backends](#backends)):
 
 ```sh
 pnpm add anarchon pg                    # PostgreSQL (or bring your own pg / postgres.js client)
-pnpm add anarchon                       # SQLite with node:sqlite (Node 22.5+), or add better-sqlite3 / @libsql/client
+pnpm add anarchon                       # SQLite with node:sqlite (Node 22.13+), or add better-sqlite3 / @libsql/client
 pnpm add anarchon amqplib               # RabbitMQ
 pnpm add anarchon @nats-io/transport-node @nats-io/jetstream   # NATS JetStream
 ```
@@ -90,6 +100,8 @@ These are real runs with three processes on Redis 8.6, broken on purpose with `k
 | The winner is stopped mid-run (`SIGTERM`, rolling deploy) | **The run is lost**; history says `interrupted` | It hands the run over at once; a backup finishes it as attempt 2 |
 | All 3 are killed mid-run, then restart | **The run is lost** | After the restart, one instance re-runs it as attempt 2 |
 | All 3 are down when a run is due | **The run never happens** | On start, it's caught up if it was due less than `catchUpMs` ago (default 5 min) |
+
+A takeover starts the handler again from the beginning, as a new attempt. It doesn't resume where the previous runner stopped.
 
 ### How the lease works
 
@@ -378,7 +390,8 @@ Notes:
 
 **Read the [hosted documentation](https://aristoteliss.github.io/anarchon/)** for guides to every option and method, the claim
 and lease algorithms step by step with diagrams, one page per backend, and recipes (Express, NestJS,
-Kubernetes, long-running jobs).
+Kubernetes, long-running jobs). [Choosing anarchon](https://aristoteliss.github.io/anarchon/getting-started/choosing-anarchon/)
+compares it with BullMQ, node-cron, your own lock and Kubernetes CronJobs, and says when another tool fits better.
 
 ```sh
 pnpm docs:dev     # http://localhost:4321
@@ -388,6 +401,7 @@ pnpm docs:build   # static site in docs/dist
 ## Examples
 
 ```sh
+npx tsx examples/quick-start.ts         # the recording above: 3 processes on SQLite, a graceful stop, then kill -9
 npx tsx examples/basic.ts               # run it in 3 terminals, then kill one (BACKEND=postgres or sqlite for those)
 npx tsx examples/http-api.ts            # Express: GET /jobs, /jobs/:name/runs, POST /jobs/:name/run
                                         # examples/http-api.http has every request, for the VS Code REST Client
@@ -406,7 +420,7 @@ pnpm --filter anarchon-example-nestjs start:nest11  # the same source on NestJS 
 pnpm --filter anarchon-example-nestjs test          # checks the app on NestJS 11 and 12
 ```
 
-All but `basic.ts` need no server: they use a SQLite file in the temp folder unless `BACKEND=redis` or
+All but `basic.ts` need no server (`quick-start.ts` always uses a SQLite file): they use a SQLite file in the temp folder unless `BACKEND=redis` or
 `BACKEND=postgres` is set (`own-clients.ts` always needs Redis or Postgres). `.vscode/launch.json`
 has a debug configuration for each; start with "Example: walkthrough", which pauses before `start()`
 and lists where to step.
@@ -431,7 +445,13 @@ pnpm test:servers:down                     # remove them and their data
 | NATS with JetStream (optional) | `nats://localhost:4222` | `NATS_URL` |
 | libSQL server: sqld or Turso (optional) | `http://localhost:8081` | `LIBSQL_URL`, token in `LIBSQL_AUTH_TOKEN` |
 
-SQLite needs no server (node:sqlite on Node 22.5+; files go to the temp folder, or `SQLITE_DIR`).
+SQLite needs no server (node:sqlite on Node 22.13+; files go to the temp folder, or `SQLITE_DIR`).
+
+To make a run fail when a server is missing, instead of skipping its tests, name the servers it must have in `REQUIRE_SERVERS`: `redis`, `redis-old`, `valkey`, `postgres`, `sqlite`, `libsql`, `rabbitmq`, `nats`. CI sets it in every test job (`.github/workflows/ci.yml`).
+
+```sh
+REQUIRE_SERVERS=redis,postgres pnpm test
+```
 
 ```sh
 pnpm test              # everything below except test/e2e
@@ -458,5 +478,5 @@ This software is **Dual-Licensed**.
 
 The project offers the **GNU AGPLv3** (see [`LICENSE`](LICENSE)) and a separate commercial license (see [`COMMERCIAL_LICENSE.txt`](COMMERCIAL_LICENSE.txt)). The AGPLv3 is a copyleft license; review its terms to determine how they apply to your use. The commercial license allows commercial integration without AGPL copyleft obligations and sets an annual fee based on the licensee's gross global revenue. Review the full terms and fee schedule in the linked files before adopting either option.
 
-For a concise comparison, see the [commercial license terms](COMMERCIAL_LICENSE.txt), including eligibility, annual revenue bands, and fees.
+For a concise comparison, see the [commercial license terms](COMMERCIAL_LICENSE.txt), including eligibility, annual revenue bands, and fees. The [licensing page](https://aristoteliss.github.io/anarchon/reference/licensing/) answers the common questions: which revenue counts, how to register for the free tier, and who to contact.
 

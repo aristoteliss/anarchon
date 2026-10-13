@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# REQUIRE_SERVERS makes a run fail when a server it names doesn't answer. Without it a missing
+# server only skips its tests (test/support/require-servers.ts).
+jobs:
+  checks:
+    name: Format, lint, types, docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm lint
+      - run: pnpm docs:check
+      - run: pnpm docs:build
+
+  test:
+    name: Tests on Redis, Valkey, PostgreSQL, SQLite (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    env:
+      REQUIRE_SERVERS: redis,redis-old,valkey,postgres,libsql,sqlite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Start the test servers
+        run: pnpm test:servers
+      - name: Wait for the libSQL server
+        run: timeout 60 bash -c 'until curl -s -o /dev/null http://localhost:8081/; do sleep 1; done'
+      - run: pnpm test
+
+  brokers:
+    name: Tests on RabbitMQ and NATS
+    runs-on: ubuntu-latest
+    env:
+      REQUIRE_SERVERS: rabbitmq,nats
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Start RabbitMQ and NATS
+        run: docker compose -f test/docker-compose.test.yml --profile brokers up -d --wait rabbitmq nats
+      - run: pnpm test test/backends/brokers.test.ts test/backends/contract.test.ts
+
+  e2e:
+    name: Cluster and failure scenarios (real processes)
+    runs-on: ubuntu-latest
+    env:
+      COMPOSE_PROFILES: brokers
+      REQUIRE_SERVERS: redis,redis-old,valkey,postgres,libsql,sqlite,rabbitmq,nats
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Start the test servers
+        run: pnpm test:servers
+      - name: Wait for the libSQL server
+        run: timeout 60 bash -c 'until curl -s -o /dev/null http://localhost:8081/; do sleep 1; done'
+      - run: pnpm test:slow
+
+  package:
+    name: Packed package (files, types, exports, Bun)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:release
+      - run: pnpm pack --pack-destination packed
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball
+          path: packed/*.tgz
+          if-no-files-found: error
+
+  consumer:
+    name: Installs and runs a job (Node ${{ matrix.node }})
+    needs: package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: tarball
+          path: packed
+      - run: node scripts/consumer-smoke.mjs packed/*.tgz

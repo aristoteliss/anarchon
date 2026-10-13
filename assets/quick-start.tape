@@ -1,5 +1,7 @@
-# Output file (can also be demo.mp4 or demo.webm)
-Output quick-start.gif
+# The README demo. Record it from the repository root with VHS (https://github.com/charmbracelet/vhs):
+#   vhs assets/quick-start.tape
+# For a video to share, change the Output line to assets/quick-start.mp4.
+Output assets/quick-start.gif
 
 # Visual Settings
 Set FontSize 16
@@ -11,10 +13,9 @@ Set WindowBar Colorful
 Set WindowBarSize 40
 Set Theme "Catppuccin Mocha"
 
-# Initial setup
+# Three processes, a graceful stop, then a crash: examples/quick-start.ts takes about 23 s.
 Type "npx tsx examples/quick-start.ts"
 Sleep 800ms
 Enter
 
-# Let the demo run
-Sleep 12s
+Sleep 27s

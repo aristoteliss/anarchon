@@ -11,7 +11,9 @@ No. Every instance runs the same code. For each run they all ask the shared stor
 
 ### How is this different from a plain cron library?
 
-A library such as `node-cron` or `croner` fires a timer in the process it runs in. With three instances, the job runs three times. anarchon adds the step that makes it run once: an atomic claim in a store all instances share. It uses `croner` only to compute *when* a cron expression is next due.
+A cron library such as `croner` fires a timer in the process it runs in. With three instances, the job runs three times. anarchon adds the step that selects one instance: an atomic claim in a store all instances share. It uses `croner` only to compute *when* a cron expression is next due.
+
+`node-cron` can also pick one runner per scheduled time with its `distributed` option. [Choosing anarchon](../../getting-started/choosing-anarchon/) compares the two, and BullMQ and Kubernetes CronJobs.
 
 ### How is this different from a job queue?
 
@@ -23,7 +25,7 @@ Yes. It behaves like a normal scheduler, and you get history, plus overlap prote
 
 ### Which Node versions are supported?
 
-Node.js 20 and newer. The built-in SQLite driver needs Node 22.5; on older versions use `better-sqlite3`.
+Node.js 20 and newer. The built-in SQLite driver needs Node 22.13 (or 22.5 with the `--experimental-sqlite` flag); on older versions use `better-sqlite3` (version 12 on Node 20).
 
 ## Jobs
 
@@ -159,4 +161,4 @@ The keys, tables and message formats are internal and may change between version
 
 ### What is the license?
 
-anarchon is dual-licensed: GNU AGPLv3, or a commercial license for applications that can't be released under the AGPL. The repository's `LICENSE` and `COMMERCIAL_LICENSE.txt` files have the terms.
+anarchon is dual-licensed: GNU AGPLv3, or a commercial license for applications that can't be released under the AGPL. The repository's `LICENSE` and `COMMERCIAL_LICENSE.txt` files have the terms, and [Licensing](../licensing/) summarizes them: the revenue tiers, how to register for the free tier, and who to contact.

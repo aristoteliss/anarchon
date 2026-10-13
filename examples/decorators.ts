@@ -42,10 +42,10 @@ class Reports {
     await work(ctx.signal, 5_000);
   }
 
-  // An absolute time that every instance computes the same way, so the job runs once in the cluster.
+  // An absolute time that every instance computes the same way, so the cluster has one slot for the job.
   @At('next-full-minute', new Date(Date.now() - (Date.now() % 60_000) + 60_000))
   async nextFullMinute() {
-    say('runs once, at the next full minute, on one instance');
+    say('a one-off job: at the next full minute, on one instance');
   }
 }
 

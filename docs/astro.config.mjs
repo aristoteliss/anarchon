@@ -17,7 +17,13 @@ const sidebar = [
   {
     label: 'Start here',
     translations: { el: 'Ξεκινήστε εδώ' },
-    items: ['getting-started/introduction', 'getting-started/installation', 'getting-started/quick-start', 'getting-started/core-concepts'],
+    items: [
+      'getting-started/introduction',
+      'getting-started/installation',
+      'getting-started/quick-start',
+      'getting-started/core-concepts',
+      'getting-started/choosing-anarchon',
+    ],
   },
   {
     label: 'Guides',
@@ -84,10 +90,14 @@ const sidebar = [
       'reference/types',
       'reference/errors',
       'reference/guarantees',
+      'reference/licensing',
       'reference/faq',
     ],
   },
 ];
+
+// Social cards need an absolute URL: the image is docs/public/og.png, rendered from assets/social-card.svg.
+const socialCard = 'https://aristoteliss.github.io/anarchon/og.png';
 
 export default defineConfig({
   site: 'https://aristoteliss.github.io',
@@ -96,11 +106,18 @@ export default defineConfig({
     mermaid({ autoTheme: true }),
     starlight({
       title: 'anarchon',
-      description: 'Leaderless cron for Node.js clusters: every job runs once per scheduled time across all instances.',
+      description: 'Leaderless cron and interval scheduling for Node.js services, coordinated through your existing datastore.',
       defaultLocale: 'root',
       locales,
       sidebar,
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/aristoteliss/anarchon' }],
+      head: [
+        { tag: 'meta', attrs: { property: 'og:image', content: socialCard } },
+        { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+        { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'anarchon: leaderless cron and interval scheduling for Node.js' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: socialCard } },
+      ],
       customCss: ['./src/styles/custom.css'],
       lastUpdated: true,
       tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 },
