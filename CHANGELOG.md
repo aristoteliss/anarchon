@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.3.2
+
+Fixes for runs that were lost or recorded wrongly in edge cases, and for the RabbitMQ and NATS
+backends. It also includes the changes of 0.3.1, which was not published.
+
+### Fixed
+
+- **Redis `stream-id`, `idmp` and `script`: `runNow()` could cancel a scheduled run.** A manual
+  run made after a run was due, and before the instances claimed it, made every instance skip
+  that run with `taken`. Manual runs now go to their own stream, `<prefix><job>:manual`, and
+  `history()` reads both streams. Entries already in `<prefix><job>:runs` stay readable.
+- **A run that ends while `stop()` waits is recorded as ended.** A store error at that moment
+  stopped the retry, so the run stayed `running` and a backup ran the finished job again.
+- **No false `lost` event after a successful run.** A heartbeat that reached the store after the
+  run ended emitted `lost` and aborted `ctx.signal`. One heartbeat is sent at a time, and a
+  refused one after the end is ignored.
+- **`stop()` hands a run over for good.** `stop()` waits for the heartbeat in flight before it
+  releases the run, so a late heartbeat cannot renew the lease it just gave up.
+- **Redis `lease`: history keeps the result of an attempt after more than 100 hand-overs.**
+- **SQLite: a libSQL server no longer blocks other databases.** Statements on a client with
+  `protocol` `http` or `ws` run in a queue of their own, not in the one every local SQLite
+  statement in the process shares. `LibsqlClientLike` has an optional `protocol` member; a
+  client without it keeps the shared queue.
+- **NATS: `history()` deletes the consumer it creates**, instead of leaving it on the server
+  for five minutes.
+- **RabbitMQ: a queue that exists with other arguments is used as it is.** Instances with a
+  different `slotTtlMs` or `historySize` used to fail their claims, or `prepareJob`, and the
+  failure closed the channel that other jobs shared. A queue keeps the arguments it was created
+  with.
+
 ## 0.3.1
 
 Package metadata and license text. The compiled code is the same as 0.3.0.
