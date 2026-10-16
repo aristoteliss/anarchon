@@ -149,6 +149,19 @@ describe('lease rules', async () => {
         }
       });
 
+      test('a heartbeat that arrives after a release does not renew the released lease', async () => {
+        const { backend, runs } = fresh('renew');
+        const base = { job: 'j', slot: T, historySize: 100, leaseMs: 60_000, overlap: 'skip' as const, maxAttempts: 1 };
+        try {
+          assert.equal((await runs.claim({ ...base, token: 'a', instanceId: 'A', mode: 'new', reason: 'scheduled' })).kind, 'won');
+          assert.equal(await runs.release('j', T, 'a'), true);
+          assert.equal(await runs.heartbeat('j', T, 'a', 60_000), false, 'the late heartbeat is refused');
+          assert.deepEqual(await runs.active('j'), [{ slot: T, attempt: 1, alive: false }], 'a backup can take over at once');
+        } finally {
+          await backend.close();
+        }
+      });
+
       test('history keeps the result of an attempt that follows more than 100 hand-overs', async () => {
         const { backend, runs } = fresh('handovers');
         const base = { job: 'j', slot: T, instanceId: 'A', historySize: 100, leaseMs: 60_000, overlap: 'skip' as const, maxAttempts: 1 };

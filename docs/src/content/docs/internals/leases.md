@@ -233,7 +233,7 @@ sequenceDiagram
   Note over B: runs the job
 ```
 
-**Release** ends the lease immediately and notes that this was a hand-over, so it doesn't count against `maxAttempts`. A backup picks the run up at its next check, within two heartbeats, not after `leaseMs`.
+**Release** ends the lease immediately and notes that this was a hand-over, so it doesn't count against `maxAttempts`. A backup picks the run up at its next check, within two heartbeats, not after `leaseMs`. A released lease stays released: a heartbeat that the runner sent before the release and that arrives after it does not renew it.
 
 Three things can happen to a job that is running when `stop()` is called:
 
@@ -288,7 +288,7 @@ And a run's state is never deleted while a late claim could still ask for it, wh
 ## Summary of the rules
 
 1. A claim for a run with no state wins and gets a lease.
-2. A heartbeat extends the lease, only with the current token.
+2. A heartbeat extends the lease, only with the current token and only while the lease was not released.
 3. A run whose lease ran out can be claimed as the next attempt, up to `maxAttempts`. If a newer run of the job starts first, the old one is marked `interrupted` instead.
 4. Finish and release only work with the current token.
 5. A new run is refused while an earlier run of the job has a live lease (`overlap: 'skip'`).

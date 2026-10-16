@@ -287,3 +287,25 @@ test('a heartbeat still on its way when stop() hands the run over does not renew
     await reader.close();
   }
 });
+
+test('a slow heartbeat does not hold back the next one', async (t) => {
+  if (!(await probeRedis(REDIS_URL))) return t.skip('no Redis');
+  const backend = new RedisBackend({ redis: REDIS_URL, prefix: `test:${uniqueId('slow-beat')}:` });
+  const runs = backend.runs!;
+  const heartbeat = runs.heartbeat.bind(runs);
+  let sent = 0;
+  runs.heartbeat = async (...args) => {
+    sent++;
+    await sleep(500);
+    return heartbeat(...args);
+  };
+  const scheduler = new Scheduler({ backend, leaseMs: 2_000, heartbeatMs: 200 });
+  scheduler.every('job', '1h', () => sleep(1_500), { catchUpMs: 0 });
+  await scheduler.start();
+  try {
+    await scheduler.runNow('job');
+    assert.ok(sent >= 5, `${sent} heartbeats sent in 1.5 s at a 200 ms interval`);
+  } finally {
+    await scheduler.stop();
+  }
+});

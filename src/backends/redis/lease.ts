@@ -22,7 +22,7 @@ import { parseEntries, toStr } from './replies';
  *    - finished: answer 'done'.
  *    A new run is also refused ('overlap') while an older run of the job has a live lease.
  * 2. heartbeat (`HEARTBEAT`): the runner moves its lease end forward, but only if the stored token
- *    is still its own. If a backup took over, the token differs: the old runner is told it lost the
+ *    is still its own and the lease was not released. If a backup took over, the token differs: the old runner is told it lost the
  *    run and its `ctx.signal` aborts.
  * 3. finish (`FINISH`): mark the run ended, again only with the matching token. A runner that lost
  *    the run can't mark it finished.
@@ -124,7 +124,8 @@ const HEARTBEAT = `${NOW}
 local raw = redis.call('HGET', KEYS[1], ARGV[1])
 if not raw then return 0 end
 local run = cjson.decode(raw)
-if run.t ~= ARGV[2] or run.s ~= 'running' then return 0 end
+-- A released lease (l = 0) stays released: a heartbeat sent before the release can arrive after it.
+if run.t ~= ARGV[2] or run.s ~= 'running' or run.l == 0 then return 0 end
 run.l = now + tonumber(ARGV[3])
 redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(run))
 return 1

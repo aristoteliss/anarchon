@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.3
+
+Fixes a heartbeat regression of 0.3.2 and an error message. The API is that of 0.3.2.
+
+### Fixed
+
+- **Heartbeats and hand-over are as fast as before 0.3.2.** 0.3.2 sent a heartbeat only after the
+  previous one answered, and `stop()` waited for heartbeats in flight before handing a run
+  over. With a slow store, a runner whose run was taken over could notice too late and finish
+  without `ctx.signal` aborting, and a hand-over could arrive after the lease ran out.
+  Heartbeats go out every `heartbeatMs` again, and `stop()` hands over at once.
+- **A late heartbeat cannot undo a hand-over.** The store no longer renews a released lease, so
+  a heartbeat sent before `stop()` released the run and arriving after it (possible on a
+  connection pool) leaves the run to the backup. Redis `lease`, PostgreSQL and SQLite.
+- **SQLite: the error for a missing driver names the Node versions that work.** On Node 22.5 to
+  22.12 without `--experimental-sqlite`, the message said `node:sqlite` needs "Node 22.5+", a
+  version the user already had. It now says Node 22.13+, or 22.5+ with
+  `--experimental-sqlite`, and still names `better-sqlite3` as the alternative.
+
 ## 0.3.2
 
 Fixes for runs that were lost or recorded wrongly in edge cases, and for the RabbitMQ and NATS

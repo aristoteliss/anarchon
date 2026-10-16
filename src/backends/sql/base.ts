@@ -149,10 +149,11 @@ export abstract class SqlBackend implements Backend, RunStore {
     return this.claimRun(input);
   }
 
-  /** One UPDATE: sets lease_until to now + leaseMs where the token matches and the run is still running. */
+  /** One UPDATE: sets lease_until to now + leaseMs where the token matches, the run is still running and its lease was not released. */
   async heartbeat(job: string, slot: number, token: string, leaseMs: number): Promise<boolean> {
+    // A released lease (lease_until = 0) stays released: a heartbeat sent before the release can arrive after it.
     const rows = await this.run(
-      `UPDATE ${this.table} SET lease_until = ${this.dialect.nowMs} + ? WHERE job = ? AND slot = ? AND token = ? AND status = 'running' RETURNING slot`,
+      `UPDATE ${this.table} SET lease_until = ${this.dialect.nowMs} + ? WHERE job = ? AND slot = ? AND token = ? AND status = 'running' AND lease_until > 0 RETURNING slot`,
       [leaseMs, job, slot, token],
     );
     return rows.length > 0;

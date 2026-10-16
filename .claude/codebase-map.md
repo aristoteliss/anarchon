@@ -21,14 +21,14 @@ catch-up of the latest missed run); RabbitMQ and NATS are claim only. `docs/` is
 - **Shape**: monorepo — workspace globs `.`, `docs`, `examples/nestjs` (3 workspace packages).
 - **Publishable packages**: 1; private: `docs`, `examples/nestjs`.
 - **Runnable workspaces**: `docs`, `examples/nestjs`.
-- **Versions**: `0.0.0`, `0.3.2`.
+- **Versions**: `0.0.0`, `0.3.3`.
 - **Packages**: see the Workspace packages table under Directory Map.
 <!-- context:generated-end repository-shape -->
 
 ## Technology Stack
 
 <!-- context:generated-start technology-stack -->
-- **Languages** (file counts, excluded directories omitted): `.md` 95, `.ts` 70, `.mjs` 6, `.py` 2
+- **Languages** (file counts, excluded directories omitted): `.md` 95, `.ts` 71, `.mjs` 6, `.py` 2
 - **Runtime engines** (root `package.json`): `node` >=20
 - **Package manager evidence**: `pnpm-lock.yaml`.
 - **Integrations**: listed with their purpose under Dependencies and Integrations.
@@ -315,13 +315,13 @@ secret value.*
 ## Snapshot Metadata
 
 <!-- context:generated-start metadata -->
-- Generated at: 2026-10-16T09:56:27Z
-- Git commit: 77cf59adaed656f93199326b685a8853a795cf89
+- Generated at: 2026-10-16T11:14:02Z
+- Git commit: aaf4767effe3d778b198b100f1ebeebb4f271ca6
 - Git branch: main
 - Uncommitted changes when generated: yes
 - Generator: `scripts/update-claude-snapshot.py` version 1.0.0
 - Snapshot status: generated — structural inspection only, no code executed
-- Files inspected: 208
+- Files inspected: 209
 - Included top-level directories: `.claude`, `.github`, `assets`, `docs`, `examples`, `scripts`, `src`, `test`
 - Excluded directory names: `.cache`, `.git`, `.gradle`, `.idea`, `.mypy_cache`, `.next`, `.nuxt`, `.parcel-cache`, `.pnpm-store`, `.pytest_cache`, `.ruff_cache`, `.svelte-kit`, `.terraform`, `.tmp`, `.tox`, `.turbo`, `.venv`, `.vscode`, `__pycache__`, `bower_components`, `build`, `coverage`, `dist`, `node_modules`, `out`, `target`, `vendor`, `venv`, `virtualenv`
 - Excluded file patterns: `.env`, `.env.*`, `*.env`, `*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.jks`, `*.keystore`, `id_rsa*`, `id_ed25519*`, `*credentials*`, `*.secret`, `secrets.*`
