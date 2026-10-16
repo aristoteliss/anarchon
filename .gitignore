@@ -23,15 +23,14 @@ test/test-run.log
 .DS_Store
 .idea/
 
-# agent workspace: instructions, local settings and state stay out, the codebase map and task files are tracked
-AGENTS.md
-CLAUDE.md
-scripts/update-claude-snapshot.py
-scripts/validate-claude-context.py
-.claude/*
-!.claude/codebase-map.md
-!.claude/tasks/
+# agent workspace: instructions, the codebase map, its scripts and the task template are tracked; local settings and task files stay out
+.claude/settings.local.json
+.claude/tasks/*
+!.claude/tasks/TEMPLATE.md
 __pycache__/
 
 # launch drafts and outreach notes: private until the owner publishes them
 marketing/
+
+# internal notes and drafts: private until the owner publishes them
+docs/internal/
