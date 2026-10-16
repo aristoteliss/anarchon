@@ -234,7 +234,7 @@ function toSqlClient(input: SqliteDatabaseLike | LibsqlClientLike | SqlClient): 
   );
 }
 
-/** Opens a file with the built-in node:sqlite (Node 22.5+), or better-sqlite3 if that's missing. */
+/** Opens a file with the built-in node:sqlite (Node 22.13+, or 22.5+ with --experimental-sqlite), or better-sqlite3 if that's missing. */
 async function openFile(path: string): Promise<SqliteDatabaseLike> {
   try {
     const { DatabaseSync } = (await import('node:sqlite')) as unknown as { DatabaseSync: new (path: string) => SqliteDatabaseLike };
@@ -248,7 +248,7 @@ async function openFile(path: string): Promise<SqliteDatabaseLike> {
       return new Database(path);
     } catch {
       throw new Error(
-        `Could not open "${path}": this Node has no node:sqlite (Node 22.5+) and "better-sqlite3" isn't installed. ` +
+        `Could not open "${path}": this Node has no node:sqlite (Node 22.13+, or 22.5+ with --experimental-sqlite) and "better-sqlite3" isn't installed. ` +
           `(${(builtinError as Error).message})`,
       );
     }
