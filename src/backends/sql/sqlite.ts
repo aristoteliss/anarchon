@@ -13,6 +13,8 @@ export interface SqliteDatabaseLike {
 
 /** A `@libsql/client` client: a local file, or a remote libSQL server (sqld / Turso). */
 export interface LibsqlClientLike {
+  /** 'http' or 'ws' on a remote libSQL server, 'file' on a local file. Absent: treated as a local file. */
+  readonly protocol?: string;
   /** Runs one statement. */
   execute(statement: { sql: string; args: SqlValue[] }): Promise<{ rows: ArrayLike<unknown> }>;
   /** Opens a write transaction. On a remote server it holds the database's write lock until commit, rollback or the server's timeout. */
@@ -63,7 +65,7 @@ export interface SqliteBackendOptions {
 /**
  * SQLite drivers block the thread while they wait for a lock. Two connections in one process could
  * then wait on each other forever (one holds a transaction across an await, the other blocks the
- * thread), so every SQLite statement in this process takes its turn here. Statements take
+ * thread), so every statement on a local SQLite file in this process takes its turn here. Statements take
  * microseconds, so this costs nothing; other processes still wait through busy_timeout.
  */
 const processQueue = new Mutex();
@@ -198,7 +200,8 @@ export function fromSqliteDatabase(db: SqliteDatabaseLike): SqlClient {
 }
 
 export function fromLibsql(client: LibsqlClientLike): SqlClient {
-  const mutex = processQueue;
+  // Only a local file blocks the thread while it waits for a lock (see processQueue).
+  const mutex = client.protocol === 'http' || client.protocol === 'ws' ? new Mutex() : processQueue;
   return {
     all: (sql, args) => mutex.run(async () => Array.from((await client.execute({ sql, args: [...args] })).rows) as SqlRow[]),
     transaction: (fn) =>

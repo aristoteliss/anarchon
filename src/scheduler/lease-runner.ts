@@ -191,6 +191,8 @@ export class LeaseRunner {
     run.data = data;
     const key = runKey(job, slot);
     let lost = false;
+    let finishing = false;
+    let renewal: Promise<void> | undefined;
     const markLost = () => {
       if (lost) return;
       lost = true;
@@ -198,26 +200,33 @@ export class LeaseRunner {
       core.emit('lost', { job: job.name, slot, attempt, instanceId: core.instanceId });
     };
     const heartbeat = setInterval(() => {
-      runs.heartbeat(job.name, slot, token, core.leaseMs).then(
-        (ok) => {
-          if (!ok) markLost();
-        },
-        (error: unknown) => core.emit('error', { error, job: job.name, slot }),
-      );
+      if (renewal) return;
+      renewal = runs
+        .heartbeat(job.name, slot, token, core.leaseMs)
+        .then(
+          (ok) => {
+            // finish() may have ended the run already: a takeover is caught by finish() itself.
+            if (!ok && !finishing) markLost();
+          },
+          (error: unknown) => core.emit('error', { error, job: job.name, slot }),
+        )
+        .finally(() => {
+          renewal = undefined;
+        });
     }, core.heartbeatMs);
     if (core.unrefTimers) heartbeat.unref();
     this.localRuns.set(key, () => clearInterval(heartbeat));
 
     run.finish = async (status) => {
-      // Keep renewing the lease until the end is stored: if Redis is briefly unreachable here, a
-      // backup must not re-run a job that already completed.
+      finishing = true;
+      // Keep renewing the lease until the end is stored, also while stop() waits: if Redis is
+      // briefly unreachable here, a backup must not re-run a job that already completed.
       for (let delay = 200; !lost && !core.isIdle(); delay = Math.min(delay * 2, core.heartbeatMs)) {
         try {
           if (!(await runs.finish(job.name, slot, token, status))) markLost();
           break;
         } catch (error) {
           core.emit('error', { error, job: job.name, slot });
-          if (!core.isRunning()) break;
           await sleep(delay);
         }
       }
@@ -225,6 +234,8 @@ export class LeaseRunner {
     };
     run.release = async () => {
       clearInterval(heartbeat);
+      // On a connection pool an earlier heartbeat could land after the release and renew the lease: wait for it.
+      await renewal;
       if (lost) return false;
       try {
         return await runs.release(job.name, slot, token);

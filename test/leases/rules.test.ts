@@ -149,6 +149,30 @@ describe('lease rules', async () => {
         }
       });
 
+      test('history keeps the result of an attempt that follows more than 100 hand-overs', async () => {
+        const { backend, runs } = fresh('handovers');
+        const base = { job: 'j', slot: T, instanceId: 'A', historySize: 100, leaseMs: 60_000, overlap: 'skip' as const, maxAttempts: 1 };
+        try {
+          let token = 't1';
+          assert.equal((await runs.claim({ ...base, token, mode: 'new', reason: 'scheduled' })).kind, 'won');
+          for (let attempt = 2; attempt <= 101; attempt++) {
+            assert.equal(await runs.release('j', T, token), true);
+            token = `t${attempt}`;
+            assert.deepEqual(await runs.claim({ ...base, token, mode: 'takeover', reason: 'takeover' }), { kind: 'won', attempt });
+          }
+          assert.equal(await runs.finish('j', T, token, 'success'), true);
+          await backend.saveResult(
+            'j',
+            { slot: T, by: 'A', attempt: 101, status: 'success', startedAt: 1, finishedAt: 2, durationMs: 1 },
+            100,
+          );
+          const [last] = await backend.history('j', 1);
+          assert.deepEqual([last?.attempt, last?.status], [101, 'success']);
+        } finally {
+          await backend.close();
+        }
+      });
+
       test('a new run is refused when its claim arrives later than maxLateMs, by the server clock', async () => {
         const { backend, runs } = fresh('late');
         const base = {

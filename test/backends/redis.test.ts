@@ -9,7 +9,7 @@ import { createClient } from 'redis';
 import { describe, test } from 'vitest';
 
 import { type Backend, RedisBackend } from '../../src';
-import { probeRedis, REDIS_OLD_URL, REDIS_URL, uniqueId, VALKEY_URL } from '../support';
+import { probeRedis, REDIS_OLD_URL, REDIS_URL, supportsIdmp, uniqueId, VALKEY_URL } from '../support';
 
 // GLIDE logs every server error (expected here: losers' XADDs are refused) to stdout.
 GlideLogger.setLoggerConfig('off');
@@ -72,6 +72,33 @@ describe('Redis / Valkey specifics', () => {
       await Promise.all(iovalkey.map((c) => c.quit()));
       for (const c of glide) c.close();
       await Promise.all(nodeRedis.map((c) => c.quit()));
+    }
+  });
+
+  test('a manual run recorded after a run is due does not take that run from the instances that claim it', async (t) => {
+    const server = await probeRedis(REDIS_URL);
+    if (!server) return t.skip(`nothing at ${REDIS_URL}`);
+    const strategies = supportsIdmp(server) ? (['stream-id', 'idmp', 'script'] as const) : (['stream-id', 'script'] as const);
+    for (const strategy of strategies) {
+      const backend = new RedisBackend({ redis: REDIS_URL, strategy, prefix: `test:${uniqueId('manual')}:` });
+      try {
+        await backend.init();
+        await backend.prepareJob('job');
+        const slot = Date.now() - 500;
+        await backend.recordManualRun(input(Date.now(), 'A'));
+        assert.equal(await backend.claim(input(slot, 'B')), true, `${strategy}: the run can still be claimed`);
+        const history = await backend.history('job', 10);
+        assert.deepEqual(
+          history.map((r) => [r.instanceId, r.manual]),
+          [
+            ['A', true],
+            ['B', false],
+          ],
+          `${strategy}: history shows both runs`,
+        );
+      } finally {
+        await backend.close();
+      }
     }
   });
 

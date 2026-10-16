@@ -195,26 +195,31 @@ export class NatsBackend implements Backend {
     const claims: ClaimRecord[] = [];
     const results: StoredResult[] = [];
     const consumer = await js.consumers.get(this.stream, { filter_subjects: [filter] });
-    while (remaining > 0) {
-      const batch = await consumer.fetch({ max_messages: Math.min(remaining, 1_000), expires: 5_000 });
-      let received = 0;
-      for await (const message of batch) {
-        received++;
-        const record = parseJson(message.string());
-        if (record && typeof record === 'object') {
-          const raw = record as Record<string, unknown>;
-          if (raw.type === 'result') {
-            const result = toResult(raw);
-            if (result) results.push(result);
-          } else {
-            const claim = toClaim(raw);
-            if (claim) claims.push(claim);
+    try {
+      while (remaining > 0) {
+        const batch = await consumer.fetch({ max_messages: Math.min(remaining, 1_000), expires: 5_000 });
+        let received = 0;
+        for await (const message of batch) {
+          received++;
+          const record = parseJson(message.string());
+          if (record && typeof record === 'object') {
+            const raw = record as Record<string, unknown>;
+            if (raw.type === 'result') {
+              const result = toResult(raw);
+              if (result) results.push(result);
+            } else {
+              const claim = toClaim(raw);
+              if (claim) claims.push(claim);
+            }
           }
+          if (message.info.pending === 0) remaining = received; // nothing newer to wait for
         }
-        if (message.info.pending === 0) remaining = received; // nothing newer to wait for
+        if (received === 0) break;
+        remaining -= received;
       }
-      if (received === 0) break;
-      remaining -= received;
+    } finally {
+      // The server keeps an ordered consumer for minutes after its last use.
+      await consumer.delete().catch(() => {});
     }
     return mergeRuns(job, claims, results, limit);
   }

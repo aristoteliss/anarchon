@@ -75,6 +75,7 @@ If the connection drops after the publish and before the confirm arrives, the in
 - **`jitterMs + maxLateMs` must be shorter than `slotTtlMs`.** After the gate queue expires, RabbitMQ no longer knows the run was taken, and a very late instance could run it again. anarchon checks this when you add a job and throws if the settings are unsafe. With the defaults (2 s + 60 s against 5 min) you are fine.
 - **Job names** may only contain letters, digits, `_` and `-`, because they become queue names.
 - **One queue per run.** A job that runs every second creates a queue every second, each living `slotTtlMs`. With the default that is about 300 small queues per such job at any moment. For very frequent jobs prefer Redis.
+- **A queue keeps the arguments it was created with.** Instances whose `slotTtlMs` or `historySize` differ use the existing queues as they are, so a new `slotTtlMs` applies to the gate queues of later runs. The history queue keeps its first size: to resize it, delete `<prefix><job>.history`, which also deletes that job's history.
 
 ## History
 

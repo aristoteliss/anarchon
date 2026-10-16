@@ -1,6 +1,6 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import type { Channel, ChannelModel, ConfirmChannel, ConsumeMessage } from 'amqplib';
+import type { Channel, ChannelModel, ConfirmChannel, ConsumeMessage, Options } from 'amqplib';
 
 import { type ClaimRecord, claimPayload, mergeRuns, parseJson, toClaim, toResult } from '../history';
 import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
@@ -136,8 +136,7 @@ export class RabbitMQBackend implements Backend {
   /** Declares the job's history stream queue, sized from historySize. */
   async prepareJob(job: string, historySize: number): Promise<void> {
     const bytes = Math.max(historySize * BYTES_PER_RUN, 100_000);
-    const channel = await this.getConfirmChannel();
-    await channel.assertQueue(this.historyQueue(job), {
+    await this.declare(this.historyQueue(job), {
       durable: true,
       arguments: {
         'x-queue-type': 'stream',
@@ -154,8 +153,7 @@ export class RabbitMQBackend implements Backend {
     // message can't be read without taking it off the queue for a moment, and while it's off, the
     // queue is empty and another instance's claim would be accepted.
     if (this.won.get(queue) === input.token) return true;
-    const channel = await this.getConfirmChannel();
-    await channel.assertQueue(queue, {
+    await this.declare(queue, {
       durable: true,
       arguments: {
         'x-queue-type': 'classic',
@@ -166,7 +164,7 @@ export class RabbitMQBackend implements Backend {
     });
     // ack: we are first. nack: the gate is full, another instance won. If the connection drops
     // before the answer, this throws: the run is skipped here rather than risk running it twice.
-    const won = await this.publish(channel, queue, claimPayload(input, false));
+    const won = await this.publish(await this.getConfirmChannel(), queue, claimPayload(input, false));
     if (won) {
       this.won.set(queue, input.token);
       const oldest = this.won.keys().next().value;
@@ -264,7 +262,7 @@ export class RabbitMQBackend implements Backend {
     if (this.confirm) return this.confirm;
     const pending: Promise<ConfirmChannel> = (async () => {
       const channel = (await (await this.getConnection()).createConfirmChannel()) as ConfirmChannel;
-      channel.on('error', () => {}); // e.g. a queue declared with different arguments
+      channel.on('error', () => {}); // also reported through 'close'
       channel.on('close', () => {
         if (this.confirm === pending) this.confirm = undefined;
       });
@@ -275,6 +273,20 @@ export class RabbitMQBackend implements Backend {
       throw error;
     });
     return this.confirm;
+  }
+
+  /** Declares a queue on a channel of its own: a refused declaration closes the channel it was sent on. */
+  private async declare(queue: string, options: Options.AssertQueue): Promise<void> {
+    const channel = (await (await this.getConnection()).createChannel()) as Channel;
+    channel.on('error', () => {});
+    try {
+      await channel.assertQueue(queue, options);
+    } catch (error) {
+      // The queue exists with other arguments (another instance's slotTtlMs or historySize): use it as it is.
+      if ((error as { code?: number }).code !== 406) throw error;
+    } finally {
+      await channel.close().catch(() => {});
+    }
   }
 
   private publish(channel: ConfirmChannel, queue: string, body: unknown): Promise<boolean> {

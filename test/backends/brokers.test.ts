@@ -3,10 +3,12 @@
 /** What is specific to RabbitMQ and NATS (claim only, no leases). */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { jetstreamManager } from '@nats-io/jetstream';
+import { connect } from '@nats-io/transport-node';
 import { describe, test } from 'vitest';
 
-import { type Backend, RabbitMQBackend, Scheduler } from '../../src';
-import { makeBackend, probeRabbit, queueSpecs, RABBITMQ_URL, sleep, uniqueId } from '../support';
+import { type Backend, NatsBackend, RabbitMQBackend, Scheduler } from '../../src';
+import { makeBackend, NATS_URL, probeNats, probeRabbit, queueSpecs, RABBITMQ_URL, sleep, uniqueId } from '../support';
 
 const futureSlot = (seconds: number) => Math.ceil(Date.now() / 1000) * 1000 + seconds * 1000;
 const input = (slot: number, instanceId: string, token = randomUUID()) => ({ job: 'job', slot, token, instanceId, historySize: 1000 });
@@ -45,6 +47,41 @@ describe('RabbitMQ and NATS (simple claim)', () => {
     } finally {
       await connection.close().catch(() => {});
       await backend.close();
+    }
+  });
+
+  test('RabbitMQ instances with different slotTtlMs or historySize share a job, and a refused declaration fails no other claim', async (t) => {
+    if (!(await probeRabbit(RABBITMQ_URL))) return t.skip(`nothing at ${RABBITMQ_URL}`);
+    const prefix = `${uniqueId('args')}.`;
+    const a = new RabbitMQBackend({ url: RABBITMQ_URL, prefix, slotTtlMs: 60_000 });
+    const b = new RabbitMQBackend({ url: RABBITMQ_URL, prefix, slotTtlMs: 120_000 });
+    try {
+      const slot = futureSlot(10);
+      assert.equal(await a.claim(input(slot, 'A')), true);
+      const claims = await Promise.all([b.claim(input(slot, 'B')), b.claim({ ...input(slot, 'B'), job: 'other' })]);
+      assert.deepEqual(claims, [false, true]);
+      await a.prepareJob('job', 100);
+      await b.prepareJob('job', 5_000);
+    } finally {
+      await Promise.all([a.close(), b.close()]);
+    }
+  });
+
+  test('NATS history() leaves no consumer behind on the server', async (t) => {
+    if (!(await probeNats(NATS_URL))) return t.skip(`nothing at ${NATS_URL}`);
+    const id = uniqueId('consumers');
+    const stream = id.toUpperCase();
+    const backend = new NatsBackend({ servers: NATS_URL, prefix: `${id}.`, stream });
+    const nc = await connect({ servers: NATS_URL });
+    try {
+      await backend.init();
+      assert.equal(await backend.claim(input(futureSlot(10), 'A')), true);
+      for (let i = 0; i < 3; i++) assert.equal((await backend.history('job', 10)).length, 1);
+      const jsm = await jetstreamManager(nc);
+      assert.deepEqual(await jsm.consumers.list(stream).next(), []);
+    } finally {
+      await backend.close();
+      await nc.close();
     }
   });
 

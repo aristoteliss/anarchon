@@ -100,7 +100,8 @@ export interface RedisBackendOptions {
  * the others can tell a dead runner from a slow one and take over (see {@link LeaseStore}).
  *
  * Keys per job, with 'stream-id', 'idmp' and 'script': a stream `<prefix><job>:runs` (one entry per
- * claimed run) and a sorted set `<prefix><job>:results`. With 'lease', see {@link LeaseStore}.
+ * claimed run), a stream `<prefix><job>:manual` (one entry per runNow() run) and a sorted set
+ * `<prefix><job>:results`. With 'lease', see {@link LeaseStore}.
  *
  * @example Usually you don't create it yourself: the Scheduler does, from its Redis shortcuts
  * ```ts
@@ -226,7 +227,7 @@ export class RedisBackend implements Backend {
 
   /**
    * Records a runNow() run. 'lease': claims a run of its own at the first free millisecond and returns
-   * that slot. Other strategies: appends an entry marked manual, so it never counts as a scheduled claim.
+   * that slot. Other strategies: appends an entry to the job's stream of manual runs, which claims never read.
    */
   async recordManualRun(input: ClaimInput): Promise<number | undefined> {
     // (lease strategy: the scheduler claims manual runs itself, through runs.claim)
@@ -246,7 +247,8 @@ export class RedisBackend implements Backend {
       throw new Error(`Could not record a manual run of "${input.job}"`);
     }
     const { client } = await this.getConnection();
-    await client.send('XADD', [this.streamKey(input.job), 'MAXLEN', '~', input.historySize, '*', ...claimFields(input, true)]);
+    // A server-clock ID in the claim stream would refuse 'stream-id' claims of a run already due.
+    await client.send('XADD', [this.manualKey(input.job), 'MAXLEN', '~', input.historySize, '*', ...claimFields(input, true)]);
   }
 
   /** Adds the result to the job's sorted set and trims it by count and age. */
@@ -259,16 +261,18 @@ export class RedisBackend implements Backend {
       const oldest = result.finishedAt - historyTtlMs;
       await client.send('ZREMRANGEBYSCORE', [this.resultsKey(job), '-inf', `(${oldest}`]);
       // XTRIM MINID needs Redis 6.2+; older servers keep the count limit only.
-      await client.send('XTRIM', [this.streamKey(job), 'MINID', '~', oldest]).catch(() => {});
+      for (const key of [this.streamKey(job), this.manualKey(job)]) await client.send('XTRIM', [key, 'MINID', '~', oldest]).catch(() => {});
     }
   }
 
-  /** Joins the claims in the stream with the results in the sorted set. */
+  /** Joins the claims and manual runs in the streams with the results in the sorted set. */
   async history(job: string, limit: number): Promise<RunRecord[]> {
     if (this.lease) return this.lease.history(job, limit);
     const { client } = await this.getConnection();
-    const entries = parseEntries(await client.send('XREVRANGE', [this.streamKey(job), '+', '-', 'COUNT', limit]));
-    const claims = entries.flatMap((entry) => toClaim(entry.fields) ?? []);
+    const streams = await Promise.all(
+      [this.streamKey(job), this.manualKey(job)].map((key) => client.send('XREVRANGE', [key, '+', '-', 'COUNT', limit])),
+    );
+    const claims = streams.flatMap((reply) => parseEntries(reply)).flatMap((entry) => toClaim(entry.fields) ?? []);
     if (claims.length === 0) return [];
     let min = Infinity;
     let max = -Infinity;
@@ -323,6 +327,10 @@ export class RedisBackend implements Backend {
 
   private streamKey(job: string): string {
     return `${this.prefix}${job}:runs`;
+  }
+
+  private manualKey(job: string): string {
+    return `${this.prefix}${job}:manual`;
   }
 
   private resultsKey(job: string): string {

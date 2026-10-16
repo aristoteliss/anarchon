@@ -267,8 +267,8 @@ export class LeaseStore implements RunStore {
   async saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void> {
     const redis = await this.redis();
     const key = this.key(job, 'results');
-    // Score: slot plus a fraction per attempt, so attempts of one slot stay together and in order.
-    await redis.send('ZADD', [key, result.slot + (result.attempt ?? 1) / 100, JSON.stringify(result)]);
+    // Score: slot plus a fraction per attempt (below 1 even after 100 hand-overs), so attempts of one slot stay together and in order.
+    await redis.send('ZADD', [key, result.slot + Math.min(result.attempt ?? 1, 99) / 100, JSON.stringify(result)]);
     await redis.send('ZREMRANGEBYRANK', [key, 0, -(historySize * 2 + 1)]);
     if (historyTtlMs) await redis.send('ZREMRANGEBYSCORE', [key, '-inf', `(${result.finishedAt - historyTtlMs}`]);
   }

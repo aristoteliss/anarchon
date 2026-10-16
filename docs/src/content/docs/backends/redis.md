@@ -138,11 +138,12 @@ With the **`lease`** strategy, each job has five keys. They share one hash tag (
 | `{cron:<job>}:runs` | stream | One entry per attempt (history) |
 | `{cron:<job>}:results` | sorted set | One result per attempt (history) |
 
-With the **claim-only** strategies there are two:
+With the **claim-only** strategies there are three:
 
 | Key | Type | Holds |
 | --- | --- | --- |
 | `cron:<job>:runs` | stream | One entry per claimed run |
+| `cron:<job>:manual` | stream | One entry per `runNow()` run |
 | `cron:<job>:results` | sorted set | One result per run |
 
 `cron:` is the `prefix`.

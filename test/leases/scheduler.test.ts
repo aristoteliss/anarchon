@@ -186,3 +186,104 @@ test('runs leave no listeners behind (no leak on long-running services)', async 
     await scheduler.stop();
   }
 });
+
+test('a run that ends while stop() waits is recorded as ended despite a store error', async (t) => {
+  if (!(await probeRedis(REDIS_URL))) return t.skip('no Redis');
+  const prefix = `test:${uniqueId('stop-finish')}:`;
+  const backend = new RedisBackend({ redis: REDIS_URL, prefix });
+  const runs = backend.runs!;
+  const finish = runs.finish.bind(runs);
+  let failures = 1;
+  runs.finish = async (...args) => {
+    if (failures-- > 0) throw new Error('connection reset');
+    return finish(...args);
+  };
+  const scheduler = new Scheduler({ backend, leaseMs: 1_000, heartbeatMs: 200 });
+  let started = false;
+  // Ignores ctx.signal on purpose
+  scheduler.at(
+    'job',
+    Date.now() + 100,
+    async () => {
+      started = true;
+      await sleep(300);
+    },
+    { jitterMs: 0 },
+  );
+  scheduler.on('error', () => {});
+  await scheduler.start();
+  while (!started) await sleep(20);
+  await scheduler.stop();
+  const reader = new RedisBackend({ redis: REDIS_URL, prefix });
+  try {
+    assert.deepEqual(await reader.runs!.active('job'), [], 'the run is ended in the store, so no backup runs it again');
+  } finally {
+    await reader.close();
+  }
+});
+
+test('a heartbeat that reaches the store after the run ended raises no "lost" and leaves ctx.signal alone', async (t) => {
+  if (!(await probeRedis(REDIS_URL))) return t.skip('no Redis');
+  const backend = new RedisBackend({ redis: REDIS_URL, prefix: `test:${uniqueId('late-beat')}:` });
+  const runs = backend.runs!;
+  const finish = runs.finish.bind(runs);
+  runs.finish = async (...args) => {
+    const ended = await finish(...args);
+    await sleep(500);
+    return ended;
+  };
+  const scheduler = new Scheduler({ backend, leaseMs: 1_000, heartbeatMs: 200 });
+  const lost: unknown[] = [];
+  let signal: AbortSignal | undefined;
+  scheduler.every(
+    'job',
+    '1h',
+    (ctx: JobContext) => {
+      signal = ctx.signal;
+    },
+    { catchUpMs: 0 },
+  );
+  scheduler.on('lost', (e) => lost.push(e));
+  await scheduler.start();
+  try {
+    assert.equal((await scheduler.runNow('job')).status, 'success');
+    assert.deepEqual(lost, []);
+    assert.equal(signal?.aborted, false);
+  } finally {
+    await scheduler.stop();
+  }
+});
+
+test('a heartbeat still on its way when stop() hands the run over does not renew the released lease', async (t) => {
+  if (!(await probeRedis(REDIS_URL))) return t.skip('no Redis');
+  const prefix = `test:${uniqueId('release-beat')}:`;
+  const backend = new RedisBackend({ redis: REDIS_URL, prefix });
+  const runs = backend.runs!;
+  const heartbeat = runs.heartbeat.bind(runs);
+  let sent = () => {};
+  const inFlight = new Promise<void>((resolve) => {
+    sent = resolve;
+  });
+  runs.heartbeat = async (...args) => {
+    sent();
+    await sleep(300);
+    return heartbeat(...args);
+  };
+  const scheduler = new Scheduler({ backend, leaseMs: 2_000, heartbeatMs: 200 });
+  const handedOver: boolean[] = [];
+  scheduler.at('job', Date.now() + 100, (ctx: JobContext) => delay(5_000, undefined, { signal: ctx.signal }), { jitterMs: 0 });
+  scheduler.on('interrupted', (e) => handedOver.push(e.handedOver));
+  scheduler.on('error', () => {});
+  await scheduler.start();
+  await inFlight;
+  await scheduler.stop();
+  await sleep(400);
+  const reader = new RedisBackend({ redis: REDIS_URL, prefix });
+  try {
+    assert.deepEqual(handedOver, [true]);
+    const [run] = await reader.runs!.active('job');
+    assert.equal(run?.alive, false, 'the lease stays released, so a backup takes over at once');
+  } finally {
+    await reader.close();
+  }
+});
