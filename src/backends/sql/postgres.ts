@@ -2,7 +2,17 @@
 
 import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlQuery, type SqlRow, type SqlValue } from './base';
 
-/** A node-postgres (`pg`) Pool. */
+/**
+ * A node-postgres (`pg`) Pool. The usual choice: claims run on their own connection while the app
+ * keeps using the pool. You keep ownership: `stop()` doesn't end it.
+ *
+ * @example
+ * ```ts
+ * import { Pool } from 'pg';
+ * const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
+ * new Scheduler({ backend: new PostgresBackend({ connection: pool }) });
+ * ```
+ */
 export interface PgPoolLike {
   /** Runs one statement on any free connection. */
   query(text: string, values?: unknown[]): Promise<{ rows: SqlRow[] }>;
@@ -12,13 +22,32 @@ export interface PgPoolLike {
   readonly idleCount: number;
 }
 
-/** A single node-postgres (`pg`) Client (already connected). */
+/**
+ * A single node-postgres (`pg`) Client (already connected). Statements and claims take turns on its
+ * one connection, so prefer a Pool when the app is busy.
+ *
+ * @example
+ * ```ts
+ * const client = new Client({ connectionString: process.env.DATABASE_URL });
+ * await client.connect();
+ * new Scheduler({ backend: new PostgresBackend({ connection: client }) });
+ * ```
+ */
 export interface PgClientLike {
   /** Runs one statement. A Client has one connection, so anarchon queues its statements on it. */
   query(text: string, values?: unknown[]): Promise<{ rows: SqlRow[] }>;
 }
 
-/** A postgres.js (`postgres`) sql instance. */
+/**
+ * A postgres.js (`postgres`) sql instance.
+ *
+ * @example
+ * ```ts
+ * import postgres from 'postgres';
+ * const sql = postgres(process.env.DATABASE_URL);
+ * new Scheduler({ backend: new PostgresBackend({ connection: sql }) });
+ * ```
+ */
 export interface PostgresJsLike {
   /** Runs a statement given as text with parameters (anarchon's SQL is built from a validated table name). */
   unsafe(query: string, params?: unknown[]): PromiseLike<ArrayLike<SqlRow>>;
@@ -26,7 +55,19 @@ export interface PostgresJsLike {
   begin<T>(fn: (sql: { unsafe(query: string, params?: unknown[]): PromiseLike<ArrayLike<SqlRow>> }) => Promise<T>): PromiseLike<T>;
 }
 
-/** Options of {@link PostgresBackend}. */
+/**
+ * Options of {@link PostgresBackend}.
+ *
+ * @example The app's pool, and tables in a schema of their own
+ * ```ts
+ * new PostgresBackend({ connection: pool, table: 'scheduler.runs' }); // scheduler.runs and scheduler.runs_attempts
+ * ```
+ *
+ * @example A connection string: anarchon opens a pg Pool and closes it on stop()
+ * ```ts
+ * new PostgresBackend({ connection: process.env.DATABASE_URL });
+ * ```
+ */
 export interface PostgresBackendOptions {
   /**
    * A connection string (default: `postgres://localhost:5432/postgres`, with PG* environment variables
@@ -140,7 +181,17 @@ export class PostgresBackend extends SqlBackend {
   }
 }
 
-/** A pg Pool: each transaction takes its own connection from the pool. */
+/**
+ * Adapts a pg Pool to {@link SqlClient}: each transaction takes its own connection from the pool.
+ * The backend does this on its own; call it to wrap the client in something of yours.
+ *
+ * @example
+ * ```ts
+ * const base = fromPgPool(pool);
+ * const logged: SqlClient = { ...base, all: (sql, params) => (log.debug(sql), base.all(sql, params)) };
+ * new PostgresBackend({ connection: logged });
+ * ```
+ */
 export function fromPgPool(pool: PgPoolLike): SqlClient {
   return {
     all: async (sql, params) => (await pool.query(sql, [...params])).rows,
@@ -161,7 +212,16 @@ export function fromPgPool(pool: PgPoolLike): SqlClient {
   };
 }
 
-/** A single pg Client: statements and transactions take turns on its one connection. */
+/**
+ * Adapts a single pg Client to {@link SqlClient}: statements and transactions take turns on its one
+ * connection.
+ *
+ * @example
+ * ```ts
+ * const client = fromPgClient(connectedClient);
+ * await client.all('SELECT 1 AS one', []); // [{ one: 1 }]
+ * ```
+ */
 export function fromPgClient(client: PgClientLike): SqlClient {
   const mutex = new Mutex();
   const query = async (sql: string, params: ReadonlyArray<SqlValue>) => (await client.query(sql, [...params])).rows;
@@ -182,6 +242,15 @@ export function fromPgClient(client: PgClientLike): SqlClient {
   };
 }
 
+/**
+ * Adapts a postgres.js sql instance to {@link SqlClient}; transactions use `sql.begin()`.
+ *
+ * @example
+ * ```ts
+ * const client = fromPostgresJs(postgres(process.env.DATABASE_URL));
+ * new PostgresBackend({ connection: client });
+ * ```
+ */
 export function fromPostgresJs(sql: PostgresJsLike): SqlClient {
   return {
     all: async (text, params) => Array.from(await sql.unsafe(text, [...params])),

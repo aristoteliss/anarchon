@@ -89,16 +89,16 @@ description: Κάθε επιλογή του scheduler, των εργασιών �
 
 ## Επιλογές Redis / Valkey backend
 
-`new RedisBackend(options)`. Οδηγός: [Redis και Valkey](../../backends/redis/).
+`new RedisBackend(options)`. Οδηγός: [Redis και Valkey](../../backends/redis/). Το `new ValkeyBackend(options)` δέχεται τις ίδιες, με `valkey` στη θέση του `redis` και χωρίς τη στρατηγική `'idmp'`. Μια στρατηγική είναι ένα όνομα, ή `{ name, ...ρυθμίσεις }` μόνο με τις ρυθμίσεις εκείνης της στρατηγικής.
 
 | Επιλογή | Τύπος | Προεπιλογή | Σημασία |
 | --- | --- | --- | --- |
 | `redis` | URL, `{ host, port, username, password, db }`, ή client | `localhost:6379` | Σύνδεση |
-| `strategy` | `'lease' \| 'stream-id' \| 'idmp' \| 'script'` | `'lease'` | Πώς επιλέγεται ένας νικητής |
+| `strategy` | `'lease' \| 'stream-id' \| 'idmp' \| 'script'`, ή `{ name, ...ρυθμίσεις }` | `'lease'` | Πώς επιλέγεται ένας νικητής |
 | `prefix` | `string` | `'cron:'` | Πρόθεμα κλειδιού |
-| `idmp.durationSec` | `number` (1 έως 86400) | `300` | `'idmp'`: για πόσο θυμάται το ID μιας εκτέλεσης |
-| `idmp.maxSize` | `number` (1 έως 10000) | `1000` | `'idmp'`: πόσα ID εκτελέσεων διατηρούνται ανά εργασία |
-| `scriptWindowMs` | `number` | `300000` | `'script'`: για πόσο θυμάται μια διεκδικημένη εκτέλεση |
+| `strategy.durationSec` | `number` (1 έως 86400) | `300` | Μόνο `{ name: 'idmp' }`: για πόσο θυμάται το ID μιας εκτέλεσης |
+| `strategy.maxSize` | `number` (1 έως 10000) | `1000` | Μόνο `{ name: 'idmp' }`: πόσα ID εκτελέσεων διατηρούνται ανά εργασία |
+| `strategy.windowMs` | `number` | `300000` | Μόνο `{ name: 'script' }`: για πόσο θυμάται μια διεκδικημένη εκτέλεση |
 
 ## Επιλογές PostgreSQL backend
 

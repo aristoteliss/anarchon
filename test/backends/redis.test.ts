@@ -8,7 +8,7 @@ import IoValkey from 'iovalkey';
 import { createClient } from 'redis';
 import { describe, test } from 'vitest';
 
-import { type Backend, RedisBackend } from '../../src';
+import { type Backend, type KeyValueStrategyName, RedisBackend, ValkeyBackend } from '../../src';
 import { probeRedis, REDIS_OLD_URL, REDIS_URL, supportsIdmp, uniqueId, VALKEY_URL } from '../support';
 
 // GLIDE logs every server error (expected here: losers' XADDs are refused) to stdout.
@@ -42,6 +42,31 @@ describe('Redis / Valkey specifics', () => {
     if (checked === 0) t.skip('no Valkey or older Redis to check');
   });
 
+  test('ValkeyBackend refuses idmp when compiling and when constructed', () => {
+    // @ts-expect-error Valkey has no 'idmp'
+    const strategy: KeyValueStrategyName<'valkey'> = 'idmp';
+    assert.throws(() => new ValkeyBackend({ strategy }), /"idmp" strategy needs Redis 8\.6.*Valkey.*"stream-id" or "script"/);
+    // @ts-expect-error nor its settings
+    assert.throws(() => new ValkeyBackend({ strategy: { name: 'idmp', durationSec: 60 } }), /"idmp" strategy needs Redis 8\.6/);
+    assert.equal(new ValkeyBackend().name, 'valkey:lease');
+    assert.equal(new ValkeyBackend({ valkey: VALKEY_URL, strategy: { name: 'script', windowMs: 60_000 } }).name, 'valkey:script');
+  });
+
+  test('a strategy takes only its own settings, when compiling and when constructed', () => {
+    // @ts-expect-error 'lease' has no settings
+    assert.throws(() => new RedisBackend({ strategy: { name: 'lease', windowMs: 60_000 } }), /"lease" strategy has no setting "windowMs"/);
+    assert.throws(
+      // @ts-expect-error durationSec belongs to 'idmp'
+      () => new RedisBackend({ strategy: { name: 'script', durationSec: 60 } }),
+      /"script" strategy has no setting "durationSec"/,
+    );
+    // @ts-expect-error settings go inside the strategy
+    new RedisBackend({ strategy: 'script', windowMs: 60_000 });
+    assert.equal(new RedisBackend({ strategy: { name: 'idmp', durationSec: 60 } }).dedupeWindowMs, 60_000);
+    assert.equal(new RedisBackend({ strategy: { name: 'script', windowMs: 90_000 } }).dedupeWindowMs, 90_000);
+    assert.equal(new RedisBackend({ strategy: 'stream-id' }).dedupeWindowMs, Infinity);
+  });
+
   test('Valkey clients: iovalkey, Valkey GLIDE and node-redis', async (t) => {
     if (!(await probeRedis(VALKEY_URL))) return t.skip(`nothing at ${VALKEY_URL}`);
     const port = Number(new URL(VALKEY_URL).port || 6379);
@@ -57,7 +82,7 @@ describe('Redis / Valkey specifics', () => {
       ] as const) {
         for (const strategy of ['stream-id', 'script'] as const) {
           const prefix = `test:${uniqueId(name)}:`;
-          const backends = clients.map((redis) => new RedisBackend({ redis: redis as never, strategy, prefix }));
+          const backends = clients.map((redis) => new ValkeyBackend({ valkey: redis as never, strategy, prefix }));
           await race(backends, 10);
           const [one] = backends;
           await one!.saveResult(
@@ -103,7 +128,7 @@ describe('Redis / Valkey specifics', () => {
   });
 
   test('script strategy: a run outside the window could be claimed again, so the scheduler refuses unsafe settings', () => {
-    const backend = new RedisBackend({ strategy: 'script', scriptWindowMs: 30_000, redis: REDIS_URL });
+    const backend = new RedisBackend({ strategy: { name: 'script', windowMs: 30_000 }, redis: REDIS_URL });
     assert.equal(backend.dedupeWindowMs, 30_000);
     assert.throws(
       () => backend.checkJob({ name: 'x', jitterMs: 2_000, maxLateMs: 60_000, minGapMs: 10, historySize: 1_000 }),

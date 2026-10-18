@@ -1,9 +1,19 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { mergeRuns, parseJson, toClaim, toResult } from '../../history';
-import type { Backend, ClaimInput, IdmpOptions, JobLimits, RedisStrategyName, RunRecord, RunStore, StoredResult } from '../../types';
+import type {
+  Backend,
+  ClaimInput,
+  IdmpOptions,
+  JobLimits,
+  KeyValueStrategy,
+  KeyValueStrategyName,
+  RunRecord,
+  RunStore,
+  StoredResult,
+} from '../../types';
 import { intInRange, positiveInt, versionAtLeast } from '../../util';
-import { type RedisCommandClient, type RedisInput, resolveRedis } from './client';
+import { type KeyValueClient, type KeyValueConnection, resolveRedis } from './client';
 import { LeaseStore } from './lease';
 import { parseEntries, toStr } from './replies';
 import { type ClaimStrategy, claimFields, IdmpStrategy, ScriptStrategy, StreamIdStrategy } from './strategies';
@@ -15,17 +25,16 @@ import { type ClaimStrategy, claimFields, IdmpStrategy, ScriptStrategy, StreamId
  * ```ts
  * new RedisBackend(); // redis://localhost:6379, 'lease', keys under 'cron:'
  * new RedisBackend({ redis: 'rediss://user:secret@host:6380/2' });
- * new RedisBackend({ redis: { host: 'localhost', port: 6390 } }); // Valkey works the same
  * new RedisBackend({ redis: existingClient, prefix: 'orders:cron:' });
- * new RedisBackend({ strategy: 'idmp', idmp: { durationSec: 600 } }); // Redis 8.6+
+ * new RedisBackend({ strategy: { name: 'idmp', durationSec: 600 } }); // Redis 8.6+
  * ```
  */
-export interface RedisBackendOptions {
+export interface RedisBackendOptions<S extends KeyValueStrategyName = KeyValueStrategyName> {
   /**
    * Where Redis is: a URL (`redis://`, or `rediss://` for TLS), `{ host, port, ... }`, or a client
    * your app already has (ioredis, iovalkey, node-redis, Valkey GLIDE, or anything with
    * `send(command, args)`). A client you pass in is never closed by stop().
-   * Default: localhost:6379 via ioredis.
+   * Default: localhost:6379, opened with node-redis.
    *
    * @example
    * ```ts
@@ -34,18 +43,22 @@ export interface RedisBackendOptions {
    * new RedisBackend({ redis: new Redis(process.env.REDIS_URL) });
    * ```
    */
-  redis?: RedisInput;
+  redis?: KeyValueConnection;
   /**
-   * How the single runner of each run is chosen (see the table on {@link RedisBackend}).
-   * Default 'lease': also gives no overlapping runs, backup runners, catch-up and retries (Redis 5+,
-   * Valkey). The simpler 'stream-id', 'idmp' (Redis 8.6+) and 'script' only decide who runs each time.
+   * How the single runner of each run is chosen (see the table on {@link RedisBackend}): a name, or
+   * `{ name, ...settings }` for the settings of 'idmp' and 'script'.
+   * Default 'lease': also gives no overlapping runs, backup runners, catch-up and retries (Redis 5+).
+   * The simpler 'stream-id', 'idmp' (Redis 8.6+) and 'script' only decide who runs each time, so a
+   * scheduler on them takes no lease options. On Valkey, use {@link ValkeyBackend}: it has no 'idmp'.
    *
    * @example
    * ```ts
    * new RedisBackend({ strategy: 'stream-id' });
+   * new RedisBackend({ strategy: { name: 'script', windowMs: 10 * 60_000 } });
+   * new RedisBackend({ strategy: { name: 'idmp', durationSec: 900, maxSize: 5_000 } });
    * ```
    */
-  strategy?: RedisStrategyName;
+  strategy?: S | KeyValueStrategy<S>;
   /**
    * Prefix for every key. Default 'cron:'. Give each app (or environment) sharing a Redis its own;
    * instances that should share jobs must use the same one.
@@ -56,29 +69,17 @@ export interface RedisBackendOptions {
    * ```
    */
   prefix?: string;
-  /**
-   * Settings for the 'idmp' strategy.
-   *
-   * @example
-   * ```ts
-   * new RedisBackend({ strategy: 'idmp', idmp: { durationSec: 900 } });
-   * ```
-   */
-  idmp?: IdmpOptions;
-  /**
-   * 'script' strategy: how long a claimed run is remembered (ms). Must be longer than a job's
-   * jitterMs + maxLateMs, or a late instance could run it again. Default 300000 (5 min).
-   *
-   * @example
-   * ```ts
-   * new RedisBackend({ strategy: 'script', scriptWindowMs: 10 * 60_000 });
-   * ```
-   */
-  scriptWindowMs?: number;
 }
 
+const SETTINGS: Record<KeyValueStrategyName, readonly string[]> = {
+  lease: [],
+  'stream-id': [],
+  idmp: ['durationSec', 'maxSize'],
+  script: ['windowMs'],
+};
+
 /**
- * Redis or Valkey.
+ * Redis. Valkey works too, but {@link ValkeyBackend} offers only the strategies Valkey supports.
  *
  * **How each run gets exactly one runner.** Redis executes commands and Lua scripts one at a time,
  * so a single command (or script) that both checks "is this run taken?" and takes it is atomic:
@@ -89,8 +90,8 @@ export interface RedisBackendOptions {
  * | --- | --- | --- |
  * | `lease` (default) | a Lua script on a hash: no state for the run -> store `{token, lease end}` and win; state with a live lease -> 'running'; lease ran out -> the caller wins the next attempt | while the run can still be claimed (`keepMs`) |
  * | `stream-id` | `XADD <job stream> <run time>-0`: Redis refuses an entry ID that is not greater than the stream's last one, so the second XADD for a run fails | forever (IDs only grow) |
- * | `idmp` (Redis 8.6+) | `XADD ... IDMP <job> <run time>`: Redis keeps the first entry for an idempotency key and answers repeats with that entry's ID | `idmp.durationSec` |
- * | `script` | a Lua script: scan the stream's recent entries for this run time; append only if absent | `scriptWindowMs` |
+ * | `idmp` (Redis 8.6+) | `XADD ... IDMP <job> <run time>`: Redis keeps the first entry for an idempotency key and answers repeats with that entry's ID | `durationSec` |
+ * | `script` | a Lua script: scan the stream's recent entries for this run time; append only if absent | `windowMs` |
  *
  * Every claim carries a random token. After the atomic step, an instance won if the stored token is
  * its own. That also makes a claim safe to send twice (a client retry after a dropped connection
@@ -112,8 +113,7 @@ export interface RedisBackendOptions {
  * ```ts
  * const backend = new RedisBackend({
  *   redis: { host: 'cache.internal', port: 6379, password: process.env.REDIS_PASSWORD },
- *   strategy: 'script',
- *   scriptWindowMs: 10 * 60_000,
+ *   strategy: { name: 'script', windowMs: 10 * 60_000 },
  *   prefix: 'billing:cron:',
  * });
  * new Scheduler({ backend });
@@ -125,47 +125,57 @@ export interface RedisBackendOptions {
  * new Scheduler({ backend: new RedisBackend({ redis }) });
  * ```
  */
-export class RedisBackend implements Backend {
+export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName> implements Backend {
   /** 'redis:' and the strategy, e.g. 'redis:lease'. */
   readonly name: string;
-  /** How one winner is picked. See the table above. */
-  readonly strategy: RedisStrategyName;
   /**
-   * How long a claimed run is remembered: Infinity for 'lease' and 'stream-id', idmp.durationSec for
-   * 'idmp', scriptWindowMs for 'script'.
+   * The strategy's name, also when it was given as `{ name, ...settings }`. See the table above.
+   *
+   * @example
+   * ```ts
+   * new RedisBackend({ strategy: { name: 'script', windowMs: 600_000 } }).strategy; // 'script'
+   * ```
+   */
+  readonly strategy: S;
+  /**
+   * How long a claimed run is remembered: Infinity for 'lease' and 'stream-id', durationSec for
+   * 'idmp', windowMs for 'script'.
    */
   readonly dedupeWindowMs: number;
-  /** Set with the 'lease' strategy: lets the scheduler use leases, backups and catch-up. */
-  readonly runs?: RunStore;
+  /** Set with the 'lease' strategy only: lets the scheduler use leases, backups and catch-up. */
+  readonly runs: S extends 'lease' ? RunStore : undefined;
   private readonly lease?: LeaseStore;
 
   private readonly prefix: string;
-  private readonly input: RedisInput | undefined;
+  private readonly input: KeyValueConnection | undefined;
   private readonly idmp: Required<IdmpOptions>;
   private readonly scriptWindowMs: number;
-  private connection: Promise<{ client: RedisCommandClient; owned: boolean }> | undefined;
+  private connection: Promise<{ client: KeyValueClient; owned: boolean }> | undefined;
   private ready: Promise<ClaimStrategy> | undefined;
 
   /** Validates the options. Nothing connects until init(). */
-  constructor(options: RedisBackendOptions = {}) {
-    this.strategy = options.strategy ?? 'lease';
-    if (!['lease', 'stream-id', 'idmp', 'script'].includes(this.strategy)) {
-      throw new TypeError(`Unknown strategy "${String(this.strategy)}" (use "lease", "stream-id", "idmp" or "script")`);
+  constructor(options: RedisBackendOptions<S> = {}) {
+    const { name = 'lease', ...settings } = (typeof options.strategy === 'object' ? options.strategy : { name: options.strategy }) as {
+      name?: KeyValueStrategyName;
+    } & IdmpOptions & { windowMs?: number };
+    if (!Object.hasOwn(SETTINGS, name)) {
+      throw new TypeError(`Unknown strategy "${String(name)}" (use "lease", "stream-id", "idmp" or "script")`);
     }
+    for (const key of Object.keys(settings)) {
+      if (!SETTINGS[name].includes(key)) throw new TypeError(`The "${name}" strategy has no setting "${key}"`);
+    }
+    this.strategy = name as S;
     this.name = `redis:${this.strategy}`;
     this.prefix = options.prefix ?? 'cron:';
     this.input = options.redis;
     this.idmp = {
-      durationSec: intInRange('idmp.durationSec', options.idmp?.durationSec ?? 300, 1, 86_400),
-      maxSize: intInRange('idmp.maxSize', options.idmp?.maxSize ?? 1_000, 1, 10_000),
+      durationSec: intInRange('strategy.durationSec', settings.durationSec ?? 300, 1, 86_400),
+      maxSize: intInRange('strategy.maxSize', settings.maxSize ?? 1_000, 1, 10_000),
     };
-    this.scriptWindowMs = positiveInt('scriptWindowMs', options.scriptWindowMs ?? 300_000);
-    this.dedupeWindowMs =
-      this.strategy === 'idmp' ? this.idmp.durationSec * 1_000 : this.strategy === 'script' ? this.scriptWindowMs : Infinity;
-    if (this.strategy === 'lease') {
-      this.lease = new LeaseStore(async () => (await this.getConnection()).client, this.prefix);
-      this.runs = this.lease;
-    }
+    this.scriptWindowMs = positiveInt('strategy.windowMs', settings.windowMs ?? 300_000);
+    this.dedupeWindowMs = name === 'idmp' ? this.idmp.durationSec * 1_000 : name === 'script' ? this.scriptWindowMs : Infinity;
+    if (name === 'lease') this.lease = new LeaseStore(async () => (await this.getConnection()).client, this.prefix);
+    this.runs = this.lease as this['runs'];
   }
 
   /** 'idmp' and 'script' remember a limited number of runs: refuses a job whose late claims could outlive that memory. */
@@ -174,12 +184,12 @@ export class RedisBackend implements Backend {
     // The server must still remember a run while late instances may try to claim it.
     if (this.strategy === 'idmp' && this.idmp.maxSize * job.minGapMs <= needed) {
       throw new RangeError(
-        `Job "${job.name}": idmp.maxSize (${this.idmp.maxSize}) runs × ${job.minGapMs} ms between runs must cover jitterMs + maxLateMs (${needed} ms)`,
+        `Job "${job.name}": the idmp strategy's maxSize (${this.idmp.maxSize}) runs × ${job.minGapMs} ms between runs must cover jitterMs + maxLateMs (${needed} ms)`,
       );
     }
     if (this.strategy === 'script' && job.historyTtlMs !== undefined && job.historyTtlMs <= this.scriptWindowMs) {
       throw new RangeError(
-        `Job "${job.name}": historyTtlMs must be longer than scriptWindowMs (${this.scriptWindowMs} ms) for the "script" strategy`,
+        `Job "${job.name}": historyTtlMs must be longer than the script strategy's windowMs (${this.scriptWindowMs} ms)`,
       );
     }
     // ('lease' needs no such check: it never forgets a run that a late claim could still ask for.)
@@ -299,7 +309,7 @@ export class RedisBackend implements Backend {
     }
   }
 
-  private getConnection(): Promise<{ client: RedisCommandClient; owned: boolean }> {
+  private getConnection(): Promise<{ client: KeyValueClient; owned: boolean }> {
     this.connection ??= resolveRedis(this.input).catch((error: unknown) => {
       this.connection = undefined;
       throw error;
@@ -335,6 +345,59 @@ export class RedisBackend implements Backend {
 
   private resultsKey(job: string): string {
     return `${this.prefix}${job}:results`;
+  }
+}
+
+/**
+ * Options of {@link ValkeyBackend}: those of {@link RedisBackendOptions}, with `valkey` in place of
+ * `redis`, and a strategy Valkey supports (no 'idmp').
+ *
+ * @example
+ * ```ts
+ * new ValkeyBackend({ valkey: 'redis://valkey.internal:6379', strategy: 'stream-id' });
+ * new ValkeyBackend({ valkey: new GlideClient(...), strategy: { name: 'script', windowMs: 10 * 60_000 } });
+ * ```
+ */
+export interface ValkeyBackendOptions<S extends KeyValueStrategyName<'valkey'> = KeyValueStrategyName<'valkey'>>
+  extends Omit<RedisBackendOptions<S>, 'redis'> {
+  /**
+   * Where Valkey is: a URL, `{ host, port, ... }`, or your iovalkey, Valkey GLIDE or node-redis
+   * client. A client you pass in is never closed by stop(). Default: localhost:6379, opened with
+   * node-redis.
+   *
+   * @example
+   * ```ts
+   * new ValkeyBackend({ valkey: 'redis://valkey.internal:6379' });
+   * new ValkeyBackend({ valkey: new Valkey(process.env.VALKEY_URL) }); // iovalkey
+   * ```
+   */
+  valkey?: KeyValueConnection;
+}
+
+/**
+ * Valkey: a {@link RedisBackend} whose `strategy` can only be one Valkey supports, so 'idmp' is a
+ * type error rather than an error from `start()`.
+ *
+ * @example
+ * ```ts
+ * new Scheduler({ backend: new ValkeyBackend({ valkey: 'redis://localhost:6379' }) });
+ * ```
+ */
+export class ValkeyBackend<S extends KeyValueStrategyName<'valkey'> = KeyValueStrategyName<'valkey'>> extends RedisBackend<S> {
+  /** 'valkey:' and the strategy, e.g. 'valkey:lease'. */
+  override readonly name: string;
+
+  /** Validates the options. Nothing connects until init(). */
+  constructor(options: ValkeyBackendOptions<S> = {}) {
+    const { valkey, ...rest } = options;
+    const name = typeof rest.strategy === 'object' ? rest.strategy.name : rest.strategy;
+    if ((name as string) === 'idmp') {
+      throw new TypeError(
+        'The "idmp" strategy needs Redis 8.6 or newer, and Valkey has no idempotent XADD. Use strategy "stream-id" or "script".',
+      );
+    }
+    super({ ...rest, redis: valkey });
+    this.name = `valkey:${this.strategy}`;
   }
 }
 

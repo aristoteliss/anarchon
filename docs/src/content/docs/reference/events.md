@@ -35,7 +35,7 @@ Events describe what happened on **this instance**. Guide: [Events and logging](
 
 ## `success`
 
-A [`RunRecord`](../types/#runrecord) with `status: 'success'`.
+A [`RunRecord`](../types/#runkey-runevent-runrecord) with `status: 'success'`.
 
 ## `failure`
 
@@ -81,6 +81,7 @@ Background checks don't emit `skip`: a backup's periodic check and the catch-up 
 | --- | --- | --- |
 | `job` | `string` | Job name |
 | `slot` | `number` | The run |
+| `scheduledAt` | `Date` | `slot` as a Date |
 | `attempt` | `number` | The attempt this instance was running |
 | `instanceId` | `string` | This instance |
 

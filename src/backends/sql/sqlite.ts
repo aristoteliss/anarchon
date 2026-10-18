@@ -3,7 +3,18 @@
 import { sleep } from '../../util';
 import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlRow, type SqlValue } from './base';
 
-/** A synchronous SQLite database: `node:sqlite` DatabaseSync or `better-sqlite3`. */
+/**
+ * A synchronous SQLite database: `node:sqlite` DatabaseSync or `better-sqlite3`. Turn on WAL so
+ * readers don't wait for the writer. You keep ownership: `stop()` doesn't close it.
+ *
+ * @example
+ * ```ts
+ * import Database from 'better-sqlite3';
+ * const db = new Database('./jobs.db');
+ * db.pragma('journal_mode = WAL');
+ * new Scheduler({ backend: new SqliteBackend({ database: db }) });
+ * ```
+ */
 export interface SqliteDatabaseLike {
   /** Compiles a statement. `reader` (better-sqlite3) says whether it returns rows. */
   prepare(sql: string): { all(...params: unknown[]): unknown[]; run(...params: unknown[]): unknown; reader?: boolean };
@@ -11,7 +22,17 @@ export interface SqliteDatabaseLike {
   exec(sql: string): unknown;
 }
 
-/** A `@libsql/client` client: a local file, or a remote libSQL server (sqld / Turso). */
+/**
+ * A `@libsql/client` client: a local file, or a remote libSQL server (sqld / Turso). A remote
+ * server lets instances on several machines share one database.
+ *
+ * @example
+ * ```ts
+ * import { createClient } from '@libsql/client';
+ * const db = createClient({ url: process.env.LIBSQL_URL, authToken: process.env.LIBSQL_AUTH_TOKEN });
+ * new Scheduler({ backend: new SqliteBackend({ database: db }) });
+ * ```
+ */
 export interface LibsqlClientLike {
   /** 'http' or 'ws' on a remote libSQL server, 'file' on a local file. Absent: treated as a local file. */
   readonly protocol?: string;
@@ -26,7 +47,19 @@ export interface LibsqlClientLike {
   }>;
 }
 
-/** Options of {@link SqliteBackend}. */
+/**
+ * Options of {@link SqliteBackend}.
+ *
+ * @example Several processes on one machine, sharing one file
+ * ```ts
+ * new SqliteBackend({ database: '/var/lib/myapp/jobs.db', table: 'cron_runs', busyTimeoutMs: 10_000 });
+ * ```
+ *
+ * @example Instances on several machines, through a libSQL server
+ * ```ts
+ * new SqliteBackend({ database: createClient({ url: process.env.LIBSQL_URL, authToken: process.env.LIBSQL_AUTH_TOKEN }) });
+ * ```
+ */
 export interface SqliteBackendOptions {
   /**
    * A file path (default './anarchon.db'), your own node:sqlite / better-sqlite3 database, a
@@ -166,7 +199,17 @@ function isBusy(error: unknown): boolean {
   return (typeof errcode === 'number' && (errcode & 0xff) === 5) || (typeof code === 'string' && code.startsWith('SQLITE_BUSY'));
 }
 
-/** node:sqlite or better-sqlite3: statements and transactions take turns (see processQueue). */
+/**
+ * Adapts a node:sqlite or better-sqlite3 database to {@link SqlClient}: statements and transactions
+ * take turns (see processQueue), and a claim is one `BEGIN IMMEDIATE` transaction.
+ *
+ * @example
+ * ```ts
+ * import { DatabaseSync } from 'node:sqlite';
+ * const client = fromSqliteDatabase(new DatabaseSync('./jobs.db'));
+ * await client.all('SELECT sqlite_version() AS v', []); // [{ v: '3.46.1' }]
+ * ```
+ */
 export function fromSqliteDatabase(db: SqliteDatabaseLike): SqlClient {
   const mutex = processQueue;
   const query = async (sql: string, params: ReadonlyArray<SqlValue>): Promise<SqlRow[]> => {
@@ -199,6 +242,16 @@ export function fromSqliteDatabase(db: SqliteDatabaseLike): SqlClient {
   };
 }
 
+/**
+ * Adapts a `@libsql/client` client to {@link SqlClient}. On a remote server, statements of this
+ * process run one at a time; a claim is one write transaction.
+ *
+ * @example
+ * ```ts
+ * const client = fromLibsql(createClient({ url: 'file:./jobs.db' }));
+ * new SqliteBackend({ database: client });
+ * ```
+ */
 export function fromLibsql(client: LibsqlClientLike): SqlClient {
   // Only a local file blocks the thread while it waits for a lock (see processQueue).
   const mutex = client.protocol === 'http' || client.protocol === 'ws' ? new Mutex() : processQueue;

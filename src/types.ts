@@ -1,37 +1,120 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 /**
- * How the Redis/Valkey backend picks the single winner of each run:
- * - `lease` (default, Redis 5+, Valkey): one atomic script claims the run and gives the winner a lease it
- *   renews while the job runs. Adds: no overlapping runs, backup runners when the winner dies or
+ * The claim strategies of the key-value backends, by server: how the backend makes sure each run has
+ * exactly one runner.
+ * - `lease` (default; Redis 5+, Valkey): one atomic script claims the run and gives the winner a lease
+ *   it renews while the job runs. Adds: no overlapping runs, backup runners when the winner dies or
  *   freezes, catch-up of a run missed while every instance was down, and retries.
- * - `stream-id` (Redis 5+, Valkey): XADD with the run time as the entry ID; Redis refuses an ID that
- *   is not bigger than the last one, so only the first instance succeeds.
- * - `idmp` (Redis 8.6+ only): XADD with `IDMP <job> <run time>`; Redis keeps the first entry and
+ * - `stream-id` (Redis 5+, Valkey): XADD with the run time as the entry ID; the server refuses an ID
+ *   that is not bigger than the last one, so only the first instance succeeds.
+ * - `idmp` (Redis 8.6+ only): XADD with `IDMP <job> <run time>`; the server keeps the first entry and
  *   ignores repeats.
- * - `script` (Redis 5+, Valkey): a small Lua script does the same as IDMP: it appends the run only if
- *   that run time isn't already in the stream.
+ * - `script` (Redis 5+, Valkey): a small Lua script does what IDMP does, on any version: it appends
+ *   the run only if that run time isn't already in the stream.
+ *
+ * Only `lease` adds the extras; the other three only decide who runs each time. The database and
+ * broker backends have no strategy to choose: PostgreSQL and SQLite always follow the `lease` rules,
+ * and RabbitMQ and NATS always make a simple claim.
+ *
+ * @example Pick a strategy from configuration (ValkeyBackend refuses an unsupported one when created)
+ * ```ts
+ * const name = (process.env.CRON_STRATEGY ?? 'lease') as KeyValueStrategies['valkey'];
+ * new ValkeyBackend({ valkey: process.env.VALKEY_URL, strategy: name });
+ * ```
  */
-export type RedisStrategyName = 'lease' | 'stream-id' | 'idmp' | 'script';
+export interface KeyValueStrategies {
+  /**
+   * The strategies of `RedisBackend`. 'idmp' needs Redis 8.6+; the others Redis 5+.
+   *
+   * @example
+   * ```ts
+   * new RedisBackend({ strategy: 'lease' }); // the default: backups, no overlap, catch-up, retries
+   * new RedisBackend({ strategy: { name: 'idmp', durationSec: 900 } }); // Redis 8.6+, one winner per run
+   * ```
+   */
+  redis: 'lease' | 'stream-id' | 'idmp' | 'script';
+  /**
+   * The strategies of `ValkeyBackend`: Valkey has no idempotent XADD, so no 'idmp'.
+   *
+   * @example
+   * ```ts
+   * new ValkeyBackend({ valkey: process.env.VALKEY_URL, strategy: { name: 'script', windowMs: 600_000 } });
+   * ```
+   */
+  valkey: 'lease' | 'stream-id' | 'script';
+}
 
-/** @deprecated use RedisStrategyName */
-export type ClaimStrategyName = RedisStrategyName;
+/**
+ * The name of a strategy one key-value server supports (see {@link KeyValueStrategies}).
+ *
+ * @example
+ * ```ts
+ * const name: KeyValueStrategyName<'valkey'> = 'idmp'; // type error: Valkey has no 'idmp'
+ * ```
+ */
+export type KeyValueStrategyName<Server extends keyof KeyValueStrategies = 'redis'> = KeyValueStrategies[Server];
+
+type StrategySettings<Name> = Name extends 'idmp' ? IdmpOptions : Name extends 'script' ? ScriptOptions : unknown;
+
+/**
+ * The `strategy` option of `RedisBackend` and `ValkeyBackend`: a strategy's name, or an object with
+ * its name and the settings of that strategy only ('idmp' and 'script' have settings).
+ *
+ * @example
+ * ```ts
+ * const plain: KeyValueStrategy = 'stream-id';
+ * const tuned: KeyValueStrategy = { name: 'script', windowMs: 10 * 60_000 };
+ * const wrong: KeyValueStrategy = { name: 'lease', windowMs: 1 }; // type error: 'lease' has no windowMs
+ * ```
+ */
+export type KeyValueStrategy<Name extends string = KeyValueStrategyName> = {
+  [N in Name]: N | ({ name: N } & StrategySettings<N>);
+}[Name];
 
 /**
  * Where the scheduler writes its own messages. `console` fits, and so do pino and winston loggers.
  *
  * @example
  * ```ts
- * new Scheduler({ logger: pino(), log: true });
- * new Scheduler({ logger: { warn: (m) => myLog('warn', m), error: (m) => myLog('error', m) } });
+ * new Scheduler({ backend, logger: pino(), log: true });
+ * new Scheduler({ backend, logger: winston.createLogger({ transports: [new winston.transports.Console()] }) });
+ * new Scheduler({ backend, logger: { warn: (m) => myLog('warn', m), error: (m) => myLog('error', m) } });
+ * ```
+ *
+ * @example A NestJS logger
+ * ```ts
+ * const nest = new Logger('anarchon');
+ * new Scheduler({ backend, logger: { info: (m) => nest.log(m), warn: (m) => nest.warn(m), error: (m, e) => nest.error(m, e) } });
  * ```
  */
 export interface Logger {
-  /** Used by `log: true` for run messages. Falls back to console.log when missing. */
+  /**
+   * Run messages of `log: true` (started, finished, skipped). Falls back to console.log when missing.
+   *
+   * @example
+   * ```ts
+   * // [anarchon] sync @ 2026-10-10T12:00:10.000Z: started on api-2 (attempt 1, scheduled)
+   * ```
+   */
   info?(message: string, ...meta: unknown[]): void;
-  /** Failed and lost runs (with `log: true`), and problems while closing the backend. */
+  /**
+   * Failed and lost runs (with `log: true`), and problems while closing the backend.
+   *
+   * @example
+   * ```ts
+   * // [anarchon] sync @ 2026-10-10T12:00:10.000Z: failed after 203 ms: Error: timeout
+   * ```
+   */
   warn(message: string, ...meta: unknown[]): void;
-  /** 'error' events nobody listens for, and listeners that throw. */
+  /**
+   * 'error' events nobody listens for, and listeners that throw. The error is the second argument.
+   *
+   * @example
+   * ```ts
+   * // logger.error('[anarchon] error in sync', new Error('connection refused'))
+   * ```
+   */
   error(message: string, ...meta: unknown[]): void;
 }
 
@@ -58,34 +141,107 @@ export interface Logger {
  * ```
  */
 export interface JobContext<Data = unknown> {
-  /** Job name. */
+  /**
+   * The job's name. Useful when one handler serves several jobs.
+   *
+   * @example
+   * ```ts
+   * const refresh: JobHandler = (ctx) => cache.refresh(ctx.name.replace('refresh-', ''));
+   * scheduler.every('refresh-prices', '1m', refresh).every('refresh-rates', '5m', refresh);
+   * ```
+   */
   name: string;
-  /** Scheduled run time in ms since epoch. Same value on every instance. */
+  /**
+   * When the run was due, in ms since epoch: the same value on every instance and every attempt.
+   * Use it as the run's key for idempotent writes, or as the end of the period the run covers.
+   *
+   * @example
+   * ```ts
+   * scheduler.every('hourly-totals', '1h', (ctx) => totals.build({ from: ctx.slot - 3_600_000, to: ctx.slot }));
+   * ```
+   */
   slot: number;
   /** `slot` as a Date: when the run was due, not when it actually started (up to jitterMs later). */
   scheduledAt: Date;
-  /** The instance running this job (you). */
+  /**
+   * The instance running this job (you): the scheduler's `instanceId`.
+   *
+   * @example
+   * ```ts
+   * scheduler.every('sync', '10s', (ctx) => log.info(`sync on ${ctx.instanceId}`));
+   * ```
+   */
   instanceId: string;
-  /** true when started with `runNow()`. */
+  /**
+   * true when started with `runNow()`, for example to skip work that only scheduled runs do.
+   *
+   * @example
+   * ```ts
+   * scheduler.cron('digest', '0 8 * * *', async (ctx) => {
+   *   const users = ctx.manual ? [await admin()] : await subscribers(); // a manual run is a preview
+   *   await sendDigest(users);
+   * });
+   * ```
+   */
   manual: boolean;
   /**
    * The data you gave for this run: the scheduler's `data`, then the job's, then the one passed
    * to `runNow()`, each on top of the one before. `undefined` when none was given. Name its type in
    * your handler: `async (ctx: JobContext<{ tenant: string }>) => ...`.
+   *
+   * @example
+   * ```ts
+   * const scheduler = new Scheduler({ backend, data: { db } });
+   * scheduler.every('export', '1h', async (ctx: JobContext<{ db: Db; format: string }>) => {
+   *   await ctx.data.db.export(ctx.data.format);
+   * }, { data: { format: 'csv' } });
+   * await scheduler.runNow('export', { format: 'json' }); // this run only
+   * ```
    */
   data: Data;
   /**
-   * Aborted when `stop()` is called, when the run times out, or (lease strategy) when this instance
-   * lost the run to a backup because it stopped renewing its lease. Check it before side effects.
+   * Aborted when `stop()` is called, when the run times out, or (lease backends) when this
+   * instance lost the run to a backup because it stopped renewing its lease. Check it before side
+   * effects, and pass it to anything that accepts a signal.
    *
    * If the handler throws after `stop()` aborted it (e.g. `ctx.signal.throwIfAborted()`), the run is
-   * recorded as 'interrupted' and, with the lease strategy, handed to another instance right away.
+   * recorded as 'interrupted' and, on a lease backend, handed to another instance right away.
    * If the handler returns normally, the run counts as finished.
+   *
+   * @example
+   * ```ts
+   * scheduler.every('crawl', '15m', async (ctx) => {
+   *   for (const url of await queue.next(100)) {
+   *     ctx.signal.throwIfAborted(); // stop between items, not in the middle of one
+   *     await fetch(url, { signal: ctx.signal });
+   *   }
+   * }, { timeoutMs: 10 * 60_000 });
+   * ```
    */
   signal: AbortSignal;
-  /** 1 for the first try; 2, 3... when a backup took over after the previous runner died. */
+  /**
+   * 1 for the first try; 2, 3... when a backup took over after the previous runner died (lease
+   * backends). A later attempt may find part of the work done.
+   *
+   * @example
+   * ```ts
+   * scheduler.cron('charge', '0 6 * * *', async (ctx) => {
+   *   const pending = ctx.attempt > 1 ? await charges.unpaid(ctx.slot) : await charges.all(ctx.slot);
+   *   for (const charge of pending) await charge.pay();
+   * });
+   * ```
+   */
   attempt: number;
-  /** Why this run started. */
+  /**
+   * Why this run started: 'scheduled', 'manual', 'catch-up' or 'takeover'.
+   *
+   * @example
+   * ```ts
+   * scheduler.cron('report', '0 6 * * *', (ctx) => {
+   *   if (ctx.reason === 'catch-up') log.info(`report for ${ctx.scheduledAt.toISOString()} runs late, after a restart`);
+   * });
+   * ```
+   */
   reason: RunReason;
 }
 
@@ -96,6 +252,13 @@ export interface JobContext<Data = unknown> {
  * - `catch-up`: it was due while every instance was down, and an instance that started within
  *   `catchUpMs` ran it (lease backends).
  * - `takeover`: its runner died, froze or was stopped, and a backup started the next attempt (lease backends).
+ *
+ * @example
+ * ```ts
+ * scheduler.on('start', (e) => {
+ *   if (e.reason === 'takeover' || e.reason === 'catch-up') alert(`${e.job} recovered (${e.reason}) on ${e.instanceId}`);
+ * });
+ * ```
  */
 export type RunReason = 'scheduled' | 'manual' | 'catch-up' | 'takeover';
 
@@ -117,6 +280,12 @@ export type JobHandler<Data = unknown> = (ctx: JobContext<Data>) => unknown;
  * Gives a run its data when the run starts, so the value can be read at that moment: a fresh
  * token, the permissions as they are now, a tenant's current settings. It may be async. If it
  * throws, the run fails with that error, like a handler that throws.
+ *
+ * @example
+ * ```ts
+ * const freshToken: JobDataProvider = async (run) => ({ token: await auth.tokenFor(run.name) });
+ * scheduler.every('pull-orders', '5m', (ctx: JobContext<{ token: string }>) => pull(ctx.data.token), { data: freshToken });
+ * ```
  */
 export type JobDataProvider = (run: Omit<JobContext, 'data'>) => unknown;
 
@@ -124,8 +293,65 @@ export type JobDataProvider = (run: Omit<JobContext, 'data'>) => unknown;
  * Data for a job's runs, handed to the handler as `ctx.data`: a value, or a function that
  * returns it when a run starts. A function is always called; to pass a function as the data, put
  * it in an object.
+ *
+ * @example
+ * ```ts
+ * scheduler.every('a', '1h', run, { data: { tenant: 'acme' } });            // a value
+ * scheduler.every('b', '1h', run, { data: () => ({ now: settings.get() }) }); // read at each run
+ * scheduler.every('c', '1h', run, { data: { notify: sendMail } });          // a function, inside an object
+ * ```
  */
 export type JobData = object | string | number | boolean | null | JobDataProvider;
+
+/**
+ * The job options that need a backend with leases: Redis or Valkey with the 'lease' strategy,
+ * PostgreSQL or SQLite. On another backend, `scheduler.every()`, `cron()` and `at()` don't offer
+ * them, and a job that sets them anyway (from a decorator or JavaScript) is refused when added.
+ *
+ * @example
+ * ```ts
+ * const scheduler = new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
+ * scheduler.cron('charge-cards', '0 6 * * *', charge, { maxAttempts: 1, catchUpMs: 0 }); // never twice, never late
+ * scheduler.every('sample', '5s', sample, { overlap: 'allow' });                       // runs may overlap
+ * ```
+ */
+export interface LeaseJobOptions {
+  /**
+   * What to do when a run is due while the previous one is still running somewhere.
+   * 'skip' (default) skips it, with a 'skip' event of reason 'overlap'; skipped runs are not queued.
+   * 'allow' runs both.
+   *
+   * @example
+   * ```ts
+   * scheduler.every('export', '5m', exportAll);                          // never two exports at once
+   * scheduler.every('sample', '5s', sample, { overlap: 'allow' });       // each run stands alone
+   * ```
+   */
+  overlap?: 'skip' | 'allow';
+  /**
+   * How many times a run may be started when runners die (first try included).
+   * 1 = never retried. A hand-over on stop() doesn't count. A run that fails by throwing is not
+   * retried either: retries are for runners that died. 1 to 100. Default 3.
+   *
+   * @example
+   * ```ts
+   * scheduler.cron('charge-cards', '0 6 * * *', charge, { maxAttempts: 1 }); // never started twice
+   * ```
+   */
+  maxAttempts?: number;
+  /**
+   * On start, run the latest scheduled run if nobody ran it and it was due at most this
+   * many ms ago (it was missed while every instance was down). Only the latest run is caught up,
+   * not every missed one. 0 = never. Default 300000 (5 min).
+   *
+   * @example
+   * ```ts
+   * scheduler.cron('daily-report', '0 6 * * *', report, { catchUpMs: 6 * 60 * 60_000 }); // up to 6 h late
+   * scheduler.every('refresh-cache', '5s', refresh, { catchUpMs: 0 });
+   * ```
+   */
+  catchUpMs?: number;
+}
 
 /**
  * Per-job settings, for `cron()`, `every()` and `at()`. Each one falls back to the scheduler's
@@ -150,7 +376,7 @@ export type JobData = object | string | number | boolean | null | JobDataProvide
  * scheduler.cron('daily-report', '0 6 * * *', report, { catchUpMs: 6 * 60 * 60_000 });
  * ```
  */
-export interface JobOptions {
+export interface JobOptions extends LeaseJobOptions {
   /**
    * Each instance waits a random 0..jitterMs before trying to claim a run, so a random instance
    * wins each time and the work is spread. 0 = no spreading: the instance with the fastest clock
@@ -208,18 +434,6 @@ export interface JobOptions {
    */
   data?: JobData;
   /**
-   * Lease strategy: what to do when a run is due while the previous one is still running somewhere.
-   * 'skip' (default) skips it, with a 'skip' event of reason 'overlap'; skipped runs are not queued.
-   * 'allow' runs both.
-   *
-   * @example
-   * ```ts
-   * scheduler.every('export', '5m', exportAll);                          // never two exports at once
-   * scheduler.every('sample', '5s', sample, { overlap: 'allow' });       // each run stands alone
-   * ```
-   */
-  overlap?: 'skip' | 'allow';
-  /**
    * Aborts ctx.signal and marks the run failed (error `TimeoutError`) after this many ms. The
    * handler itself is not killed: it should watch `ctx.signal`. Set it on jobs that can hang, since
    * with overlap 'skip' a hung run blocks every later run of the job. Default: no limit.
@@ -230,29 +444,6 @@ export interface JobOptions {
    * ```
    */
   timeoutMs?: number;
-  /**
-   * Lease strategy: how many times a run may be started when runners die (first try included).
-   * 1 = never retried. A hand-over on stop() doesn't count. A run that fails by throwing is not
-   * retried either: retries are for runners that died. 1 to 100. Default 3.
-   *
-   * @example
-   * ```ts
-   * scheduler.cron('charge-cards', '0 6 * * *', charge, { maxAttempts: 1 }); // never started twice
-   * ```
-   */
-  maxAttempts?: number;
-  /**
-   * Lease strategy: on start, run the latest scheduled run if nobody ran it and it was due at most this
-   * many ms ago (it was missed while every instance was down). Only the latest run is caught up,
-   * not every missed one. 0 = never. Default 300000 (5 min).
-   *
-   * @example
-   * ```ts
-   * scheduler.cron('daily-report', '0 6 * * *', report, { catchUpMs: 6 * 60 * 60_000 }); // up to 6 h late
-   * scheduler.every('refresh-cache', '5s', refresh, { catchUpMs: 0 });
-   * ```
-   */
-  catchUpMs?: number;
 }
 
 /**
@@ -302,11 +493,21 @@ export interface EveryJobOptions extends JobOptions {
 }
 
 /**
+ * Options of `at()`: a one-off job has no previous run to overlap, so no `overlap`.
+ *
+ * @example
+ * ```ts
+ * scheduler.at('migrate-2026-12', '2026-12-01T03:00:00Z', migrate, { timeoutMs: 60 * 60_000, maxAttempts: 1 });
+ * ```
+ */
+export type AtJobOptions = Omit<JobOptions, 'overlap'>;
+
+/**
  * Settings of the Redis 'idmp' strategy (Redis 8.6+).
  *
  * @example A job with jitterMs 5 s and maxLateMs 10 min needs Redis to remember runs for longer than that
  * ```ts
- * new RedisBackend({ strategy: 'idmp', idmp: { durationSec: 900 } });
+ * new RedisBackend({ strategy: { name: 'idmp', durationSec: 900 } });
  * ```
  */
 export interface IdmpOptions {
@@ -316,7 +517,7 @@ export interface IdmpOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ backend: new RedisBackend({ strategy: 'idmp', idmp: { durationSec: 900 } }), maxLateMs: 600_000 });
+   * new Scheduler({ backend: new RedisBackend({ strategy: { name: 'idmp', durationSec: 900 } }), maxLateMs: 600_000 });
    * ```
    */
   durationSec?: number;
@@ -326,10 +527,32 @@ export interface IdmpOptions {
    *
    * @example
    * ```ts
-   * new RedisBackend({ strategy: 'idmp', idmp: { maxSize: 5_000 } });
+   * new RedisBackend({ strategy: { name: 'idmp', maxSize: 5_000 } });
    * ```
    */
   maxSize?: number;
+}
+
+/**
+ * Settings of the Redis/Valkey 'script' strategy.
+ *
+ * @example
+ * ```ts
+ * new RedisBackend({ strategy: { name: 'script', windowMs: 10 * 60_000 } });
+ * ```
+ */
+export interface ScriptOptions {
+  /**
+   * How long a claimed run is remembered (ms). Must be longer than a job's jitterMs + maxLateMs, or
+   * a late instance could run it again. Default 300000 (5 min).
+   *
+   * @example Instances that may reach a run up to 10 min late
+   * ```ts
+   * const backend = new RedisBackend({ strategy: { name: 'script', windowMs: 15 * 60_000 } });
+   * new Scheduler({ backend, maxLateMs: 10 * 60_000 });
+   * ```
+   */
+  windowMs?: number;
 }
 
 // ------------------------------------------------------------------ backend contract
@@ -337,6 +560,17 @@ export interface IdmpOptions {
 /**
  * What a lease-capable backend answers when asked to claim a run. Exactly one instance gets 'won'
  * for each attempt of a run; what the scheduler does with each answer is in `LeaseRunner.run()`.
+ *
+ * @example How a custom RunStore decides, in outline
+ * ```ts
+ * async claim(input: RunClaim): Promise<ClaimOutcome> {
+ *   const run = await this.load(input.job, input.slot);
+ *   if (!run) return input.mode === 'takeover' ? { kind: 'none' } : this.start(input, 1); // { kind: 'won', attempt: 1 }
+ *   if (run.finished) return { kind: 'done' };
+ *   if (run.leaseEnd > now) return { kind: 'running', attempt: run.attempt };
+ *   return run.attempt < run.maxAttempts ? this.start(input, run.attempt + 1) : { kind: 'done' };
+ * }
+ * ```
  */
 export type ClaimOutcome =
   | { kind: 'won'; attempt: number }
@@ -351,6 +585,18 @@ export type ClaimOutcome =
   /** A new run was asked for more than maxLateMs after its slot, by the server's clock. */
   | { kind: 'late'; lateMs: number };
 
+/**
+ * A claim on a lease backend: {@link ClaimInput} plus what the store needs to decide it on its own,
+ * atomically: the lease to give, the overlap rule, the attempt limit and how late is too late.
+ *
+ * @example What the scheduler sends for a due run
+ * ```ts
+ * await runs.claim({
+ *   job: 'report', slot: 1791633600000, token: randomUUID(), instanceId: 'api-1', historySize: 1000,
+ *   mode: 'new', reason: 'scheduled', leaseMs: 30_000, overlap: 'skip', maxAttempts: 3, maxLateMs: 61_000, keepMs: 301_000,
+ * });
+ * ```
+ */
 export interface RunClaim extends ClaimInput {
   /** 'new': a run that is due. 'takeover': a run whose runner stopped renewing its lease. */
   mode: 'new' | 'takeover';
@@ -377,7 +623,16 @@ export interface RunClaim extends ClaimInput {
 
 /**
  * Optional backend capability: runs with leases. The winner renews its lease while the job runs;
- * when a lease runs out before the run is finished, a backup can claim the next attempt.
+ * when a lease runs out before the run is finished, a backup can claim the next attempt. A backend
+ * that sets `runs` gets backups, no overlap, catch-up and retries, and the lease options.
+ *
+ * @example A custom backend with leases
+ * ```ts
+ * class MyBackend implements Backend {
+ *   readonly runs: RunStore = new MyRunStore(this.db); // claim, heartbeat, finish, release, active
+ *   // ...the rest of Backend
+ * }
+ * ```
  */
 export interface RunStore {
   /** Decides one claim atomically. Exactly one caller gets 'won' for each attempt of a run. */
@@ -395,12 +650,15 @@ export interface RunStore {
   active(job: string): Promise<Array<{ slot: number; attempt: number; alive: boolean }>>;
 }
 
-/** What a backend stores when an instance claims a run. */
-export interface ClaimInput {
-  /** The job's name. With `slot`, the identity of the run. */
-  job: string;
-  /** Scheduled run time (ms). */
-  slot: number;
+/**
+ * What a backend stores when an instance claims a run.
+ *
+ * @example A claim a custom backend receives
+ * ```ts
+ * { job: 'sync', slot: 1791633610000, token: '4f1c…', instanceId: 'api-2', historySize: 1000 }
+ * ```
+ */
+export interface ClaimInput extends RunKey {
   /** Random value unique to this attempt: lets an instance recognize its own claim after a retry. */
   token: string;
   /** Who is claiming. Shown in history as the runner. */
@@ -411,7 +669,15 @@ export interface ClaimInput {
   historyTtlMs?: number;
 }
 
-/** What the winner stores when a run ends. */
+/**
+ * What the winner stores when a run ends. `history()` joins it with the claim into a RunRecord.
+ *
+ * @example
+ * ```ts
+ * { slot: 1791633610000, by: 'api-2', attempt: 1, status: 'failed', startedAt: 1791633610412,
+ *   finishedAt: 1791633610615, durationMs: 203, error: 'Error: upstream timeout' }
+ * ```
+ */
 export interface StoredResult {
   /** The run's scheduled time (ms). */
   slot: number;
@@ -431,6 +697,17 @@ export interface StoredResult {
   error?: string;
 }
 
+/**
+ * A job's settings that a backend may need to refuse it, passed to `checkJob()` when the job is
+ * added: its name, how late its claims can come, and how much history it keeps.
+ *
+ * @example A backend that remembers runs for 5 minutes
+ * ```ts
+ * checkJob(job: JobLimits) {
+ *   if (job.jitterMs + job.maxLateMs >= 300_000) throw new RangeError(`Job "${job.name}": claims can come too late for this store`);
+ * }
+ * ```
+ */
 export interface JobLimits {
   /** The job's name, for error messages and for backends that restrict names. */
   name: string;
@@ -485,14 +762,39 @@ export interface JobLimits {
  * ```
  */
 export interface Backend {
-  /** e.g. 'redis:lease', 'redis:stream-id'. */
+  /**
+   * Which backend and strategy, for logs and error messages: 'redis:lease', 'valkey:script',
+   * 'postgres', 'sqlite', 'rabbitmq', 'nats'.
+   *
+   * @example
+   * ```ts
+   * log.info(`scheduler on ${scheduler.backend.name}`); // 'scheduler on postgres'
+   * ```
+   */
   readonly name: string;
   /**
    * How long the backend remembers that a run was claimed (ms). Infinity means forever.
-   * jitterMs + maxLateMs of every job must be shorter than this.
+   * jitterMs + maxLateMs of every job must be shorter than this, which the scheduler checks when a
+   * job is added.
+   *
+   * @example
+   * ```ts
+   * new RedisBackend({ strategy: { name: 'script', windowMs: 600_000 } }).dedupeWindowMs; // 600000
+   * new PostgresBackend().dedupeWindowMs;                                               // Infinity
+   * ```
    */
   readonly dedupeWindowMs: number;
-  /** Throws if a job can't run safely on this backend (name, limits). */
+  /**
+   * Throws if a job can't run safely on this backend (name, limits, options it can't honour).
+   * Called when the job is added, so a bad job fails at once instead of at its first run.
+   *
+   * @example
+   * ```ts
+   * checkJob(job: JobLimits) {
+   *   if (!/^[a-z0-9-]+$/.test(job.name)) throw new TypeError(`Job "${job.name}": lowercase names only on this backend`);
+   * }
+   * ```
+   */
   checkJob?(job: JobLimits): void;
   /** Connects and checks the server. Called by start() and before reads. */
   init(): Promise<void>;
@@ -506,7 +808,15 @@ export interface Backend {
   recordManualRun(input: ClaimInput): Promise<number | undefined>;
   /** Stores how an attempt ended, and trims the job's history to historySize and historyTtlMs. */
   saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void>;
-  /** Latest runs of a job from all instances, newest first. */
+  /**
+   * Latest runs of a job from all instances, newest first, at most `limit` attempts. What
+   * `scheduler.history()` and `lastRun()` return.
+   *
+   * @example
+   * ```ts
+   * const [latest] = await backend.history('report', 1);
+   * ```
+   */
   history(job: string, limit: number): Promise<RunRecord[]>;
   /** Present when the backend supports leases (see RunStore). */
   readonly runs?: RunStore;
@@ -516,33 +826,7 @@ export interface Backend {
 
 // ------------------------------------------------------------------ scheduler
 
-/**
- * Options of `new Scheduler()`. `backend` is required: no store is assumed.
- * Give every instance of a service the same options, apart from `instanceId`.
- *
- * @example Production-style setup on Redis
- * ```ts
- * new Scheduler({
- *   backend: new RedisBackend({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' }), // this service's own keys
- *   instanceId: process.env.POD_NAME, // readable names in history
- *   timezone: 'Europe/Athens',       // for cron expressions
- *   logger: pino(),
- *   log: true,
- * });
- * ```
- *
- * @example Quick failover for short jobs, slow and steady for long ones
- * ```ts
- * new Scheduler({ backend, leaseMs: 6_000, heartbeatMs: 1_000 });   // a dead runner is replaced within ~8 s
- * new Scheduler({ backend, leaseMs: 120_000 });                    // tolerates 2 min of lost network
- * ```
- *
- * @example In tests and scripts: don't let the scheduler keep the process alive
- * ```ts
- * new Scheduler({ backend: new SqliteBackend({ database: ':memory:' }), unrefTimers: true });
- * ```
- */
-export interface SchedulerOptions {
+interface CommonSchedulerOptions<B extends Backend> {
   /**
    * A name for this scheduler, unique in the process. Jobs declared with decorators choose a
    * scheduler by it: `@Cron('close', '0 6 1 * *', { scheduler: 'billing' })`. A scheduler without a
@@ -578,7 +862,7 @@ export interface SchedulerOptions {
    * new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }) });
    * ```
    */
-  backend: Backend;
+  backend: B;
   /**
    * Name of this instance in history and events. Must differ between instances, or history can't
    * tell them apart. Default `${hostname}:${pid}`; a pod name or host name reads better.
@@ -675,8 +959,22 @@ export interface SchedulerOptions {
    * ```
    */
   unrefTimers?: boolean;
+}
+
+/**
+ * The scheduler options that need a backend with leases: Redis or Valkey with the 'lease' strategy,
+ * PostgreSQL or SQLite. `new Scheduler()` doesn't offer them with another backend, and refuses them
+ * when they are set anyway.
+ *
+ * @example
+ * ```ts
+ * new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }), leaseMs: 10_000, heartbeatMs: 2_000 });
+ * new Scheduler({ backend: new NatsBackend(), leaseMs: 10_000 }); // type error: NATS has no leases
+ * ```
+ */
+export interface LeaseSchedulerOptions {
   /**
-   * Lease strategy: a running job's lease lasts this long and is renewed every heartbeatMs. A runner
+   * A running job's lease lasts this long and is renewed every heartbeatMs. A runner
    * that stops renewing (crash, freeze, lost network) loses the run to a backup about leaseMs later
    * (at most leaseMs + 2 × heartbeatMs). Default 30000.
    *
@@ -690,7 +988,7 @@ export interface SchedulerOptions {
    */
   leaseMs?: number;
   /**
-   * Lease strategy: how often a running job renews its lease, and how often backups check on it
+   * How often a running job renews its lease, and how often backups check on it
    * (every 1 to 2 heartbeats). Must be under half of leaseMs. Default 5000, or leaseMs / 6 if smaller.
    *
    * @example
@@ -702,8 +1000,105 @@ export interface SchedulerOptions {
 }
 
 /**
- * interrupted: the attempt didn't finish. Its runner died or froze, lost the run to a backup, or
- * was stopped with `stop()`.
+ * True when backend type B has no leases (no `runs`): RabbitMQ, NATS, and Redis or Valkey with a
+ * strategy other than 'lease'. A backend typed only as `Backend` may have them.
+ */
+type HasNoLeases<B> = 'runs' extends keyof B ? (B[keyof B & 'runs'] extends undefined ? true : false) : true;
+
+/**
+ * Options of `new Scheduler()`. `backend` is required: no store is assumed.
+ * Give every instance of a service the same options, apart from `instanceId`.
+ *
+ * @example Production-style setup on Redis
+ * ```ts
+ * new Scheduler({
+ *   backend: new RedisBackend({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' }), // this service's own keys
+ *   instanceId: process.env.POD_NAME, // readable names in history
+ *   timezone: 'Europe/Athens',       // for cron expressions
+ *   logger: pino(),
+ *   log: true,
+ * });
+ * ```
+ *
+ * @example Quick failover for short jobs, slow and steady for long ones
+ * ```ts
+ * new Scheduler({ backend, leaseMs: 6_000, heartbeatMs: 1_000 });   // a dead runner is replaced within ~8 s
+ * new Scheduler({ backend, leaseMs: 120_000 });                    // tolerates 2 min of lost network
+ * ```
+ *
+ * @example In tests and scripts: don't let the scheduler keep the process alive
+ * ```ts
+ * new Scheduler({ backend: new SqliteBackend({ database: ':memory:' }), unrefTimers: true });
+ * ```
+ */
+export type SchedulerOptions<B extends Backend = Backend> = CommonSchedulerOptions<B> &
+  (HasNoLeases<B> extends true ? unknown : LeaseSchedulerOptions);
+
+/**
+ * The options a job takes on a scheduler with backend B: `Options` without {@link LeaseJobOptions}
+ * when B has no leases.
+ *
+ * @example
+ * ```ts
+ * type OnRabbit = JobOptionsFor<RabbitMQBackend>; // no overlap, maxAttempts or catchUpMs
+ * ```
+ */
+export type JobOptionsFor<B, Options extends AtJobOptions = JobOptions> =
+  HasNoLeases<B> extends true ? Omit<Options, keyof LeaseJobOptions> : Options;
+
+/**
+ * Which run something is about: a job and one of its scheduled times. Every run event, history
+ * record and claim carries it.
+ *
+ * @example Tell runs apart in logs and metrics
+ * ```ts
+ * const runId = ({ job, slot }: RunKey) => `${job}@${new Date(slot).toISOString()}`;
+ * scheduler.on('start', (e) => log.info(`started ${runId(e)}`));
+ * scheduler.on('skip', (e) => metrics.increment('skipped', { run: runId(e), reason: e.reason }));
+ * ```
+ */
+export interface RunKey {
+  /** The job's name, as given to `every()`, `cron()`, `at()` or a decorator. */
+  job: string;
+  /**
+   * When the run was due (ms since epoch). Every instance computes the same value, so `job` and
+   * `slot` together name one run across the cluster. For a runNow() run: when it was asked for.
+   */
+  slot: number;
+}
+
+/**
+ * What every run event and history record says besides {@link RunKey}: when the run was due, and
+ * which instance it is about.
+ *
+ * @example One log format for every kind of run event
+ * ```ts
+ * const line = (e: RunEvent) => `${e.job} due ${e.scheduledAt.toISOString()} on ${e.instanceId}`;
+ * scheduler.on('start', (e) => log.info(line(e)));
+ * scheduler.on('skip', (e) => log.debug(`${line(e)}: ${e.reason}`));
+ * scheduler.on('lost', (e) => log.warn(`${line(e)}: taken over by a backup`));
+ * ```
+ */
+export interface RunEvent extends RunKey {
+  /** `slot` as a Date. */
+  scheduledAt: Date;
+  /**
+   * The instance: the one the event happened on, or in history the one that ran the attempt. Set
+   * it with the scheduler's `instanceId` option (a pod or host name reads well).
+   */
+  instanceId: string;
+}
+
+/**
+ * How an attempt stands. 'running': in progress, or its runner died on a backend without leases.
+ * 'success': the handler returned. 'failed': it threw or timed out. 'interrupted': it didn't
+ * finish; its runner died or froze, lost the run to a backup, or was stopped with `stop()`.
+ *
+ * @example
+ * ```ts
+ * const runs = await scheduler.history('nightly-export', 20);
+ * const failures = runs.filter((run) => run.status === 'failed' || run.status === 'interrupted');
+ * ```
  */
 export type RunStatus = 'running' | 'success' | 'failed' | 'interrupted';
 
@@ -720,25 +1115,24 @@ export type RunStatus = 'running' | 'success' | 'failed' | 'interrupted';
  *     status: 'interrupted', startedAt: 2026-10-10T12:00:01Z },
  * ]
  * ```
+ *
+ * @example Alert when the latest run of a job is too old or failed
+ * ```ts
+ * const last = await scheduler.lastRun('sync-customers');
+ * if (!last || Date.now() - last.scheduledAt.getTime() > 30 * 60_000) alert('sync-customers has not run for 30 min');
+ * else if (last.status === 'failed') alert(`sync-customers failed on ${last.instanceId}: ${last.error}`);
+ * ```
  */
-export interface RunRecord {
-  /** The job's name. */
-  job: string;
-  /** Scheduled run time (ms since epoch). */
-  slot: number;
-  /** `slot` as a Date: when the run was due. */
-  scheduledAt: Date;
-  /** The instance that ran it. */
-  instanceId: string;
+export interface RunRecord extends RunEvent {
   /** true when started with runNow(). */
   manual: boolean;
   /** 1 for the first try, 2+ when a backup took over. Each attempt is its own record. */
   attempt: number;
-  /** Why this attempt started. Missing on backends that don't record it. */
+  /** Why this attempt started. Missing on backends that don't record it (RabbitMQ, NATS). */
   reason?: RunReason;
   /**
-   * 'running': in progress. 'interrupted': its runner stopped before finishing (lease strategy;
-   * other strategies keep showing 'running').
+   * 'running': in progress. 'interrupted': its runner stopped before finishing (lease backends;
+   * the others keep showing 'running').
    */
   status: RunStatus;
   /** When the instance claimed and started the run. */
@@ -751,7 +1145,16 @@ export interface RunRecord {
   error?: string;
 }
 
-/** A registered job, as `jobs()` reports it. */
+/**
+ * A registered job, as `jobs()` reports it.
+ *
+ * @example A health endpoint that lists the jobs and when they run next
+ * ```ts
+ * app.get('/health/jobs', (_req, res) => {
+ *   res.json(scheduler.jobs().map((job) => ({ name: job.name, schedule: job.schedule, next: job.nextRunAt })));
+ * });
+ * ```
+ */
 export interface JobInfo {
   /** The job's name. */
   name: string;
@@ -759,22 +1162,24 @@ export interface JobInfo {
   type: 'cron' | 'every' | 'once';
   /** The schedule in words, e.g. 'every 10s' or 'cron "0 8 * * 1-5" (Europe/Athens)'. */
   schedule: string;
-  /** Next scheduled run, or null if there are no more. */
+  /** Next scheduled run, or null if there are no more (a one-off job that already ran). */
   nextRunAt: Date | null;
-  /** How many runs of this job this instance is executing right now. */
+  /** How many runs of this job this instance is executing right now (more than 1 only with overlap 'allow' or runNow()). */
   runningHere: number;
 }
 
-/** Payload of 'start': this instance won a run and is about to call the handler. */
-export interface RunStartEvent {
-  /** The job's name. */
-  job: string;
-  /** The run's scheduled time (ms since epoch). */
-  slot: number;
-  /** `slot` as a Date. */
-  scheduledAt: Date;
-  /** This instance. */
-  instanceId: string;
+/**
+ * Payload of 'start': this instance won a run and is about to call the handler.
+ *
+ * @example Count runs per instance, and notice takeovers
+ * ```ts
+ * scheduler.on('start', (e) => {
+ *   metrics.increment('job.start', { job: e.job, instance: e.instanceId, reason: e.reason });
+ *   if (e.reason === 'takeover') log.warn(`${e.job}: attempt ${e.attempt} taken over by ${e.instanceId}`);
+ * });
+ * ```
+ */
+export interface RunStartEvent extends RunEvent {
   /** true when started with runNow(). */
   manual: boolean;
   /** 1, or 2+ when this instance is taking the run over. */
@@ -783,48 +1188,71 @@ export interface RunStartEvent {
   reason: RunReason;
 }
 
-/** This instance stopped owning a run it was executing (a backup took over); ctx.signal was aborted. */
-export interface LostEvent {
-  /** The job's name. */
-  job: string;
-  /** The run that was taken over (ms since epoch). */
-  slot: number;
+/**
+ * Payload of 'lost': this instance stopped owning a run it was executing, because a backup took it
+ * over (this instance missed its heartbeats: a long pause, or the store was unreachable).
+ * `ctx.signal` of that run was aborted. Only on backends with leases.
+ *
+ * @example
+ * ```ts
+ * scheduler.on('lost', (e) => {
+ *   log.warn(`${e.job} @ ${e.scheduledAt.toISOString()}: attempt ${e.attempt} on ${e.instanceId} was taken over`);
+ * });
+ * ```
+ */
+export interface LostEvent extends RunEvent {
   /** The attempt this instance was running. The backup runs attempt + 1. */
   attempt: number;
-  /** This instance. */
-  instanceId: string;
 }
 
-/** Payload of 'failure': the handler threw (or timed out). `error` is the message, `cause` the thrown value. */
+/**
+ * Payload of 'failure': the handler threw, or `timeoutMs` passed. `error` is the message, `cause`
+ * the thrown value.
+ *
+ * @example Page on failures, but not on errors the job expects
+ * ```ts
+ * scheduler.on('failure', (run) => {
+ *   if (run.cause instanceof RateLimitError) return;
+ *   pager.notify(`${run.job} failed on ${run.instanceId} after ${run.durationMs} ms: ${run.error}`);
+ * });
+ * ```
+ */
 export interface RunFailureEvent extends RunRecord {
-  /** The value the job threw. */
+  /** The value the job threw: an Error, or anything else a handler can throw. */
   cause: unknown;
 }
 
 /**
- * A run ended without finishing because `stop()` or a backup's takeover aborted ctx.signal and the
- * job then threw. Not a job failure.
+ * Payload of 'interrupted': a run ended without finishing because `stop()` or a backup's takeover
+ * aborted ctx.signal and the job then threw. Not a job failure.
+ *
+ * @example
+ * ```ts
+ * scheduler.on('interrupted', (run) => {
+ *   log.info(`${run.job}: stopped on ${run.instanceId}${run.handedOver ? ', another instance finishes it' : ''}`);
+ * });
+ * ```
  */
 export interface RunInterruptedEvent extends RunRecord {
   /** The value the job threw. */
   cause: unknown;
-  /** Lease strategy: the run was given to another instance to finish (graceful shutdown). */
+  /** The run was given to another instance to finish (graceful shutdown on a lease backend). */
   handedOver: boolean;
 }
 
 /**
  * Payload of 'skip': a run was due and this instance did not run it. With several instances this is
  * the normal case: for every run, all instances but one emit 'skip' with reason 'taken'.
+ *
+ * @example Only the reasons worth a look
+ * ```ts
+ * scheduler.on('skip', (e) => {
+ *   if (e.reason === 'late') log.warn(`${e.job}: reached ${e.lateMs} ms late, skipped (process frozen?)`);
+ *   if (e.reason === 'overlap') log.info(`${e.job}: the previous run is still going, skipped`);
+ * });
+ * ```
  */
-export interface SkipEvent {
-  /** The job's name. */
-  job: string;
-  /** The run this instance did not run (ms since epoch). */
-  slot: number;
-  /** `slot` as a Date. */
-  scheduledAt: Date;
-  /** This instance. */
-  instanceId: string;
+export interface SkipEvent extends RunEvent {
   /**
    * 'taken': another instance won this run. 'late': this instance got there after maxLateMs.
    * 'overlap': the previous run of this job is still running (overlap 'skip').
@@ -834,14 +1262,21 @@ export interface SkipEvent {
   lateMs?: number;
 }
 
-/** Payload of 'error'. Without an 'error' listener these are written to the logger instead. */
-export interface SchedulerErrorEvent {
-  /** Backend or setup problem (not a job failure; those come as 'failure'). */
+/**
+ * Payload of 'error': a backend or setup problem, not a job failure (those are 'failure'). Without
+ * an 'error' listener these are written to the logger instead. `job` and `slot` are set when the
+ * problem belongs to one run.
+ *
+ * @example
+ * ```ts
+ * scheduler.on('error', ({ error, job, slot }) => {
+ *   log.error(job ? `${job} @ ${slot}: store problem` : 'scheduler problem', error);
+ * });
+ * ```
+ */
+export interface SchedulerErrorEvent extends Partial<RunKey> {
+  /** What went wrong: a connection error, a refused write, a listener that threw. */
   error: unknown;
-  /** The job the problem belongs to, when it belongs to one. */
-  job?: string;
-  /** The run the problem belongs to, when it belongs to one. */
-  slot?: number;
 }
 
 /**

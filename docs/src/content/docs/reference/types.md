@@ -59,18 +59,21 @@ type RunReason = 'scheduled' | 'manual' | 'catch-up' | 'takeover';
 | `'catch-up'` | It was due while every instance was down |
 | `'takeover'` | A backup started the next attempt of a run whose runner was gone |
 
-### `JobOptions`, `EveryJobOptions`, `CronJobOptions`
+### `JobOptions`, `EveryJobOptions`, `CronJobOptions`, `AtJobOptions`
 
 ```ts
-interface JobOptions {
+interface LeaseJobOptions {
+  overlap?: 'skip' | 'allow';
+  maxAttempts?: number;
+  catchUpMs?: number;
+}
+
+interface JobOptions extends LeaseJobOptions {
   jitterMs?: number;
   maxLateMs?: number;
   historySize?: number;
   historyTtlMs?: number;
-  overlap?: 'skip' | 'allow';
   timeoutMs?: number;
-  maxAttempts?: number;
-  catchUpMs?: number;
 }
 
 interface EveryJobOptions extends JobOptions {
@@ -80,6 +83,10 @@ interface EveryJobOptions extends JobOptions {
 interface CronJobOptions extends JobOptions {
   timezone?: string;
 }
+
+type AtJobOptions = Omit<JobOptions, 'overlap'>;
+
+type JobOptionsFor<B, Options = JobOptions> = /* Options, without LeaseJobOptions when B has no leases */;
 ```
 
 See [Options](../options/#job-options).
@@ -129,16 +136,22 @@ interface JobInfo {
 
 ## Runs
 
-### `RunRecord`
+### `RunKey`, `RunEvent`, `RunRecord`
 
-One attempt of one run. Returned by `history()`, `lastRun()` and `runNow()`, and the payload of `success`.
+`RunKey` names one run: a job and its scheduled time. `RunEvent` adds when it was due and which instance it is about; `RunRecord` and the run events (`RunStartEvent`, `SkipEvent`, `LostEvent`) extend it, so one function can read any of them. A `RunRecord` is one attempt of one run. Returned by `history()`, `lastRun()` and `runNow()`, and the payload of `success`.
 
 ```ts
-interface RunRecord {
+interface RunKey {
   job: string;
   slot: number;
+}
+
+interface RunEvent extends RunKey {
   scheduledAt: Date;
   instanceId: string;
+}
+
+interface RunRecord extends RunEvent {
   manual: boolean;
   attempt: number;
   reason?: RunReason;
@@ -160,9 +173,18 @@ Guide: [History](../../guides/history/#status).
 
 ## Scheduler
 
-### `SchedulerOptions`
+### `SchedulerOptions`, `LeaseSchedulerOptions`
 
-See [Options](../options/#scheduler-options).
+```ts
+interface LeaseSchedulerOptions {
+  leaseMs?: number;
+  heartbeatMs?: number;
+}
+
+type SchedulerOptions<B extends Backend = Backend> = { backend: B; /* ... */ } & /* LeaseSchedulerOptions when B may have leases */;
+```
+
+`Scheduler` takes its backend's type, `Scheduler<B>`, so its options and those of `every()`, `cron()` and `at()` depend on the backend. A backend "has leases" when its `runs` may be set: PostgreSQL, SQLite, Redis or Valkey with the `lease` strategy, and any value typed only as `Backend`. On the others, `LeaseSchedulerOptions` and `LeaseJobOptions` aren't offered. See [Options](../options/#scheduler-options).
 
 ### `Logger`
 
@@ -176,20 +198,39 @@ interface Logger {
 
 `console`, pino and winston loggers all fit.
 
-### `RedisStrategyName`
+### `KeyValueStrategies`, `KeyValueStrategyName`, `KeyValueStrategy`
 
 ```ts
-type RedisStrategyName = 'lease' | 'stream-id' | 'idmp' | 'script';
+interface KeyValueStrategies {
+  redis: 'lease' | 'stream-id' | 'idmp' | 'script';
+  valkey: 'lease' | 'stream-id' | 'script';
+}
+type KeyValueStrategyName<Server extends keyof KeyValueStrategies = 'redis'> = KeyValueStrategies[Server];
+
+// A name, or { name, ...that strategy's settings }
+type KeyValueStrategy<Name = KeyValueStrategyName> =
+  | Name
+  | { name: 'idmp'; durationSec?: number; maxSize?: number }
+  | { name: 'script'; windowMs?: number }
+  | { name: 'lease' | 'stream-id' };
 ```
 
-### `IdmpOptions`
+The strategies of the key-value backends, by server. `KeyValueStrategy` is the `strategy` option of `RedisBackend`; `ValkeyBackend` takes `KeyValueStrategy<KeyValueStrategyName<'valkey'>>`, with no `idmp` because Valkey can't run it. A strategy's settings go inside it, so they can't be given to another strategy. `lease` (the default) also gives no overlapping runs, backup runners, catch-up and retries. `stream-id`, `script` and `idmp` (Redis 8.6+) only decide who runs each time. [Redis and Valkey](../../backends/redis/) explains each one. The database and broker backends have no strategy option: PostgreSQL and SQLite always follow the `lease` rules, and RabbitMQ and NATS always make a simple claim.
+
+### `IdmpOptions`, `ScriptOptions`
 
 ```ts
 interface IdmpOptions {
   durationSec?: number; // 1 to 86400, default 300
   maxSize?: number;     // 1 to 10000, default 1000
 }
+
+interface ScriptOptions {
+  windowMs?: number;    // default 300000
+}
 ```
+
+The settings of `{ name: 'idmp' }` and `{ name: 'script' }`.
 
 ## Events
 
@@ -311,13 +352,13 @@ The minimal shape anarchon needs from each client library. You pass a real clien
 
 | Type | Matches |
 | --- | --- |
-| `RedisInput` | Anything accepted as `redis` |
-| `RedisCommandClient` | `{ send(command, args) }` |
-| `RedisConnectionOptions` | `{ host, port, username, password, db }` |
+| `KeyValueConnection` | Anything accepted as `redis` (`RedisBackend`) or `valkey` (`ValkeyBackend`) |
+| `KeyValueClient` | `{ send(command, args) }` |
+| `KeyValueConnectionOptions` | `{ host, port, username, password, db }` |
 | `IORedisLike`, `NodeRedisLike`, `ValkeyGlideLike` | ioredis / iovalkey, node-redis, Valkey GLIDE |
 | `PgPoolLike`, `PgClientLike`, `PostgresJsLike` | `pg` Pool, `pg` Client, postgres.js |
 | `SqliteDatabaseLike`, `LibsqlClientLike` | `node:sqlite` / `better-sqlite3`, `@libsql/client` |
 | `SqlClient`, `SqlQuery`, `SqlRow`, `SqlValue` | The `{ all, transaction }` adapter of the SQL backends |
 | `RabbitMQConnectionLike`, `NatsConnectionLike` | An `amqplib` connection, a NATS connection |
 
-Backend option types: `RedisBackendOptions`, `PostgresBackendOptions`, `SqliteBackendOptions`, `RabbitMQBackendOptions`, `NatsBackendOptions`. See [Options](../options/).
+Backend option types: `RedisBackendOptions`, `ValkeyBackendOptions`, `PostgresBackendOptions`, `SqliteBackendOptions`, `RabbitMQBackendOptions`, `NatsBackendOptions`. See [Options](../options/).

@@ -23,12 +23,20 @@ scheduler.every('report', '35m', buildReport, {
 | [`maxAttempts`](#maxattempts) | `3` | yes | How many times a run may be started when runners die |
 | [`catchUpMs`](#catchupms) | `300000` (5 min) | yes | How old a missed run may be and still run on start |
 | [`historySize`](#historysize-and-historyttlms) | scheduler's (1000) | no | How many runs to remember |
-| [`historyTtlMs`](#historysize-and-historyttlms) | scheduler's (none) | no | How long to remember them |
+| [`historyTtlMs`](#historysize-and-historyttlms) | scheduler's (none) | no, but not RabbitMQ or NATS | How long to remember them |
 | `offsetMs` | `0` | no | `every()` only: [shifts the grid](../defining-jobs/#shifting-the-grid-offsetms) |
 | `timezone` | scheduler's | no | `cron()` only: [the time zone](../defining-jobs/#time-zones) |
 | [`data`](../run-data/) | none | no | Data for the job's runs, read in the handler as `ctx.data` |
 
 "Scheduler's" means the option of the same name on `new Scheduler()`. See [Scheduler options](../scheduler-options/).
+
+An option that needs a lease backend isn't offered on another one. On a scheduler whose backend is RabbitMQ, NATS, or Redis/Valkey without the `lease` strategy, `every()`, `cron()` and `at()` don't accept `overlap`, `maxAttempts` or `catchUpMs`: the code doesn't compile. Decorators and plain JavaScript can't be checked that way, so the job is refused when it is added, with an error that names the option and the backend. `at()` never takes `overlap`, since a one-off job has no previous run.
+
+```ts
+const scheduler = new Scheduler({ backend: new RabbitMQBackend({ url }) });
+scheduler.every('sync', '5m', sync, { timeoutMs: 60_000 });   // fine
+scheduler.every('sync', '5m', sync, { overlap: 'allow' });    // type error: RabbitMQ has no leases
+```
 
 ## `jitterMs`
 
@@ -142,6 +150,8 @@ Only the **latest** run is caught up, not every run that was missed.
 scheduler.every('heartbeat', '5s', ping, { historySize: 100 });
 scheduler.cron('audit', '0 * * * *', audit, { historyTtlMs: 30 * 24 * 60 * 60_000 }); // 30 days
 ```
+
+RabbitMQ and NATS trim history by count only, so they refuse `historyTtlMs`. NATS keeps one history size for all its jobs: the largest of the backend's `historySize` and every job's.
 
 On lease backends a small `historySize` is always safe: a run is never forgotten while a late claim could still ask for it. On claim-only backends the store's memory of claimed runs also has to cover late instances; anarchon checks this when you add the job and throws if the settings are unsafe. See [Timing and clocks](../../internals/timing-and-clocks/).
 

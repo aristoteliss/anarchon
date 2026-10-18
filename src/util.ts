@@ -27,6 +27,13 @@ export function intInRange(label: string, value: number, min: number, max: numbe
   return value;
 }
 
+/** Refuses historyTtlMs on a backend that trims history by count only. */
+export function refuseHistoryTtl(backend: string, job: { name: string; historyTtlMs?: number | undefined }): void {
+  if (job.historyTtlMs !== undefined) {
+    throw new TypeError(`Job "${job.name}": historyTtlMs is not supported by ${backend}, which keeps history by count (historySize) only`);
+  }
+}
+
 /** Job names used in queue names and NATS subjects must stay simple. */
 export function assertSimpleName(backend: string, name: string): void {
   if (!/^[A-Za-z0-9_-]+$/.test(name)) {

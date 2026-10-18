@@ -177,7 +177,7 @@ environment value is read or reproduced here.
 
 Names only — values are never read by the generator.
 
-`AMQP_URL`, `BACKEND`, `BILLING_REDIS_URL`, `DATABASE_URL`, `EXIT_AFTER_MS`, `INSTANCE_ID`, `LIBSQL_AUTH_TOKEN`, `LIBSQL_URL`, `NATS_URL`, `POD_NAME`, `PORT`, `POSTGRES_URL`, `RABBITMQ_URL`, `REDIS_OLD_URL`, `REDIS_PASSWORD`, `REDIS_URL`, `REQUIRE_SERVERS`, `RUN_MS`, `SCENARIO`, `SPEC`, `SQLITE_DIR`, `SQLITE_FILE`, `STRATEGY`, `VALKEY_URL`
+`AMQP_URL`, `BACKEND`, `BILLING_REDIS_URL`, `CRON_STRATEGY`, `DATABASE_URL`, `EXIT_AFTER_MS`, `INSTANCE_ID`, `JOB_TIMEOUT`, `LIBSQL_AUTH_TOKEN`, `LIBSQL_URL`, `NATS_URL`, `POD_NAME`, `PORT`, `POSTGRES_URL`, `RABBITMQ_URL`, `REDIS_OLD_URL`, `REDIS_PASSWORD`, `REDIS_URL`, `REQUIRE_SERVERS`, `RUN_MS`, `SCENARIO`, `SPEC`, `SQLITE_DIR`, `SQLITE_FILE`, `STRATEGY`, `VALKEY_URL`
 <!-- context:generated-end dependencies -->
 
 ## Conventions
@@ -193,6 +193,7 @@ rules live in `AGENTS.md`.*
 | Framework neutrality | Nothing specific to NestJS in `src/`, the root config files or `test/` | `CLAUDE.md`, Tests |
 | License | Every source file starts with the repository license header | the files themselves |
 | Files | kebab-case | `src/scheduler/` |
+| Backend-specific options | An option a backend or strategy can't honour is absent from the types where the backend is known (`Scheduler<B>`, `JobOptionsFor<B>`, a strategy's settings inside `{ name }`) and throws where it isn't (decorators, JavaScript); never silently ignored | `src/types.ts`, `src/scheduler/job.ts` (`refuseWithoutLeases`), `src/backends/redis/index.ts` |
 <!-- context:manual-end conventions -->
 
 ## Commands
@@ -301,9 +302,10 @@ secret value.*
 <!-- context:manual-start gotchas -->
 *Manual section: the generator never overwrites it. Every entry cites a source.*
 
-- **The environment variable list includes JSDoc examples.** `APP_ENV`, `POD_NAME`,
-  `PORT` and `REDIS_PASSWORD` appear in `@example` blocks of `src/types.ts` and
-  `src/backends/redis/index.ts`; the library itself reads no environment.
+- **The environment variable list includes JSDoc examples.** Names such as `POD_NAME`,
+  `REDIS_PASSWORD`, `CRON_STRATEGY` and `JOB_TIMEOUT` appear only in `@example` blocks across
+  `src/` (the public API's examples read credentials from `process.env`); the library itself
+  reads no environment.
 - **The root is a workspace package.** `pnpm-workspace.yaml` lists `.`, so the map's
   workspace table shows the published package as `.`.
 - **`test:all:full` pipes through `tee`.** Its exit status does not prove success; use
@@ -315,8 +317,8 @@ secret value.*
 ## Snapshot Metadata
 
 <!-- context:generated-start metadata -->
-- Generated at: 2026-10-18T05:25:29Z
-- Git commit: 8e5bf89f9dcd2ed97846b3eb67ab7306b697ce64
+- Generated at: 2026-10-18T08:42:57Z
+- Git commit: 63fd69e0dc9c2ab63d776a78ce15206e540bec15
 - Git branch: backend-only-options
 - Uncommitted changes when generated: yes
 - Generator: `scripts/update-claude-snapshot.py` version 1.0.0

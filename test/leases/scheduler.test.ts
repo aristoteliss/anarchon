@@ -6,7 +6,7 @@ import { getEventListeners } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { describe, test } from 'vitest';
 
-import { type JobContext, RedisBackend, type RunClaim, type RunRecord, Scheduler, type SkipEvent } from '../../src';
+import { type JobContext, type LostEvent, RedisBackend, type RunClaim, type RunRecord, Scheduler, type SkipEvent } from '../../src';
 import { leaseSpecs, makeBackend, probeRedis, REDIS_URL, sleep, uniqueId } from '../support';
 
 describe('scheduler with leases', async () => {
@@ -130,8 +130,8 @@ test('an instance that skipped a run as an overlap backs it up when another inst
   const prefix = `test:${uniqueId('overlap-backup')}:`;
   const backends = [0, 1].map(() => new RedisBackend({ redis: REDIS_URL, prefix }));
   const [a, b] = backends.map((backend, i) => new Scheduler({ backend, instanceId: 'AB'[i]!, leaseMs: 400, heartbeatMs: 100 })) as [
-    Scheduler,
-    Scheduler,
+    Scheduler<RedisBackend>,
+    Scheduler<RedisBackend>,
   ];
   // B's claims of new runs arrive late: A decides first, and B asks for the second run after the first has ended.
   const runs = backends[1]!.runs!;
@@ -249,6 +249,24 @@ test('a heartbeat that reaches the store after the run ended raises no "lost" an
     assert.equal((await scheduler.runNow('job')).status, 'success');
     assert.deepEqual(lost, []);
     assert.equal(signal?.aborted, false);
+  } finally {
+    await scheduler.stop();
+  }
+});
+
+test('a run taken over by a backup raises "lost" with the run, its due time and the attempt', async (t) => {
+  if (!(await probeRedis(REDIS_URL))) return t.skip('no Redis');
+  const backend = new RedisBackend({ redis: REDIS_URL, prefix: `test:${uniqueId('lost')}:` });
+  backend.runs!.heartbeat = async () => false;
+  const scheduler = new Scheduler({ backend, leaseMs: 1_000, heartbeatMs: 100, instanceId: 'A' });
+  const due = Date.now() + 100;
+  scheduler.at('job', due, (ctx: JobContext) => delay(5_000, undefined, { signal: ctx.signal }).catch(() => {}), { jitterMs: 0 });
+  const lost = new Promise<LostEvent>((resolve) => scheduler.on('lost', resolve));
+  await scheduler.start();
+  try {
+    const event = await lost;
+    assert.deepEqual(event, { job: 'job', slot: event.slot, scheduledAt: new Date(event.slot), attempt: 1, instanceId: 'A' });
+    assert.ok(Math.abs(event.slot - due) < 1_000);
   } finally {
     await scheduler.stop();
   }

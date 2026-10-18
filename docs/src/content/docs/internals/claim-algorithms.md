@@ -105,13 +105,13 @@ sequenceDiagram
   R-->>B: token a1: not mine, lost
 ```
 
-All instances use the job name as the producer ID, so for this job they act as one logical producer sending the same message. Redis remembers a key for `idmp.durationSec`.
+All instances use the job name as the producer ID, so for this job they act as one logical producer sending the same message. Redis remembers a key for `strategy.durationSec`.
 
 ## Redis: `script`
 
 **Store feature:** an atomic Lua script, as with `lease`.
 
-The script scans the stream's entries of the last `scriptWindowMs` for this slot. If it finds one, it returns that entry's token. Otherwise it appends the claim and returns the caller's token. The caller won if the token that comes back is its own.
+The script scans the stream's entries of the last `strategy.windowMs` for this slot. If it finds one, it returns that entry's token. Otherwise it appends the claim and returns the caller's token. The caller won if the token that comes back is its own.
 
 It behaves like `idmp` on servers that don't have it (Valkey, Redis before 8.6).
 
@@ -203,8 +203,8 @@ Every instance publishes with the same message ID, because the ID is built from 
 | --- | --- | --- | --- |
 | Redis `lease` | Lua script | Redis's single command thread | as long as a late claim could ask |
 | Redis `stream-id` | `XADD` with an explicit ID | Redis | forever |
-| Redis `idmp` | `XADD ... IDMP` | Redis | `idmp.durationSec` |
-| Redis `script` | Lua script | Redis | `scriptWindowMs` |
+| Redis `idmp` | `XADD ... IDMP` | Redis | `strategy.durationSec` |
+| Redis `script` | Lua script | Redis | `strategy.windowMs` |
 | PostgreSQL | Transaction + row lock per job | The row lock | as long as a late claim could ask |
 | SQLite | `BEGIN IMMEDIATE` transaction | The database write lock | as long as a late claim could ask |
 | RabbitMQ | Publish to a full-or-empty queue | The queue | `slotTtlMs` |

@@ -11,7 +11,7 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { type Backend, PostgresBackend, RedisBackend, type RedisStrategyName, SqliteBackend } from '../src';
+import { type Backend, type KeyValueStrategyName, PostgresBackend, RedisBackend, SqliteBackend } from '../src';
 
 export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -21,7 +21,7 @@ export function backendFromEnv(name: string): Backend {
     case 'redis':
       return new RedisBackend({
         redis: process.env.REDIS_URL ?? 'redis://localhost:6379',
-        strategy: (process.env.STRATEGY as RedisStrategyName | undefined) ?? 'lease',
+        strategy: (process.env.STRATEGY as KeyValueStrategyName | undefined) ?? 'lease',
         prefix: `example:${name}:`,
       });
     case 'postgres':

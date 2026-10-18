@@ -89,16 +89,16 @@ The scheduler options above, with these differences. Reference: [Decorators](../
 
 ## Redis backend
 
-`new RedisBackend(options)`. Guide: [Redis and Valkey](../../backends/redis/).
+`new RedisBackend(options)`. Guide: [Redis and Valkey](../../backends/redis/). `new ValkeyBackend(options)` takes the same, with `valkey` in place of `redis` and no `'idmp'` strategy. A strategy is a name, or `{ name, ...settings }` with the settings of that strategy only.
 
 | Option | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `redis` | URL, `{ host, port, username, password, db }`, or a client | `localhost:6379` | Connection |
-| `strategy` | `'lease' \| 'stream-id' \| 'idmp' \| 'script'` | `'lease'` | How one winner is picked |
+| `strategy` | `'lease' \| 'stream-id' \| 'idmp' \| 'script'`, or `{ name, ...settings }` | `'lease'` | How one winner is picked |
 | `prefix` | `string` | `'cron:'` | Key prefix |
-| `idmp.durationSec` | `number` (1 to 86400) | `300` | `'idmp'`: how long a run's ID is remembered |
-| `idmp.maxSize` | `number` (1 to 10000) | `1000` | `'idmp'`: how many run IDs are kept per job |
-| `scriptWindowMs` | `number` | `300000` | `'script'`: how long a claimed run is remembered |
+| `strategy.durationSec` | `number` (1 to 86400) | `300` | `{ name: 'idmp' }` only: how long a run's ID is remembered |
+| `strategy.maxSize` | `number` (1 to 10000) | `1000` | `{ name: 'idmp' }` only: how many run IDs are kept per job |
+| `strategy.windowMs` | `number` | `300000` | `{ name: 'script' }` only: how long a claimed run is remembered |
 
 ## PostgreSQL backend
 

@@ -5,15 +5,38 @@ import type { NatsConnection } from '@nats-io/transport-node';
 
 import { type ClaimRecord, claimPayload, mergeRuns, parseJson, toClaim, toResult } from '../history';
 import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
-import { assertSimpleName, errorMessage, positiveInt } from '../util';
+import { assertSimpleName, errorMessage, positiveInt, refuseHistoryTtl } from '../util';
 
-/** The parts of a NATS connection this backend uses. */
+/**
+ * The parts of a NATS connection this backend uses: a connection from `@nats-io/transport-node`
+ * fits. Share the app's connection instead of opening a second one.
+ *
+ * @example
+ * ```ts
+ * import { connect } from '@nats-io/transport-node';
+ * const nc = await connect({ servers: process.env.NATS_URL, name: 'billing-api' });
+ * new Scheduler({ backend: new NatsBackend({ connection: nc }) }); // stop() leaves nc open
+ * ```
+ */
 export interface NatsConnectionLike {
   /** Only called on connections anarchon opened. */
   close(): Promise<void>;
 }
 
-/** Options of {@link NatsBackend}. */
+/**
+ * Options of {@link NatsBackend}.
+ *
+ * @example A three-node cluster: the stream replicated, so its memory of claimed runs survives a node
+ * ```ts
+ * new NatsBackend({
+ *   servers: ['nats://n1:4222', 'nats://n2:4222', 'nats://n3:4222'],
+ *   stream: 'BILLING_CRON',
+ *   prefix: 'billing.cron.',
+ *   replicas: 3,
+ *   duplicateWindowMs: 10 * 60_000, // instances may claim up to 10 min late
+ * });
+ * ```
+ */
 export interface NatsBackendOptions {
   /**
    * Server URL(s). Default 'nats://localhost:4222'.
@@ -65,8 +88,8 @@ export interface NatsBackendOptions {
    */
   duplicateWindowMs?: number;
   /**
-   * Messages kept per subject, i.e. about how many runs per job (stream-wide; a job's own
-   * historySize doesn't change it). Default 1000.
+   * About how many runs to keep per job. All jobs share the stream, so it keeps the largest of this
+   * and every job's historySize, for each job. Default 1000.
    *
    * @example
    * ```ts
@@ -124,7 +147,8 @@ export class NatsBackend implements Backend {
   private readonly userConnection: NatsConnectionLike | undefined;
   private readonly stream: string;
   private readonly prefix: string;
-  private readonly historySize: number;
+  private historySize: number;
+  private streamHistorySize = 0;
   private readonly replicas: number;
   private state: Promise<{ nc: NatsConnection; js: JetStreamClient; jsm: JetStreamManager }> | undefined;
 
@@ -139,9 +163,11 @@ export class NatsBackend implements Backend {
     this.replicas = positiveInt('replicas', options.replicas ?? 1);
   }
 
-  /** Job names become subjects: letters, digits, '_' and '-' only. */
+  /** Job names become subjects: letters, digits, '_' and '-' only. History is kept by count. */
   checkJob(job: JobLimits): void {
     assertSimpleName('NATS', job.name);
+    refuseHistoryTtl(this.name, job);
+    this.historySize = Math.max(this.historySize, job.historySize);
   }
 
   /** Connects, and creates the stream or brings its duplicate window and limits up to date. */
@@ -149,8 +175,12 @@ export class NatsBackend implements Backend {
     await this.getState();
   }
 
-  /** Nothing per job: all jobs share the stream. */
-  async prepareJob(): Promise<void> {}
+  /** All jobs share the stream: makes it keep at least this job's historySize runs per job. */
+  async prepareJob(_job: string, historySize: number): Promise<void> {
+    this.historySize = Math.max(this.historySize, historySize);
+    const { jsm } = await this.getState();
+    if (this.streamHistorySize < this.historySize) await this.ensureStream(jsm);
+  }
 
   /**
    * Publishes the claim with the message ID `<job>:<slot>`. Won unless the ack says duplicate; a
@@ -289,12 +319,14 @@ export class NatsBackend implements Backend {
             subjects: [...new Set([...(config.subjects ?? []), ...wanted.subjects])],
           });
         }
+        this.streamHistorySize = wanted.max_msgs_per_subject;
         return;
       } catch (error) {
         if (!/not found/i.test(errorMessage(error))) throw error;
       }
       try {
         await jsm.streams.add({ name: this.stream, num_replicas: this.replicas, ...wanted } as never);
+        this.streamHistorySize = wanted.max_msgs_per_subject;
         return;
       } catch (error) {
         // Another instance created it at the same moment: loop and check its settings.

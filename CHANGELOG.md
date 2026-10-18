@@ -12,6 +12,39 @@
 - **A named scheduler created from default settings needs a `backend` function.** Settings with
   `redis` gave each named scheduler the key prefix `cron:<name>:`. Write it as
   `` backend: (name) => new RedisBackend({ redis: url, prefix: `cron:${name}:` }) ``.
+- **`RedisStrategyName` is now `KeyValueStrategyName`.** Same values (`'lease' | 'stream-id' |
+  'idmp' | 'script'`); `KeyValueStrategyName<'valkey'>` lists the ones Valkey supports, and
+  `KeyValueStrategies` lists them by server.
+- **A strategy's settings go inside it.** `RedisBackend` no longer takes `idmp` and
+  `scriptWindowMs`: write `strategy: { name: 'idmp', durationSec, maxSize }` and
+  `strategy: { name: 'script', windowMs }`. A setting of another strategy is a type error, and an
+  error when the backend is created. `KeyValueStrategy` is now a name or such an object.
+- **Lease options need a backend with leases.** `overlap`, `maxAttempts` and `catchUpMs` on jobs,
+  and `leaseMs` and `heartbeatMs` on the scheduler, did nothing on RabbitMQ, NATS, or Redis/Valkey
+  without the `lease` strategy. They now fail to compile there, and throw when set from a
+  decorator or JavaScript. `overlap: 'skip'` was never enforced on those backends.
+- **RabbitMQ and NATS refuse `historyTtlMs`.** They keep history by count only and ignored it.
+- **`at()` takes no `overlap`.** `overlap` from `register()` defaults is left out of one-off jobs.
+- **The Redis connection types are named for both servers.** `RedisInput`,
+  `RedisConnectionOptions` and `RedisCommandClient` are `KeyValueConnection`,
+  `KeyValueConnectionOptions` and `KeyValueClient`.
+
+### Added
+
+- **`ValkeyBackend`.** A `RedisBackend` for Valkey that takes `valkey` in place of `redis` and
+  accepts only the strategies Valkey supports: `strategy: 'idmp'` is a type error instead of an
+  error from `start()`. `RedisBackend` still works with Valkey.
+- **`Scheduler<B>` knows its backend's type.** `new Scheduler({ backend })` infers it, so the
+  options of the scheduler and of `every()`, `cron()` and `at()` match the backend. New types:
+  `LeaseJobOptions`, `LeaseSchedulerOptions`, `JobOptionsFor`, `AtJobOptions`, `ScriptOptions`.
+- **`RunKey` and `RunEvent`.** The fields every run event and history record share (`job`,
+  `slot`, `scheduledAt`, `instanceId`), as types of their own: one function can read any of them.
+- **The 'lost' event has `scheduledAt`,** like the other run events.
+
+### Changed
+
+- **NATS keeps the history its jobs ask for.** The stream keeps the largest of the backend's
+  `historySize` and every job's, for each job; a job's own `historySize` was ignored before.
 
 ## 0.3.3
 

@@ -198,6 +198,7 @@ Everything the package exports.
 | --- | --- | --- |
 | `Scheduler` | class | The scheduler |
 | `RedisBackend` | class | [Redis and Valkey](../../backends/redis/) |
+| `ValkeyBackend` | class | [Redis and Valkey](../../backends/redis/) |
 | `PostgresBackend` | class | [PostgreSQL](../../backends/postgres/) |
 | `SqliteBackend` | class | [SQLite and libSQL](../../backends/sqlite/) |
 | `RabbitMQBackend` | class | [RabbitMQ](../../backends/rabbitmq/) |

@@ -3,10 +3,23 @@
 import { type ClaimRecord, mergeRuns } from '../../history';
 import type { Backend, ClaimInput, ClaimOutcome, RunClaim, RunRecord, RunStatus, RunStore, StoredResult } from '../../types';
 
+/** A statement parameter: the SQL backends only bind strings, numbers and null. */
 export type SqlValue = string | number | null;
+/**
+ * One result row, by column name. Numbers may come back as strings or bigints, depending on the
+ * driver; the backends convert what they read.
+ */
 export type SqlRow = Record<string, unknown>;
 
-/** Runs one statement and returns its rows. Statements are written with `?` placeholders. */
+/**
+ * Runs one statement and returns its rows. Statements come with the placeholders of the backend's
+ * database (`$1` for Postgres, `?` for SQLite), ready for the driver.
+ *
+ * @example
+ * ```ts
+ * const query: SqlQuery = { all: async (sql, params) => (await pool.query(sql, [...params])).rows };
+ * ```
+ */
 export interface SqlQuery {
   /** Runs one statement and resolves with its rows ([] for a statement that returns none). */
   all(sql: string, params: ReadonlyArray<SqlValue>): Promise<SqlRow[]>;
@@ -16,6 +29,15 @@ export interface SqlQuery {
  * What the SQL backends need from a driver: single statements, and a transaction (used to claim
  * runs). Postgres, SQLite and libSQL drivers are adapted to this automatically; pass your own
  * `{ all, transaction }` for anything else.
+ *
+ * @example A driver anarchon doesn't know (here a Kysely-like `db`)
+ * ```ts
+ * const client: SqlClient = {
+ *   all: async (sql, params) => (await db.raw(sql, params)).rows,
+ *   transaction: (fn) => db.transaction(async (trx) => fn({ all: async (sql, params) => (await trx.raw(sql, params)).rows })),
+ * };
+ * new PostgresBackend({ connection: client });
+ * ```
  */
 export interface SqlClient extends SqlQuery {
   /** Runs fn inside one transaction: commit when it resolves, roll back when it throws. */
@@ -94,6 +116,13 @@ interface RunRow {
  * Tables (created on start):
  *   <table>           one row per run: attempt, token, status, lease end
  *   <table>_attempts  one row per attempt: who, why, when, and how it ended (history)
+ *
+ * @example Read a job's unfinished runs straight from the backend, as in tests or tooling
+ * ```ts
+ * const backend = new PostgresBackend({ connection: process.env.DATABASE_URL });
+ * await backend.init();
+ * const open = await backend.active('nightly-export'); // [{ slot, attempt, alive }]
+ * ```
  */
 export abstract class SqlBackend implements Backend, RunStore {
   /** 'postgres' or 'sqlite'. */

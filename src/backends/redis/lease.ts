@@ -3,7 +3,7 @@
 import { mergeRuns, parseJson, toResult } from '../../history';
 import type { ClaimOutcome, RunClaim, RunRecord, RunStore, StoredResult } from '../../types';
 import { errorMessage } from '../../util';
-import type { RedisCommandClient } from './client';
+import type { KeyValueClient } from './client';
 import { parseEntries, toStr } from './replies';
 
 /**
@@ -189,11 +189,25 @@ interface StoredRun {
   l: number;
 }
 
+/**
+ * The {@link RunStore} of `RedisBackend` and `ValkeyBackend` with the 'lease' strategy: claims,
+ * heartbeats and hand-overs as Lua scripts (the algorithm is described at the top of this file).
+ * The backend creates it; use it directly to look at a job's runs, e.g. in tests or tooling.
+ *
+ * @example Which runs of a job are unfinished, and whether their runner is alive
+ * ```ts
+ * const backend = new RedisBackend({ redis: process.env.REDIS_URL });
+ * await backend.init();
+ * for (const run of await backend.runs.active('nightly-export')) {
+ *   console.log(new Date(run.slot), `attempt ${run.attempt}`, run.alive ? 'running' : 'waiting for a backup');
+ * }
+ * ```
+ */
 export class LeaseStore implements RunStore {
   private readonly shas = new Map<string, string>();
 
   constructor(
-    private readonly redis: () => Promise<RedisCommandClient>,
+    private readonly redis: () => Promise<KeyValueClient>,
     private readonly prefix: string,
   ) {}
 

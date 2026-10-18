@@ -81,6 +81,8 @@ One point is open: **lease expiry on the store's clock**. A compare-and-swap in 
 
 On a claim-only backend, write each run to work on [everything outstanding](../../reference/guarantees/#that-every-slot-runs). A lost run then costs a delay, not lost work.
 
+The options only leases can honour aren't available on a claim-only backend: `overlap`, `maxAttempts` and `catchUpMs` on jobs, `leaseMs` and `heartbeatMs` on the scheduler. Typed code that sets them doesn't compile, and a decorator or JavaScript that sets them gets an error when the job or scheduler is created. This also covers Redis and Valkey with a strategy other than `lease`.
+
 ## Next
 
 - [Backends overview](../overview/)

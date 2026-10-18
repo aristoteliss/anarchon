@@ -28,7 +28,7 @@ The de-duplication this backend uses decides who is first, but it holds no lease
 | `stream` | `'CRON'` | JetStream stream name |
 | `prefix` | `'cron.'` | Subject prefix |
 | `duplicateWindowMs` | `300000` (5 min) | How long JetStream remembers a claimed run |
-| `historySize` | `1000` | Messages kept per subject, so about how many runs per job |
+| `historySize` | `1000` | About how many runs to keep per job, at least |
 | `replicas` | `1` | Stream replicas in a NATS cluster |
 
 ```ts
@@ -39,7 +39,7 @@ new NatsBackend({ connection, stream: 'BILLING_CRON', prefix: 'billing.cron.', r
 ```
 
 :::note
-`historySize` here is set on the backend and applies to the whole stream. The per-job `historySize` option doesn't change it.
+All jobs share one stream, so it keeps one history size for all of them: the largest of the backend's `historySize` and every job's. A job that asks for more raises it when the job is added.
 :::
 
 ## How one instance wins
@@ -82,7 +82,7 @@ anarchon creates the stream on `start()` if it doesn't exist, covering the subje
 
 ## History
 
-`history()` reads the job's claims and results from the stream and joins them. `lastRun()` and `runNow()` work as on other backends. A run whose runner died keeps the status `running`.
+`history()` reads the job's claims and results from the stream and joins them. `lastRun()` and `runNow()` work as on other backends. A run whose runner died keeps the status `running`. History is trimmed by count only, so `historyTtlMs` is refused.
 
 ## Next
 

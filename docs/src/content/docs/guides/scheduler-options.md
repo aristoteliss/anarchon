@@ -70,7 +70,7 @@ Always set `timezone` if you use `cron()`. The default is the server's local zon
 
 ## Lease timing
 
-*Lease backends only.*
+*Lease backends only.* With RabbitMQ, NATS, or Redis/Valkey without the `lease` strategy, `new Scheduler()` doesn't offer `leaseMs` and `heartbeatMs`, and refuses them if they are set anyway.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -149,6 +149,7 @@ The constructor validates its options and throws at once, so a bad setting can't
 | `instanceId` is an empty string | `TypeError` |
 | A number is negative, zero where not allowed, or not a whole number | `RangeError` |
 | `heartbeatMs` is not under half of `leaseMs` | `RangeError` |
+| `leaseMs` or `heartbeatMs` with a backend that has no leases | `TypeError` |
 
 Nothing connects in the constructor. Connection problems appear when you call `start()`.
 

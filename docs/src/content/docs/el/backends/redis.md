@@ -3,15 +3,17 @@ title: Redis και Valkey
 description: Το προεπιλεγμένο backend, οι τέσσερις στρατηγικές του, τα κλειδιά και οι επιλογές του.
 ---
 
-Το Redis είναι το προεπιλεγμένο backend. Λειτουργεί με Redis 5 ή νεότερο και με Valkey.
+Το Redis είναι το προεπιλεγμένο backend. Το `RedisBackend` λειτουργεί με Redis 5 ή νεότερο, και το `ValkeyBackend` με Valkey.
 
 ```ts
-import { RedisBackend, Scheduler } from 'anarchon';
+import { RedisBackend, Scheduler, ValkeyBackend } from 'anarchon';
 
 new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
 new Scheduler({ backend: new RedisBackend({ redis: 'redis://cache.internal:6379' }) });
-new Scheduler({ backend: new RedisBackend({ redis: { host: 'localhost', port: 6390 } }) }); // Valkey
+new Scheduler({ backend: new ValkeyBackend({ valkey: { host: 'localhost', port: 6390 } }) });
 ```
+
+Το `ValkeyBackend` είναι ένα `RedisBackend` που δέχεται μόνο τις στρατηγικές που υποστηρίζει το Valkey, οπότε το `strategy: 'idmp'` είναι σφάλμα τύπου αντί για σφάλμα από το `start()`. Η επιλογή σύνδεσής του είναι `valkey` αντί για `redis`, και δεν έχει ρυθμίσεις `idmp`. Όλα τα υπόλοιπα αυτής της σελίδας ισχύουν και για τα δύο.
 
 ## Σύνδεση
 
@@ -37,27 +39,28 @@ const scheduler = new Scheduler({ backend: new RedisBackend({ redis }) }); // τ
 
 ## Επιλογές
 
-Επιλογές του `new RedisBackend()`:
+Επιλογές του `new RedisBackend()`. Το `new ValkeyBackend()` δέχεται τις ίδιες, με `valkey` στη θέση του `redis` και χωρίς τη στρατηγική `'idmp'`:
 
 | Επιλογή | Προεπιλογή | Σημασία |
 | --- | --- | --- |
 | `redis` | `localhost:6379` | Σύνδεση ή client |
-| `strategy` | `'lease'` | Πώς επιλέγεται ένας νικητής (παρακάτω) |
+| `strategy` | `'lease'` | Πώς επιλέγεται ένας νικητής: ένα όνομα, ή `{ name, ...ρυθμίσεις }` (παρακάτω) |
 | `prefix` | `'cron:'` | Πρόθεμα κάθε κλειδιού |
-| `idmp` | `{ durationSec: 300, maxSize: 1000 }` | Μόνο για τη στρατηγική `'idmp'` |
-| `scriptWindowMs` | `300000` | Μόνο για τη στρατηγική `'script'`: για πόσο διάστημα απομνημονεύεται μια δεσμευμένη εκτέλεση |
+
+Οι ρυθμίσεις μιας στρατηγικής μπαίνουν μέσα της, ώστε μια επιλογή που δεν χρησιμοποιεί η στρατηγική να μην μπορεί να οριστεί κατά λάθος: το `{ name: 'lease', windowMs: 1 }` είναι σφάλμα τύπου, και σφάλμα όταν δημιουργείται το backend.
 
 ```ts
 import { RedisBackend, Scheduler } from 'anarchon';
 
 const backend = new RedisBackend({
   redis: process.env.REDIS_URL,
-  strategy: 'script',
-  scriptWindowMs: 10 * 60_000,
+  strategy: { name: 'script', windowMs: 10 * 60_000 },
   prefix: 'billing:cron:',
 });
 new Scheduler({ backend });
 ```
+
+Μόνο το `lease` δίνει στον scheduler μισθώσεις. Με τις άλλες στρατηγικές, οι επιλογές μίσθωσης (`overlap`, `maxAttempts` και `catchUpMs` στις εργασίες, `leaseMs` και `heartbeatMs` στον scheduler) δεν προσφέρονται από τους τύπους και απορρίπτονται αν οριστούν: δείτε [Brokers και μισθώσεις](../brokers-and-leases/).
 
 ## Στρατηγικές
 
@@ -67,8 +70,8 @@ new Scheduler({ backend });
 | --- | --- | --- | --- |
 | `lease` (προεπιλογή) | **ναι** | Redis 5+, Valkey | όσο διάστημα θα μπορούσε να τη ζητήσει ένα καθυστερημένο claim |
 | `stream-id` | όχι | Redis 5+, Valkey | για πάντα |
-| `idmp` | όχι | Redis 8.6+ μόνο | `idmp.durationSec` (5 λεπτά) |
-| `script` | όχι | Redis 5+, Valkey | `scriptWindowMs` (5 λεπτά) |
+| `idmp` | όχι | Redis 8.6+ μόνο | `strategy.durationSec` (5 λεπτά) |
+| `script` | όχι | Redis 5+, Valkey | `strategy.windowMs` (5 λεπτά) |
 
 **Χρησιμοποιήστε τη στρατηγική `lease` εκτός αν έχετε λόγο να μην το κάνετε.** Είναι η μόνη στρατηγική με backups, προστασία επικάλυψης, επαναπροσπάθειες και ανάκτηση (catch-up). Οι άλλες αποφασίζουν μόνο ποιος εκτελεί κάθε φορά· διατηρούνται για ελάχιστες ρυθμίσεις και για σύγκριση.
 
@@ -115,16 +118,28 @@ A: XADD cron:sync:runs IDMP sync 1791633610000 * slot ... token a1  ->  "1791633
 B: XADD cron:sync:runs IDMP sync 1791633610000 * slot ... token b7  ->  "1791633610012-0"  (A's entry)
 ```
 
-Στη συνέχεια, κάθε instance διαβάζει εκείνη την εγγραφή και συγκρίνει τα tokens. Σε Valkey ή παλαιότερο Redis, η μέθοδος `start()` αποτυγχάνει με μήνυμα που παραπέμπει στις υπόλοιπες στρατηγικές.
+Στη συνέχεια, κάθε instance διαβάζει εκείνη την εγγραφή και συγκρίνει τα tokens. Με το `ValkeyBackend`, το `strategy: 'idmp'` δεν μεταγλωττίζεται. Με το `RedisBackend` σε Valkey ή παλαιότερο Redis, η μέθοδος `start()` αποτυγχάνει με μήνυμα που παραπέμπει στις υπόλοιπες στρατηγικές.
 
-| Επιλογή `idmp` | Προεπιλογή | Σημασία |
+| Ρύθμιση του `{ name: 'idmp' }` | Προεπιλογή | Σημασία |
 | --- | --- | --- |
 | `durationSec` | `300` | Για πόσο χρόνο το Redis απομνημονεύει το ID μιας εκτέλεσης (1 έως 86400) |
 | `maxSize` | `1000` | Πόσα IDs εκτελέσεων διατηρεί το Redis ανά εργασία (1 έως 10000) |
 
+```ts
+new RedisBackend({ strategy: { name: 'idmp', durationSec: 900, maxSize: 5_000 } });
+```
+
 ### `script`
 
 Η ίδια συμπεριφορά με το `idmp` για servers που δεν το υποστηρίζουν. Ένα Lua script σαρώνει τις πρόσφατες εγγραφές του stream για αυτόν τον χρόνο εκτέλεσης και προσθέτει το claim μόνο αν απουσιάζει.
+
+| Ρύθμιση του `{ name: 'script' }` | Προεπιλογή | Σημασία |
+| --- | --- | --- |
+| `windowMs` | `300000` | Για πόσο απομνημονεύεται μια δεσμευμένη εκτέλεση. Πρέπει να είναι μεγαλύτερο από το `jitterMs + maxLateMs` μιας εργασίας |
+
+```ts
+new ValkeyBackend({ strategy: { name: 'script', windowMs: 10 * 60_000 } });
+```
 
 ## Κλειδιά (Keys)
 

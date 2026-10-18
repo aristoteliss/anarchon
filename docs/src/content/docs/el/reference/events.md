@@ -35,7 +35,7 @@ scheduler.off(event, listener);
 
 ## `success`
 
-Ένα [`RunRecord`](../types/#runrecord) με `status: 'success'`.
+Ένα [`RunRecord`](../types/#runkey-runevent-runrecord) με `status: 'success'`.
 
 ## `failure`
 
@@ -81,6 +81,7 @@ scheduler.off(event, listener);
 | --- | --- | --- |
 | `job` | `string` | Όνομα εργασίας |
 | `slot` | `number` | Η εκτέλεση |
+| `scheduledAt` | `Date` | Το `slot` ως Date |
 | `attempt` | `number` | Η προσπάθεια που εκτελούσε αυτό το instance |
 | `instanceId` | `string` | Αυτό το instance |
 

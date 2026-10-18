@@ -123,8 +123,22 @@ history, removed behavior, or "before vs now" narratives.
   `@example` of a real call. A block that only restates the name or signature does not
   meet this rule. Do not explain implementation mechanics. A method that implements a
   documented interface member is covered by that interface's doc.
-- Exported types and interface members get a doc comment only for what the type cannot
-  say: units, the meaning of an absent or empty value, a security or ordering constraint.
+- The public API (everything `src/index.ts` exports) is documented generously, for a user
+  reading it in their editor:
+  - Every exported class, interface and type has a JSDoc block with at least one `@example`
+    of a real use case. Name the case in the example's title when there are several
+    (`@example One object per tenant`).
+  - Every option a user sets (scheduler, job, decorator, `register()`, `configure()` and
+    backend options) says what it does, its default, when to change it, and has an
+    `@example` with a realistic value.
+  - Fields of event payloads, history records and the backend contract are each documented,
+    and share the `@example` of their interface: show them in use there (a listener, a
+    payload, an outline of an implementation) instead of one example per field.
+  - Every overload signature has its own JSDoc, since editors show it per signature.
+  - Examples compile against the current API (a `Scheduler` always gets a `backend`) and
+    never contain secrets: read credentials from `process.env`.
+- Internal types and functions get a doc comment for what their signature cannot say: units,
+  the meaning of an absent or empty value, a concurrency, security or ordering constraint.
 - Inline comments belong only inside difficult core mechanisms (lease handling, claiming,
   timers, backend protocols), where they state a non-obvious concurrency, security or
   protocol constraint. Keep them short and factual. Paragraph-sized comments or tutorial

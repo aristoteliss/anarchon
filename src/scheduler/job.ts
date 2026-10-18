@@ -67,6 +67,17 @@ export interface JobDefaults {
 }
 
 /** Checks a job's name, handler and options against its schedule and the backend, and builds it. */
+/** Throws when a backend without leases is given options only leases can honour. */
+export function refuseWithoutLeases(backend: Backend, options: object, keys: readonly string[], label = ''): void {
+  if (backend.runs) return;
+  const key = keys.find((k) => (options as Record<string, unknown>)[k] !== undefined);
+  if (key) {
+    throw new TypeError(
+      `${label}${key} needs a backend with leases (Redis or Valkey with the "lease" strategy, PostgreSQL, SQLite); ${backend.name} has none`,
+    );
+  }
+}
+
 export function createJob(
   name: string,
   schedule: Schedule,
@@ -77,6 +88,7 @@ export function createJob(
 ): Job {
   if (typeof name !== 'string' || name.trim() === '') throw new TypeError('Job name must be a non-empty string');
   if (typeof handler !== 'function') throw new TypeError(`Job "${name}": handler must be a function`);
+  refuseWithoutLeases(backend, options, ['overlap', 'maxAttempts', 'catchUpMs'], `Job "${name}": `);
 
   const jitterMs =
     options.jitterMs !== undefined

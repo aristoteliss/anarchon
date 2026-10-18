@@ -39,14 +39,12 @@ function work(ms: number, signal: AbortSignal): Promise<boolean> {
   });
 }
 
+const backend = scenarioBackend(cfg);
 const options: Record<string, unknown> = { instanceId: cfg.instanceId };
-if (cfg.leaseMs) options.leaseMs = cfg.leaseMs;
-if (cfg.heartbeatMs) options.heartbeatMs = cfg.heartbeatMs;
+if (backend.runs && cfg.leaseMs) options.leaseMs = cfg.leaseMs;
+if (backend.runs && cfg.heartbeatMs) options.heartbeatMs = cfg.heartbeatMs;
 
-const scheduler = new Scheduler({
-  backend: scenarioBackend(cfg),
-  ...options,
-});
+const scheduler = new Scheduler({ backend, ...options });
 
 scheduler.every(
   'job',

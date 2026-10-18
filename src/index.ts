@@ -6,14 +6,15 @@ export type { RabbitMQBackendOptions, RabbitMQConnectionLike } from './backends/
 export { RabbitMQBackend } from './backends/rabbitmq';
 export type {
   IORedisLike,
+  KeyValueClient,
+  KeyValueConnection,
+  KeyValueConnectionOptions,
   NodeRedisLike,
   RedisBackendOptions,
-  RedisCommandClient,
-  RedisConnectionOptions,
-  RedisInput,
+  ValkeyBackendOptions,
   ValkeyGlideLike,
 } from './backends/redis';
-export { fromIORedis, fromNodeRedis, fromValkeyGlide, LeaseStore, RedisBackend } from './backends/redis';
+export { fromIORedis, fromNodeRedis, fromValkeyGlide, LeaseStore, RedisBackend, ValkeyBackend } from './backends/redis';
 export type { SqlClient, SqlQuery, SqlRow, SqlValue } from './backends/sql/base';
 export { SqlBackend } from './backends/sql/base';
 export type { PgClientLike, PgPoolLike, PostgresBackendOptions, PostgresJsLike } from './backends/sql/postgres';
@@ -26,6 +27,7 @@ export type { ConfigureOptions } from './registry';
 export { formatDuration, parseDuration } from './schedule';
 export { Scheduler } from './scheduler';
 export type {
+  AtJobOptions,
   Backend,
   ClaimInput,
   ClaimOutcome,
@@ -39,12 +41,16 @@ export type {
   JobInfo,
   JobLimits,
   JobOptions,
+  KeyValueStrategies,
+  KeyValueStrategy,
+  KeyValueStrategyName,
   Logger,
   LostEvent,
-  RedisStrategyName,
   RunClaim,
+  RunEvent,
   RunFailureEvent,
   RunInterruptedEvent,
+  RunKey,
   RunReason,
   RunRecord,
   RunStartEvent,
@@ -53,6 +59,7 @@ export type {
   SchedulerErrorEvent,
   SchedulerEvents,
   SchedulerOptions,
+  ScriptOptions,
   SkipEvent,
   StoredResult,
 } from './types';

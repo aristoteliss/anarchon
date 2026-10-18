@@ -72,8 +72,8 @@ So anarchon requires the store's memory to be longer than the latest possible cl
 | --- | --- | --- |
 | Redis `lease`, PostgreSQL, SQLite | As long as a late claim could ask, whatever `historySize` is | Nothing to set |
 | Redis `stream-id` | Forever | Nothing to set |
-| Redis `idmp` | 5 min, and at most 1000 runs | `idmp.durationSec`, `idmp.maxSize` |
-| Redis `script` | 5 min, and at most `historySize` runs | `scriptWindowMs` |
+| Redis `idmp` | 5 min, and at most 1000 runs | `strategy.durationSec`, `strategy.maxSize` |
+| Redis `script` | 5 min, and at most `historySize` runs | `strategy.windowMs` |
 | RabbitMQ | 5 min | `slotTtlMs` |
 | NATS | 5 min | `duplicateWindowMs` |
 

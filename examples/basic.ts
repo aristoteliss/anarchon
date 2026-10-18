@@ -13,7 +13,7 @@
  * over at once) or kill -9 (a backup takes over when its lease runs out), and watch another one
  * finish it as attempt 2.
  */
-import { type Backend, PostgresBackend, RedisBackend, type RedisStrategyName, Scheduler, SqliteBackend } from '../src';
+import { type Backend, type KeyValueStrategyName, PostgresBackend, RedisBackend, Scheduler, SqliteBackend } from '../src';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -23,7 +23,7 @@ function backend(): Backend {
   if (process.env.BACKEND === 'sqlite') return new SqliteBackend({ database: process.env.SQLITE_FILE ?? './anarchon.db' });
   return new RedisBackend({
     redis: process.env.REDIS_URL ?? 'redis://localhost:6379',
-    strategy: (process.env.STRATEGY as RedisStrategyName | undefined) ?? 'lease',
+    strategy: (process.env.STRATEGY as KeyValueStrategyName | undefined) ?? 'lease',
   });
 }
 

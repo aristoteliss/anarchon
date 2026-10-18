@@ -4,9 +4,18 @@ import type { Channel, ChannelModel, ConfirmChannel, ConsumeMessage, Options } f
 
 import { type ClaimRecord, claimPayload, mergeRuns, parseJson, toClaim, toResult } from '../history';
 import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
-import { assertSimpleName, positiveInt, versionAtLeast } from '../util';
+import { assertSimpleName, positiveInt, refuseHistoryTtl, versionAtLeast } from '../util';
 
-/** The parts of an amqplib connection this backend uses. */
+/**
+ * The parts of an amqplib connection this backend uses: what `amqplib.connect()` returns fits.
+ *
+ * @example
+ * ```ts
+ * import amqplib from 'amqplib';
+ * const connection = await amqplib.connect(process.env.AMQP_URL);
+ * new Scheduler({ backend: new RabbitMQBackend({ connection }) }); // stop() leaves it open
+ * ```
+ */
 export interface RabbitMQConnectionLike {
   /** A channel for reading history. */
   createChannel(): Promise<unknown>;
@@ -20,7 +29,14 @@ export interface RabbitMQConnectionLike {
   readonly connection: { readonly serverProperties: { version?: string; product?: string } };
 }
 
-/** Options of {@link RabbitMQBackend}. */
+/**
+ * Options of {@link RabbitMQBackend}.
+ *
+ * @example
+ * ```ts
+ * new RabbitMQBackend({ url: process.env.AMQP_URL, prefix: 'billing.cron.', slotTtlMs: 10 * 60_000 });
+ * ```
+ */
 export interface RabbitMQBackendOptions {
   /**
    * AMQP URL. Default 'amqp://localhost'.
@@ -122,6 +138,7 @@ export class RabbitMQBackend implements Backend {
   /** Job names become queue names: letters, digits, '_' and '-' only. */
   checkJob(job: JobLimits): void {
     assertSimpleName('RabbitMQ', job.name);
+    refuseHistoryTtl(this.name, job);
   }
 
   /** Connects and checks for RabbitMQ 3.9+, the first version with stream queues. */

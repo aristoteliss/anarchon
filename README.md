@@ -275,6 +275,8 @@ The layers are merged from the most general to the most specific: two plain obje
 | `timezone` | scheduler's | `cron()` only |
 | `data` | none | Data for this job's runs, read as `ctx.data`. A value, or a function called when a run starts |
 
+`overlap`, `maxAttempts` and `catchUpMs`, like the scheduler's `leaseMs` and `heartbeatMs`, need a backend with leases (Redis or Valkey `lease`, PostgreSQL, SQLite). On another backend they aren't offered by the types, and a job or scheduler that sets them anyway is refused with an error. `at()` takes no `overlap`.
+
 ### Lifecycle
 
 - **`start()`** connects, checks the server, schedules every job, and picks up unfinished and missed runs.
@@ -354,9 +356,10 @@ With `lease`, each job has these keys, all with one hash tag so Redis Cluster ke
 Redis, Valkey, PostgreSQL and SQLite get everything described above: leases, backups, no overlap, catch-up and hand-over on `stop()`. RabbitMQ and NATS only make sure one instance wins each run (like the simple `stream-id` claim): they can't hold a lease that a backup could check.
 
 ```ts
-import { NatsBackend, PostgresBackend, RabbitMQBackend, RedisBackend, Scheduler, SqliteBackend } from 'anarchon';
+import { NatsBackend, PostgresBackend, RabbitMQBackend, RedisBackend, Scheduler, SqliteBackend, ValkeyBackend } from 'anarchon';
 
 new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
+new Scheduler({ backend: new ValkeyBackend({ valkey: 'redis://localhost:6390' }) });
 new Scheduler({ backend: new PostgresBackend({ connection: 'postgres://user:pass@db/app' }) });
 new Scheduler({ backend: new SqliteBackend({ database: './anarchon.db' }) });
 new Scheduler({ backend: new RabbitMQBackend({ url: 'amqp://localhost' }) });
@@ -376,13 +379,15 @@ new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222' }) }
 | Option | Default | Meaning |
 |---|---|---|
 | `redis` | `localhost:6379` | `{ host, port, password, db }`, a URL, or your own client: ioredis, iovalkey, node-redis, Valkey GLIDE, or any `{ send(command, args) }`. Clients you pass aren't closed on stop |
-| `strategy` | `'lease'` | `'lease'`, or one of the simple claims: `'stream-id'`, `'idmp'` (Redis 8.6+), `'script'` |
+| `strategy` | `'lease'` | `'lease'`, or one of the simple claims: `'stream-id'`, `'idmp'` (Redis 8.6+), `'script'`. Settings go inside it: `{ name: 'script', windowMs }`, `{ name: 'idmp', durationSec, maxSize }` |
 | `prefix` | `'cron:'` | Key prefix |
+
+`new ValkeyBackend(options)` takes the same options, with `valkey` in place of `redis`. Its `strategy` can't be `'idmp'`, which Valkey doesn't support: that is a type error, not an error from `start()`.
 
 Notes:
 - **Postgres and SQLite** create two tables on start: `anarchon_runs` (one row per run: attempt, token, status, lease end) and `anarchon_runs_attempts` (one row per attempt: the history). Postgres adds `anarchon_runs_jobs`. Pick another name with `table` (Postgres may include a schema). Leases use the database's clock.
 - **SQLite** only coordinates processes that open the same file: one machine, or a volume with working file locks (not NFS). For several machines, use Postgres or a libSQL server (`@libsql/client` with a remote URL).
-- **RabbitMQ and NATS** remember a run for `slotTtlMs` / `duplicateWindowMs` (default 5 min), so `jitterMs + maxLateMs` must be shorter. Job names may only use letters, digits, `_` and `-`. A claim whose answer is lost (connection dropped mid-publish) is skipped by that instance rather than risk running twice.
+- **RabbitMQ and NATS** remember a run for `slotTtlMs` / `duplicateWindowMs` (default 5 min), so `jitterMs + maxLateMs` must be shorter. Job names may only use letters, digits, `_` and `-`. History is kept by count only, so `historyTtlMs` is refused; NATS keeps the largest `historySize` of the backend and its jobs for every job. A claim whose answer is lost (connection dropped mid-publish) is skipped by that instance rather than risk running twice.
 
 ## Guarantees and limits
 

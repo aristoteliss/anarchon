@@ -23,12 +23,20 @@ scheduler.every('report', '35m', buildReport, {
 | [`maxAttempts`](#maxattempts) | `3` | ναι | Πόσες φορές μπορεί να ξεκινήσει μια εκτέλεση όταν καταρρέουν οι runners |
 | [`catchUpMs`](#catchupms) | `300000` (5 λεπτά) | ναι | Πόσο παλιά μπορεί να είναι μια χαμένη εκτέλεση και παρ' όλα αυτά να εκτελεστεί κατά την εκκίνηση |
 | [`historySize`](#historysize-και-historyttlms) | του scheduler (1000) | όχι | Πόσες εκτελέσεις διατηρούνται στο ιστορικό |
-| [`historyTtlMs`](#historysize-και-historyttlms) | του scheduler (κανένα) | όχι | Για πόσο χρονικό διάστημα διατηρούνται |
+| [`historyTtlMs`](#historysize-και-historyttlms) | του scheduler (κανένα) | όχι, αλλά όχι σε RabbitMQ ή NATS | Για πόσο χρονικό διάστημα διατηρούνται |
 | `offsetMs` | `0` | όχι | Μόνο για `every()`: [μετατοπίζει το πλέγμα](../defining-jobs/#μετατόπιση-του-πλέγματος-offsetms) |
 | `timezone` | του scheduler | όχι | Μόνο για `cron()`: [τη ζώνη ώρας](../defining-jobs/#ζώνες-ώρας) |
 | [`data`](../run-data/) | κανένα | όχι | Δεδομένα για τις εκτελέσεις της εργασίας, που διαβάζονται στον handler ως `ctx.data` |
 
 «Του scheduler» σημαίνει την επιλογή με το ίδιο όνομα στο `new Scheduler()`. Δείτε τις [Επιλογές scheduler](../scheduler-options/).
+
+Μια επιλογή που απαιτεί lease backend δεν προσφέρεται σε άλλο backend. Σε scheduler με backend RabbitMQ, NATS, ή Redis/Valkey χωρίς τη στρατηγική `lease`, τα `every()`, `cron()` και `at()` δεν δέχονται `overlap`, `maxAttempts` ή `catchUpMs`: ο κώδικας δεν μεταγλωττίζεται. Οι decorators και η απλή JavaScript δεν ελέγχονται έτσι, οπότε η εργασία απορρίπτεται όταν προστίθεται, με σφάλμα που ονομάζει την επιλογή και το backend. Το `at()` δεν δέχεται ποτέ `overlap`, αφού μια εφάπαξ εργασία δεν έχει προηγούμενη εκτέλεση.
+
+```ts
+const scheduler = new Scheduler({ backend: new RabbitMQBackend({ url }) });
+scheduler.every('sync', '5m', sync, { timeoutMs: 60_000 });   // εντάξει
+scheduler.every('sync', '5m', sync, { overlap: 'allow' });    // σφάλμα τύπου: το RabbitMQ δεν έχει μισθώσεις
+```
 
 ## `jitterMs`
 
@@ -142,6 +150,8 @@ scheduler.every('refresh-cache', '5s', refresh, { catchUpMs: 0 });              
 scheduler.every('heartbeat', '5s', ping, { historySize: 100 });
 scheduler.cron('audit', '0 * * * *', audit, { historyTtlMs: 30 * 24 * 60 * 60_000 }); // 30 ημέρες
 ```
+
+Τα RabbitMQ και NATS περικόπτουν το ιστορικό μόνο βάσει πλήθους, οπότε απορρίπτουν το `historyTtlMs`. Το NATS κρατά ένα μέγεθος ιστορικού για όλες τις εργασίες του: το μεγαλύτερο ανάμεσα στο `historySize` του backend και σε εκείνο κάθε εργασίας.
 
 Στα backends μίσθωσης ένα μικρό `historySize` είναι πάντα ασφαλές: μια εκτέλεση δεν ξεχνιέται ποτέ όσο ένα καθυστερημένο claim θα μπορούσε ακόμα να τη ζητήσει. Στα backends μόνο διεκδίκησης (claim-only backends), η μνήμη του store για τις διεκδικημένες εκτελέσεις πρέπει επίσης να καλύπτει τα καθυστερημένα instances. Το anarchon το ελέγχει αυτό όταν προσθέτετε την εργασία και αποτυγχάνει με σφάλμα (throws) αν οι ρυθμίσεις δεν είναι ασφαλείς. Δείτε το [Χρονισμός και ρολόγια](../../internals/timing-and-clocks/).
 

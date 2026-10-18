@@ -35,11 +35,16 @@ description: Τα σφάλματα που ρίχνει το anarchon, τι ση�
 | `Job "X": invalid date ...` | `at()` με κάτι που δεν είναι ημερομηνία | Περάστε ένα `Date`, ms, ή μια συμβολοσειρά ISO |
 | `Job "X": jitterMs (N) must be under half the time between runs (M ms)` | Το jitter είναι πολύ μεγάλο για το μεσοδιάστημα | Μειώστε το `jitterMs`, ή αφήστε το μη ορισμένο |
 | `Job "X": maxLateMs (N) must be bigger than jitterMs (M)` | Ένα instance που περιμένει όλο το jitter του θα ήταν ήδη καθυστερημένο | Αυξήστε το `maxLateMs` ή μειώστε το `jitterMs` |
-| `Job "X": jitterMs + maxLateMs (N ms) must be shorter than how long B remembers a run (M ms)...` | Ένα καθυστερημένο instance θα μπορούσε να διεκδικήσει μια εκτέλεση που το store έχει ξεχάσει | Μειώστε το `maxLateMs`, ή αυξήστε το παράθυρο του backend (`idmp.durationSec`, `scriptWindowMs`, `slotTtlMs`, `duplicateWindowMs`) |
-| `Job "X": idmp.maxSize (N) runs × G ms between runs must cover jitterMs + maxLateMs` | Το `'idmp'` διατηρεί πολύ λίγα ID εκτελέσεων για αυτό το μεσοδιάστημα | Αυξήστε το `idmp.maxSize` ή μειώστε το `maxLateMs` |
+| `Job "X": jitterMs + maxLateMs (N ms) must be shorter than how long B remembers a run (M ms)...` | Ένα καθυστερημένο instance θα μπορούσε να διεκδικήσει μια εκτέλεση που το store έχει ξεχάσει | Μειώστε το `maxLateMs`, ή αυξήστε το παράθυρο του backend (`strategy.durationSec`, `strategy.windowMs`, `slotTtlMs`, `duplicateWindowMs`) |
+| `Job "X": the idmp strategy's maxSize (N) runs × G ms between runs must cover jitterMs + maxLateMs` | Το `'idmp'` διατηρεί πολύ λίγα ID εκτελέσεων για αυτό το μεσοδιάστημα | Αυξήστε το `strategy.maxSize` ή μειώστε το `maxLateMs` |
 | `Job "X": historySize (N) runs × G ms between runs must cover jitterMs + maxLateMs ... for the "script" strategy` | Το `'script'` βρίσκει τις διεκδικημένες εκτελέσεις στο stream, το οποίο περικόπτεται στο `historySize` | Αυξήστε το `historySize` ή μειώστε το `maxLateMs` |
-| `Job "X": historyTtlMs must be longer than scriptWindowMs` | Ίδιος λόγος, βάσει ηλικίας | Αυξήστε το `historyTtlMs` |
+| `Job "X": historyTtlMs must be longer than the script strategy's windowMs` | Ίδιος λόγος, βάσει ηλικίας | Αυξήστε το `historyTtlMs` |
 | `Job "X": overlap must be "skip" or "allow"` | Τυπογραφικό λάθος στο `overlap` | Χρησιμοποιήστε ένα από τα δύο |
+| `Job "X": overlap needs a backend with leases (...); B has none` (επίσης `maxAttempts`, `catchUpMs`) | Μια επιλογή μίσθωσης σε RabbitMQ, NATS, ή Redis/Valkey χωρίς τη στρατηγική `lease`. Ο κώδικας με τύπους δεν μεταγλωττίζεται· το σφάλμα αφορά decorators και JavaScript | Αφαιρέστε την επιλογή, ή χρησιμοποιήστε backend με μισθώσεις |
+| `leaseMs needs a backend with leases (...); B has none` (επίσης `heartbeatMs`) | Το ίδιο, στο `new Scheduler()` | Αφαιρέστε την επιλογή, ή χρησιμοποιήστε backend με μισθώσεις |
+| `Job "X": a one-off job takes no overlap` | `at()` με `overlap` | Αφαιρέστε το: μια εφάπαξ εργασία δεν έχει προηγούμενη εκτέλεση |
+| `Job "X": historyTtlMs is not supported by B, which keeps history by count (historySize) only` | `historyTtlMs` σε RabbitMQ ή NATS, στην εργασία ή στον scheduler | Χρησιμοποιήστε το `historySize` |
+| `The "S" strategy has no setting "K"` | Ρύθμιση άλλης στρατηγικής, π.χ. `{ name: 'lease', windowMs }` | Μεταφέρετέ τη στη στρατηγική όπου ανήκει |
 | `Job "X": with RabbitMQ, job names may only contain letters, digits, "_" and "-"` | Το όνομα γίνεται όνομα ουράς ή subject | Μετονομάστε την εργασία |
 | `offsetMs must be a whole number of ms` | Δεκαδικό offset | Χρησιμοποιήστε ακέραια χιλιοστά του δευτερολέπτου |
 

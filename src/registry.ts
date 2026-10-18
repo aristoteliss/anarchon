@@ -15,29 +15,76 @@ import type { Backend, SchedulerOptions } from './types';
 
 /**
  * Settings a scheduler is created from when a decorated job needs it: the options of
- * `new Scheduler()`, with a backend that must be given, and whether to start it.
+ * `new Scheduler()`, with a backend that must be given, and whether to start it. Use them when the
+ * decorated classes are created before your code would create the scheduler (a framework's
+ * dependency injection), or to keep the setup of several schedulers in one place.
+ *
+ * @example The default scheduler, created when the first decorated object needs it
+ * ```ts
+ * Scheduler.configure({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }), timezone: 'Europe/Athens' });
+ *
+ * class Reports {
+ *   @Cron('digest', '0 8 * * 1-5')
+ *   digest() {}
+ * }
+ * new Reports();               // creates the default scheduler from the settings and adds 'digest'
+ * await Scheduler.startAll();
+ * ```
+ *
+ * @example One set of settings for every named scheduler, each with its own key prefix
+ * ```ts
+ * Scheduler.configure({
+ *   backend: (name) => new RedisBackend({ redis: process.env.REDIS_URL, prefix: `cron:${name}:` }),
+ *   autoStart: true,
+ * });
+ * // @Every('sync', '1m', { scheduler: 'billing' }) creates the 'billing' scheduler on keys 'cron:billing:...'
+ * ```
+ *
+ * @example Settings of their own for one named scheduler
+ * ```ts
+ * Scheduler.configure('billing', { backend: new PostgresBackend({ connection: billingPool }), leaseMs: 10_000 });
+ * ```
  */
 export interface ConfigureOptions extends Omit<SchedulerOptions, 'backend' | 'name'> {
   /**
    * Where runs are claimed and recorded. A function is called with the scheduler's name
    * (`'default'` for the default one) and returns a backend for it: that lets one set of settings
-   * serve several schedulers, each with its own table or key prefix.
+   * serve several schedulers, each with its own table or key prefix. A backend object can serve
+   * one scheduler only, so default settings with an object can't create named schedulers.
+   *
+   * @example
+   * ```ts
+   * Scheduler.configure({ backend: new SqliteBackend({ database: './jobs.db' }) });                     // one scheduler
+   * Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: `jobs_${name}` }) }); // one table each
+   * ```
    */
   backend: Backend | ((name: string) => Backend);
   /**
    * Start the scheduler as soon as it is created. A failure to start is reported as an `'error'`
    * event. Default false: you start it, with `Scheduler.get(name).start()` or `Scheduler.startAll()`.
+   *
+   * @example A worker whose jobs should run as soon as their classes are created
+   * ```ts
+   * Scheduler.configure({ backend, autoStart: true });
+   * Scheduler.get().on('error', ({ error }) => log.error('scheduler', error));
+   * ```
    */
   autoStart?: boolean;
 }
 
-/** What the registry uses of one scheduler. */
+/** What the registry uses of one scheduler. The Scheduler builds it in its constructor. */
 export interface SchedulerHost {
+  /** The Scheduler object, as the registry hands it out. */
   readonly scheduler: object;
+  /** Its name, or undefined for an unnamed scheduler (which can be the default one). */
   readonly name: string | undefined;
+  /** Adds one declared job under `name`, with the object's `register()` defaults under its own options. */
   add(job: DeclaredJob, name: string, defaults: NonNullable<RegisterOptions['defaults']>): void;
+  /** Removes a job. false when there was none by that name. */
   remove(name: string): boolean;
+  /** Whether a job by that name is on the scheduler. */
   has(name: string): boolean;
+  /** Starts the scheduler without waiting, reporting a failure as an 'error' event (`autoStart`). */
   startInBackground(): void;
 }
 
@@ -60,11 +107,19 @@ const waiting = new Map<unknown, object>();
 let defaultScheduler: SchedulerHost | undefined;
 let factory: ((options: SchedulerOptions) => object) | undefined;
 
-/** How a scheduler is created from settings. Set by the scheduler module, which the registry can't import. */
+/**
+ * How a scheduler is created from settings. Set by the scheduler module, which the registry can't import.
+ *
+ * @example
+ * ```ts
+ * setSchedulerFactory((options) => new Scheduler(options)); // once, in scheduler.ts
+ * ```
+ */
 export function setSchedulerFactory(create: (options: SchedulerOptions) => object): void {
   factory = create;
 }
 
+/** A scheduler's own settings, else the default settings when their backend is a function. */
 function settingsFor(name: string | undefined): ConfigureOptions | undefined {
   const own = settings.get(name);
   if (own || name === undefined) return own;
@@ -76,6 +131,7 @@ function settingsFor(name: string | undefined): ConfigureOptions | undefined {
   );
 }
 
+/** Creates a scheduler from settings, and starts it in the background with `autoStart`. */
 function create(name: string | undefined, { autoStart, backend, ...options }: ConfigureOptions): SchedulerHost {
   if (!factory) throw new Error('No scheduler can be created yet');
   const built = typeof backend === 'function' ? backend(name ?? DEFAULT_NAME) : backend;
@@ -143,6 +199,7 @@ function place(target: object, options: RegisterOptions, forced: SchedulerHost |
   return true;
 }
 
+/** Retries the objects that waited for a scheduler, once one may exist. */
 function placeWaiting(): void {
   for (const target of [...waiting.values()]) place(target, {}, undefined);
 }
@@ -161,7 +218,16 @@ onObjectCreated((target) => {
   }
 });
 
-/** `scheduler.register(target, options)`: every job of the object goes on that scheduler. */
+/**
+ * `scheduler.register(target, options)`: every job of the object goes on that scheduler. Registering
+ * again without options keeps the jobs as they are; with options, it replaces them.
+ *
+ * @example
+ * ```ts
+ * scheduler.register(new TenantJobs('acme'), { prefix: 'acme:', defaults: { data: { tenant: 'acme' } } });
+ * // registerOn(host of scheduler, object, { prefix: 'acme:', ... }): adds 'acme:sync', 'acme:report', ...
+ * ```
+ */
 export function registerOn(host: SchedulerHost, target: object, options: RegisterOptions): void {
   if (options.prefix !== undefined && typeof options.prefix !== 'string') throw new TypeError('register(): prefix must be a string');
   if (options.defaults !== undefined && (typeof options.defaults !== 'object' || options.defaults === null)) {
@@ -174,7 +240,15 @@ export function registerOn(host: SchedulerHost, target: object, options: Registe
   place(target, here && !asked ? here.options : options, host);
 }
 
-/** A scheduler was created: it takes its name, or the role of default scheduler if nobody has it. Adds no jobs. */
+/**
+ * A scheduler was created: it takes its name, or the role of default scheduler if nobody has it. Adds no jobs.
+ *
+ * @example
+ * ```ts
+ * new Scheduler({ name: 'billing', backend }); // schedulerCreated(host): 'billing' is taken
+ * new Scheduler({ name: 'billing', backend }); // throws: A scheduler named "billing" already exists
+ * ```
+ */
 export function schedulerCreated(host: SchedulerHost): void {
   if (host.name !== undefined) {
     if (named.has(host.name)) throw new Error(`A scheduler named "${host.name}" already exists`);
@@ -190,6 +264,12 @@ export function schedulerCreated(host: SchedulerHost): void {
  * stopped, and the objects that were waiting for a scheduler add their jobs.
  *
  * @returns one warning for each declared job that still no object has added.
+ *
+ * @example
+ * ```ts
+ * await scheduler.start(); // schedulerStarting(host); each warning is logged:
+ * // [anarchon] @Every "sync" on Reports.sync is not scheduled: with legacy decorators, add @Scheduled() ...
+ * ```
  */
 export function schedulerStarting(host: SchedulerHost): string[] {
   if (host.name === undefined) {
@@ -204,13 +284,29 @@ export function schedulerStarting(host: SchedulerHost): string[] {
   return takeUnaddedWarnings();
 }
 
-/** A scheduler was stopped: it gives up its name or the default role until it is started again. */
+/**
+ * A scheduler was stopped: it gives up its name or the default role until it is started again, so
+ * a new scheduler can take them (a test, or a restart within one process).
+ *
+ * @example
+ * ```ts
+ * await old.stop();                                  // schedulerStopped(host)
+ * const next = new Scheduler({ name: 'billing', backend }); // allowed: 'billing' is free
+ * ```
+ */
 export function schedulerStopped(host: SchedulerHost): void {
   if (defaultScheduler === host) defaultScheduler = undefined;
   if (host.name !== undefined && named.get(host.name) === host) named.delete(host.name);
 }
 
-/** Chooses the default scheduler. `undefined`: no default scheduler, and no object waiting for one. */
+/**
+ * Chooses the default scheduler. `undefined`: no default scheduler, and no object waiting for one.
+ *
+ * @example
+ * ```ts
+ * Scheduler.setDefault(main); // setDefaultScheduler(host of main): undecorated-scheduler jobs go to main
+ * ```
+ */
 export function setDefaultScheduler(host: SchedulerHost | undefined): void {
   defaultScheduler = host;
   if (host) {
@@ -221,7 +317,16 @@ export function setDefaultScheduler(host: SchedulerHost | undefined): void {
   }
 }
 
-/** Stores the settings a scheduler is created from, and lets the objects that waited for it add their jobs. */
+/**
+ * Stores the settings a scheduler is created from, and lets the objects that waited for it add their
+ * jobs. Throws when that scheduler already exists: settings only apply to one not created yet.
+ *
+ * @example
+ * ```ts
+ * Scheduler.configure('billing', { backend }); // configure('billing', { backend })
+ * Scheduler.configure({ backend });            // configure(undefined, ...): the default scheduler
+ * ```
+ */
 export function configure(name: string | undefined, options: ConfigureOptions): void {
   if (name !== undefined && (typeof name !== 'string' || name === ''))
     throw new TypeError('Scheduler.configure(): name must be a non-empty string');
@@ -237,7 +342,16 @@ export function configure(name: string | undefined, options: ConfigureOptions): 
   placeWaiting();
 }
 
-/** The default scheduler or a named one, created from its settings if it doesn't exist. */
+/**
+ * The default scheduler or a named one, created from its settings if it doesn't exist. Throws when
+ * there is neither a scheduler nor settings to create it from.
+ *
+ * @example
+ * ```ts
+ * Scheduler.get();          // getScheduler(undefined): the default scheduler
+ * Scheduler.get('billing'); // getScheduler('billing')
+ * ```
+ */
 export function getScheduler(name: string | undefined): object {
   const host = resolve(name);
   if (host) return host.scheduler;
@@ -248,12 +362,29 @@ export function getScheduler(name: string | undefined): object {
   );
 }
 
-/** The default scheduler and the named ones. */
+/**
+ * The default scheduler and the named ones, each once.
+ *
+ * @example
+ * ```ts
+ * await Scheduler.startAll(); // starts every scheduler knownSchedulers() returns
+ * ```
+ */
 export function knownSchedulers(): object[] {
   return [...new Set([...(defaultScheduler ? [defaultScheduler] : []), ...named.values()])].map((host) => host.scheduler);
 }
 
-/** Back to the initial state: no default scheduler, no names, no settings, nothing waiting. Stops nothing. */
+/**
+ * Back to the initial state: no default scheduler, no names, no settings, nothing waiting. Stops nothing.
+ *
+ * @example Between tests
+ * ```ts
+ * afterEach(async () => {
+ *   await Scheduler.stopAll();
+ *   Scheduler.reset(); // resetSchedulers()
+ * });
+ * ```
+ */
 export function resetSchedulers(): void {
   defaultScheduler = undefined;
   named.clear();
@@ -262,7 +393,14 @@ export function resetSchedulers(): void {
   forgetUnadded();
 }
 
-/** The scheduler module's handle for a scheduler object. */
+/**
+ * The scheduler module's handle for a scheduler object.
+ *
+ * @example
+ * ```ts
+ * const host = hostOf(scheduler); // undefined for an object that is not a Scheduler
+ * ```
+ */
 export function hostOf(scheduler: object): SchedulerHost | undefined {
   return hosts.get(scheduler);
 }

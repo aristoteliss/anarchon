@@ -2,19 +2,49 @@
 
 import { parseDuration } from './schedule';
 import type { Scheduler } from './scheduler/scheduler';
-import type { CronJobOptions, EveryJobOptions, JobHandler, JobOptions } from './types';
+import type { AtJobOptions, CronJobOptions, EveryJobOptions, JobHandler, JobOptions } from './types';
 
-/** Which scheduler a job declared with a decorator goes to. */
+/**
+ * Which scheduler a job declared with a decorator goes to.
+ *
+ * @example
+ * ```ts
+ * class Billing {
+ *   @Cron('close-month', '0 6 1 * *', { scheduler: 'billing' }) // by name
+ *   close() {}
+ *   @Every('refresh', '5m', { scheduler: cacheScheduler })      // a Scheduler object
+ *   refresh() {}
+ * }
+ * ```
+ */
 export interface JobPlacement {
   /**
    * The scheduler this job is added to: its name, or the scheduler itself. Default: the default
    * scheduler. A named scheduler that doesn't exist yet is created from its settings (see
    * `Scheduler.configure()`); jobs that give the same name share one scheduler.
+   *
+   * @example Jobs that need another store than the rest
+   * ```ts
+   * Scheduler.configure('billing', { backend: new PostgresBackend({ connection: billingPool }) });
+   * class Invoices {
+   *   @Cron('invoice-run', '0 2 * * *', { scheduler: 'billing' }) // created from the settings above
+   *   run() {}
+   * }
+   * ```
    */
   scheduler?: string | Scheduler;
 }
 
-/** A job's options, plus what a decorator adds: the job's name and the scheduler it goes to. */
+/**
+ * A job's options, plus what a decorator adds: the job's name and the scheduler it goes to. Used
+ * when the decorator gets the schedule only, so the name goes in the options.
+ *
+ * @example
+ * ```ts
+ * @Every('5m', { name: 'sync-customers', scheduler: 'crm', timeoutMs: 60_000 })
+ * sync() {}
+ * ```
+ */
 export type DecoratedJobOptions<Options> = Options &
   JobPlacement & {
     /**
@@ -28,7 +58,7 @@ export type DecoratedJobOptions<Options> = Options &
 type Declaration = { name?: string; scheduler?: string | object } & (
   | { type: 'cron'; expression: string; options: CronJobOptions }
   | { type: 'every'; interval: number | string; options: EveryJobOptions }
-  | { type: 'at'; when: Date | number | string; options: JobOptions }
+  | { type: 'at'; when: Date | number | string; options: AtJobOptions }
 );
 
 /** A job declared on a method, bound to one object. */
@@ -37,6 +67,16 @@ export type DeclaredJob = Declaration & { name: string; handler: JobHandler };
 /**
  * A method decorator that works with both decorator styles: standard decorators (TypeScript 5+, no
  * compiler flag) and legacy ones (`experimentalDecorators`, the style NestJS and Angular use).
+ * What `@Cron`, `@Every` and `@At` return.
+ *
+ * @example Your own decorator for a schedule used in many places
+ * ```ts
+ * const Nightly = (name: string): JobDecorator => Cron(name, '0 3 * * *', { timezone: 'UTC', timeoutMs: 60 * 60_000 });
+ * class Maintenance {
+ *   @Nightly('vacuum')
+ *   vacuum() {}
+ * }
+ * ```
  */
 export interface JobDecorator {
   <Data>(method: JobHandler<Data>, context: ClassMethodDecoratorContext): void;
@@ -45,22 +85,58 @@ export interface JobDecorator {
 
 type AnyClass = abstract new (...args: never[]) => object;
 
-/** A class decorator that works with both decorator styles. */
+/**
+ * A class decorator that works with both decorator styles. What `@Scheduled()` returns.
+ *
+ * @example
+ * ```ts
+ * @Scheduled() // needed with experimentalDecorators, harmless without
+ * class Reports {
+ *   @Every('refresh', '10m')
+ *   refresh() {}
+ * }
+ * ```
+ */
 export interface ScheduledDecorator {
   <Class extends AnyClass>(target: Class, context: ClassDecoratorContext<Class>): void;
   <Class extends AnyClass>(target: Class): Class;
 }
 
-/** Options of `scheduler.register()`: they apply to the jobs of the one object being registered. */
+/**
+ * Options of `scheduler.register()`: they apply to the jobs of the one object being registered.
+ *
+ * @example One class, one object per tenant, each with its own jobs and data
+ * ```ts
+ * class TenantJobs {
+ *   @Every('sync', '10m')
+ *   sync(ctx: JobContext<{ tenant: string }>) { return syncTenant(ctx.data.tenant); }
+ * }
+ * for (const tenant of ['acme', 'globex']) {
+ *   scheduler.register(new TenantJobs(), { prefix: `${tenant}:`, defaults: { data: { tenant } } });
+ * }
+ * // jobs 'acme:sync' and 'globex:sync'
+ * ```
+ */
 export interface RegisterOptions {
   /**
    * Put in front of the name of every job of this object. With a prefix of its own, each object of
    * one class has its own jobs: `tenant-a:sync` and `tenant-b:sync`.
+   *
+   * @example
+   * ```ts
+   * scheduler.register(new ReportJobs(), { prefix: 'eu:' }); // 'eu:ReportJobs-daily', 'eu:weekly'...
+   * ```
    */
   prefix?: string;
   /**
    * Job options for every job of this object. An option a job sets in its decorator wins, and the
-   * scheduler's settings apply to what neither sets. `timezone` is used by cron jobs only.
+   * scheduler's settings apply to what neither sets. `timezone` is used by cron jobs only, and
+   * `overlap` is left out of one-off (`@At`) jobs.
+   *
+   * @example
+   * ```ts
+   * scheduler.register(new ReportJobs(), { defaults: { timezone: 'America/New_York', timeoutMs: 15 * 60_000 } });
+   * ```
    */
   defaults?: JobOptions & Pick<CronJobOptions, 'timezone'>;
 }
@@ -251,6 +327,15 @@ const AT: ScheduleKind = {
  * ```
  */
 export function Cron(expression: string, options?: DecoratedJobOptions<CronJobOptions>): JobDecorator;
+/**
+ * Declares a cron job with this name on a method. See the other form for the details.
+ *
+ * @example
+ * ```ts
+ * @Cron('weekday-digest', '0 8 * * 1-5', { timezone: 'Europe/Athens', timeoutMs: 10 * 60_000 })
+ * async digest(ctx: JobContext) {}
+ * ```
+ */
 export function Cron(name: string, expression: string, options?: CronJobOptions & JobPlacement): JobDecorator;
 export function Cron(...args: unknown[]): JobDecorator {
   const { name, scheduler, value, options } = parse<string, CronJobOptions>(CRON, args);
@@ -273,6 +358,15 @@ export function Cron(...args: unknown[]): JobDecorator {
  * ```
  */
 export function Every(interval: number | string, options?: DecoratedJobOptions<EveryJobOptions>): JobDecorator;
+/**
+ * Declares an interval job with this name on a method. See the other form for the details.
+ *
+ * @example
+ * ```ts
+ * @Every('sync-customers', '5m', { offsetMs: 60_000, scheduler: 'crm' }) // :01, :06, :11...
+ * async sync(ctx: JobContext) {}
+ * ```
+ */
 export function Every(name: string, interval: number | string, options?: EveryJobOptions & JobPlacement): JobDecorator;
 export function Every(...args: unknown[]): JobDecorator {
   const { name, scheduler, value, options } = parse<number | string, EveryJobOptions>(EVERY, args);
@@ -292,10 +386,19 @@ export function Every(...args: unknown[]): JobDecorator {
  * }
  * ```
  */
-export function At(when: Date | number | string, options?: DecoratedJobOptions<JobOptions>): JobDecorator;
-export function At(name: string, when: Date | number | string, options?: JobOptions & JobPlacement): JobDecorator;
+export function At(when: Date | number | string, options?: DecoratedJobOptions<AtJobOptions>): JobDecorator;
+/**
+ * Declares a one-off job with this name on a method. See the other form for the details.
+ *
+ * @example
+ * ```ts
+ * @At('launch-mail', '2026-12-01T09:00:00Z', { maxAttempts: 1 })
+ * async announce() {}
+ * ```
+ */
+export function At(name: string, when: Date | number | string, options?: AtJobOptions & JobPlacement): JobDecorator;
 export function At(...args: unknown[]): JobDecorator {
-  const { name, scheduler, value, options } = parse<Date | number | string, JobOptions>(AT, args);
+  const { name, scheduler, value, options } = parse<Date | number | string, AtJobOptions>(AT, args);
   return declare('At', { type: 'at', when: value, options, name, scheduler });
 }
 

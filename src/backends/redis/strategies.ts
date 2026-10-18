@@ -1,8 +1,8 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import type { ClaimInput, IdmpOptions, RedisStrategyName } from '../../types';
+import type { ClaimInput, IdmpOptions, KeyValueStrategy } from '../../types';
 import { errorMessage } from '../../util';
-import type { RedisCommandClient } from './client';
+import type { KeyValueClient } from './client';
 import { parseEntries, toRecord, toStr } from './replies';
 
 export interface StreamClaim extends ClaimInput {
@@ -12,7 +12,7 @@ export interface StreamClaim extends ClaimInput {
 
 export interface ClaimStrategy {
   /** The strategy's name, as passed in `strategy`. */
-  readonly name: RedisStrategyName;
+  readonly name: KeyValueStrategy;
   /** Checks once that the server supports this strategy. */
   init(): Promise<void>;
   /** Runs once per job stream before its first claim. */
@@ -27,12 +27,12 @@ export function claimFields(input: ClaimInput, manual: boolean): Array<string | 
   return fields;
 }
 
-async function tokenAt(redis: RedisCommandClient, key: string, id: string): Promise<string | undefined> {
+async function tokenAt(redis: KeyValueClient, key: string, id: string): Promise<string | undefined> {
   const [entry] = parseEntries(await redis.send('XRANGE', [key, id, id]));
   return entry?.fields.token;
 }
 
-async function serverInfo(redis: RedisCommandClient): Promise<{ product: string; version: string }> {
+async function serverInfo(redis: KeyValueClient): Promise<{ product: string; version: string }> {
   const info = toStr(await redis.send('INFO', ['server']));
   const valkey = /valkey_version:([\d.]+)/.exec(info)?.[1];
   if (valkey) return { product: 'Valkey', version: valkey };
@@ -54,7 +54,7 @@ async function serverInfo(redis: RedisCommandClient): Promise<{ product: string;
 export class StreamIdStrategy implements ClaimStrategy {
   readonly name = 'stream-id';
 
-  constructor(private readonly redis: RedisCommandClient) {}
+  constructor(private readonly redis: KeyValueClient) {}
 
   /** Nothing to check: XADD with an explicit ID works on every server with streams. */
   async init(): Promise<void> {}
@@ -93,7 +93,7 @@ export class IdmpStrategy implements ClaimStrategy {
   readonly name = 'idmp';
 
   constructor(
-    private readonly redis: RedisCommandClient,
+    private readonly redis: KeyValueClient,
     private readonly options: Required<IdmpOptions>,
   ) {}
 
@@ -181,7 +181,7 @@ export class ScriptStrategy implements ClaimStrategy {
   private sha: string | undefined;
 
   constructor(
-    private readonly redis: RedisCommandClient,
+    private readonly redis: KeyValueClient,
     private readonly windowMs: number,
   ) {}
 

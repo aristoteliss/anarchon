@@ -8,12 +8,13 @@ import BetterSqlite3 from 'better-sqlite3';
 
 import {
   type Backend,
+  type KeyValueStrategyName,
   NatsBackend,
   PostgresBackend,
   RabbitMQBackend,
   RedisBackend,
-  type RedisStrategyName,
   SqliteBackend,
+  ValkeyBackend,
 } from '../../src';
 import {
   LIBSQL_URL,
@@ -37,10 +38,10 @@ import {
 /** Everything needed to build the same backend in several processes. */
 export interface Spec {
   /** Default 'redis'. */
-  kind?: 'redis' | 'postgres' | 'sqlite' | 'rabbitmq' | 'nats';
+  kind?: 'redis' | 'valkey' | 'postgres' | 'sqlite' | 'rabbitmq' | 'nats';
   url: string;
   /** Redis / Valkey only. */
-  strategy?: RedisStrategyName;
+  strategy?: KeyValueStrategyName;
   /** SQLite driver: the built-in node:sqlite (default), better-sqlite3, the libSQL client on a file, or on a libSQL server (url). */
   driver?: 'node:sqlite' | 'better-sqlite3' | 'libsql' | 'libsql-server';
   /** Unique per test so tests never share keys, tables, queues or subjects. */
@@ -51,6 +52,8 @@ export function makeBackend(spec: Spec): Backend {
   switch (spec.kind ?? 'redis') {
     case 'redis':
       return new RedisBackend({ redis: spec.url, strategy: spec.strategy, prefix: `test:${spec.id}:` });
+    case 'valkey':
+      return new ValkeyBackend({ valkey: spec.url, strategy: spec.strategy as KeyValueStrategyName<'valkey'>, prefix: `test:${spec.id}:` });
     case 'postgres':
       return new PostgresBackend({ connection: spec.url, table: `t_${spec.id}` });
     case 'sqlite': {
@@ -78,19 +81,24 @@ export type SpecEntry = { label: string; spec: Omit<Spec, 'id'>; skip?: string }
 export async function redisSpecs(): Promise<SpecEntry[]> {
   const servers = await Promise.all(
     [
-      [REDIS_URL, 'Redis'],
-      [REDIS_OLD_URL, 'older Redis'],
-      [VALKEY_URL, 'Valkey'],
-    ].map(async ([url, fallback]) => ({ url: url!, fallback: fallback!, server: await probeRedis(url!) })),
+      [REDIS_URL, 'Redis', 'redis'],
+      [REDIS_OLD_URL, 'older Redis', 'redis'],
+      [VALKEY_URL, 'Valkey', 'valkey'],
+    ].map(async ([url, fallback, kind]) => ({
+      url: url!,
+      fallback: fallback!,
+      kind: kind as 'redis' | 'valkey',
+      server: await probeRedis(url!),
+    })),
   );
   const specs: SpecEntry[] = [];
-  for (const { url, fallback, server } of servers) {
+  for (const { url, fallback, kind, server } of servers) {
     for (const strategy of ['lease', 'stream-id', 'idmp', 'script'] as const) {
       const label = `${server ? `${server.product} ${server.version}` : fallback} · ${strategy}`;
-      if (!server) specs.push({ label, spec: { url, strategy }, skip: `nothing at ${url}` });
+      if (!server) specs.push({ label, spec: { kind, url, strategy }, skip: `nothing at ${url}` });
       else if (strategy === 'idmp' && !supportsIdmp(server))
         continue; // covered by the "refuses" test
-      else specs.push({ label, spec: { url, strategy } });
+      else specs.push({ label, spec: { kind, url, strategy } });
     }
   }
   return specs;

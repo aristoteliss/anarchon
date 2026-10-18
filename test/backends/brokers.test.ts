@@ -85,6 +85,39 @@ describe('RabbitMQ and NATS (simple claim)', () => {
     }
   });
 
+  test('RabbitMQ and NATS keep history by count only, so they refuse historyTtlMs', () => {
+    for (const backend of [new RabbitMQBackend(), new NatsBackend()]) {
+      const scheduler = new Scheduler({ backend });
+      assert.throws(
+        () => scheduler.every('a', '1m', () => {}, { historyTtlMs: 60_000 }),
+        new RegExp(`Job "a": historyTtlMs.*${backend.name}`),
+      );
+      assert.throws(() => new Scheduler({ backend, historyTtlMs: 60_000 }).every('b', '1m', () => {}), /Job "b": historyTtlMs/);
+    }
+  });
+
+  test('NATS keeps as many runs per job as the job that asks for the most', async (t) => {
+    if (!(await probeNats(NATS_URL))) return t.skip(`nothing at ${NATS_URL}`);
+    const id = uniqueId('history_size');
+    const stream = id.toUpperCase();
+    const scheduler = new Scheduler({ backend: new NatsBackend({ servers: NATS_URL, prefix: `${id}.`, stream, historySize: 100 }) });
+    scheduler.every('small', '1h', () => {}, { historySize: 50 }).every('big', '1h', () => {}, { historySize: 300 });
+    const nc = await connect({ servers: NATS_URL });
+    const jsm = await jetstreamManager(nc);
+    const kept = async () => (await jsm.streams.info(stream)).config.max_msgs_per_subject;
+    try {
+      await scheduler.start();
+      assert.equal(await kept(), 300);
+      scheduler.every('bigger', '1h', () => {}, { historySize: 500 });
+      await scheduler.runNow('bigger');
+      assert.equal(await kept(), 500);
+    } finally {
+      await scheduler.stop();
+      await jsm.streams.delete(stream);
+      await nc.close();
+    }
+  });
+
   test('RabbitMQ and NATS job names must be simple (they become queue names and subjects)', () => {
     const backend = new RabbitMQBackend();
     assert.throws(() => backend.checkJob({ name: 'a.b', jitterMs: 0, maxLateMs: 1, minGapMs: 1000, historySize: 1 }), /letters, digits/);

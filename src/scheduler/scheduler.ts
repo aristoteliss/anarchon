@@ -21,6 +21,7 @@ import {
 } from '../registry';
 import { cronSchedule, everySchedule, onceSchedule, parseDuration, type Schedule } from '../schedule';
 import type {
+  AtJobOptions,
   Backend,
   CronJobOptions,
   EveryJobOptions,
@@ -28,6 +29,8 @@ import type {
   JobHandler,
   JobInfo,
   JobOptions,
+  JobOptionsFor,
+  LeaseSchedulerOptions,
   Logger,
   RunRecord,
   SchedulerErrorEvent,
@@ -39,7 +42,7 @@ import { ClaimOnlyRunner } from './claim-only-runner';
 import type { SchedulerCore } from './core';
 import { layerData } from './data';
 import { Executor } from './executor';
-import { createJob, type Job, type JobDefaults } from './job';
+import { createJob, type Job, type JobDefaults, refuseWithoutLeases } from './job';
 import { LeaseRunner } from './lease-runner';
 import { logRuns } from './logging';
 import { JobTimers } from './timers';
@@ -99,12 +102,36 @@ import { JobTimers } from './timers';
  * const next = scheduler.nextRun('sync');
  * ```
  */
-export class Scheduler {
-  /** This instance's name in history and events. Default `${hostname}:${pid}`. */
+export class Scheduler<B extends Backend = Backend> {
+  /**
+   * This instance's name in history and events. Default `${hostname}:${pid}`.
+   *
+   * @example
+   * ```ts
+   * const scheduler = new Scheduler({ backend, instanceId: process.env.POD_NAME });
+   * const mine = (await scheduler.history('sync', 50)).filter((run) => run.instanceId === scheduler.instanceId);
+   * ```
+   */
   readonly instanceId: string;
-  /** Where runs are claimed and recorded. `backend.name` tells which one, e.g. 'redis:lease' or 'postgres'. */
-  readonly backend: Backend;
-  /** The name decorated jobs choose this scheduler by (`{ scheduler: 'billing' }`), if it has one. */
+  /**
+   * Where runs are claimed and recorded, as given to the constructor. `backend.name` tells which
+   * one, e.g. 'redis:lease' or 'postgres'.
+   *
+   * @example
+   * ```ts
+   * log.info(`jobs run on ${scheduler.backend.name}`);
+   * ```
+   */
+  readonly backend: B;
+  /**
+   * The name decorated jobs choose this scheduler by (`{ scheduler: 'billing' }`), if it has one.
+   *
+   * @example
+   * ```ts
+   * const billing = new Scheduler({ name: 'billing', backend });
+   * Scheduler.get('billing') === billing; // true
+   * ```
+   */
   readonly name: string | undefined;
 
   private readonly defaults: JobDefaults;
@@ -150,7 +177,7 @@ export class Scheduler {
    * new Scheduler({ backend, leaseMs: 10_000, heartbeatMs: 2_000 });
    * ```
    */
-  constructor(options: SchedulerOptions) {
+  constructor(options: SchedulerOptions<B>) {
     // Also for callers without types, who can leave the options out altogether.
     if (!options?.backend) {
       throw new TypeError('A scheduler needs a backend, e.g. backend: new RedisBackend({ redis: url }). No store is assumed');
@@ -163,6 +190,8 @@ export class Scheduler {
     this.instanceId = options.instanceId ?? `${hostname()}:${process.pid}`;
     if (typeof this.instanceId !== 'string' || this.instanceId === '') throw new TypeError('instanceId must be a non-empty string');
     this.backend = options.backend;
+    refuseWithoutLeases(this.backend, options, ['leaseMs', 'heartbeatMs']);
+    const lease = options as LeaseSchedulerOptions;
     this.defaults = {
       jitterMs: nonNegativeInt('jitterMs', options.jitterMs ?? 2_000),
       maxLateMs: positiveInt('maxLateMs', options.maxLateMs ?? 60_000),
@@ -170,8 +199,8 @@ export class Scheduler {
       timezone: options.timezone,
     };
     if (options.historyTtlMs !== undefined) this.defaults.historyTtlMs = positiveInt('historyTtlMs', options.historyTtlMs);
-    const leaseMs = positiveInt('leaseMs', options.leaseMs ?? 30_000);
-    const heartbeatMs = positiveInt('heartbeatMs', options.heartbeatMs ?? Math.min(5_000, Math.floor(leaseMs / 6)));
+    const leaseMs = positiveInt('leaseMs', lease.leaseMs ?? 30_000);
+    const heartbeatMs = positiveInt('heartbeatMs', lease.heartbeatMs ?? Math.min(5_000, Math.floor(leaseMs / 6)));
     if (heartbeatMs * 2 >= leaseMs) {
       throw new RangeError(`heartbeatMs (${heartbeatMs}) must be under half of leaseMs (${leaseMs}), so a lease is renewed at least twice`);
     }
@@ -209,7 +238,9 @@ export class Scheduler {
         } else if (job.type === 'every') {
           this.every(name, job.interval, job.handler, options);
         } else {
-          this.at(name, job.when, job.handler, options);
+          // register() defaults cover every job of the object; a one-off job has nothing to overlap.
+          const { overlap, ...once } = defaults;
+          this.at(name, job.when, job.handler, { ...once, ...job.options, ...(data === undefined ? {} : { data }) });
         }
       },
       remove: (name) => this.remove(name),
@@ -265,6 +296,14 @@ export class Scheduler {
    * ```
    */
   static configure(options: ConfigureOptions): void;
+  /**
+   * Settings for the scheduler with this name only. They win over the default settings for it.
+   *
+   * @example
+   * ```ts
+   * Scheduler.configure('billing', { backend: new PostgresBackend({ connection: billingPool }), leaseMs: 10_000 });
+   * ```
+   */
   static configure(name: string, options: ConfigureOptions): void;
   static configure(first: string | ConfigureOptions, second?: ConfigureOptions): void {
     if (typeof first === 'string' || second !== undefined) configure(first as string, second as ConfigureOptions);
@@ -287,7 +326,14 @@ export class Scheduler {
     return getScheduler(name) as Scheduler;
   }
 
-  /** The default scheduler and every scheduler that has a name. */
+  /**
+   * The default scheduler and every scheduler that has a name.
+   *
+   * @example A health check across all schedulers
+   * ```ts
+   * const jobs = Scheduler.all().flatMap((s) => s.jobs().map((job) => ({ scheduler: s.name ?? 'default', ...job })));
+   * ```
+   */
   static all(): Scheduler[] {
     return knownSchedulers() as Scheduler[];
   }
@@ -296,6 +342,13 @@ export class Scheduler {
    * Starts the default scheduler and every scheduler that has a name.
    *
    * @throws when one of them can't start; the others are started all the same.
+   *
+   * @example
+   * ```ts
+   * Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: `cron_${name}` }) });
+   * new ReportJobs(); // decorated; creates the schedulers its jobs name
+   * await Scheduler.startAll();
+   * ```
    */
   static async startAll(): Promise<void> {
     const results = await Promise.allSettled(Scheduler.all().map((scheduler) => scheduler.start()));
@@ -303,7 +356,17 @@ export class Scheduler {
     if (failed) throw failed.reason;
   }
 
-  /** Stops the default scheduler and every scheduler that has a name. Same options as `stop()`. */
+  /**
+   * Stops the default scheduler and every scheduler that has a name. Same options as `stop()`.
+   *
+   * @example On shutdown
+   * ```ts
+   * process.on('SIGTERM', async () => {
+   *   await Scheduler.stopAll({ timeoutMs: 20_000 }); // running jobs get 20 s, then are handed over
+   *   process.exit(0);
+   * });
+   * ```
+   */
   static async stopAll(options: { timeoutMs?: number } = {}): Promise<void> {
     await Promise.all(Scheduler.all().map((scheduler) => scheduler.stop(options)));
   }
@@ -311,6 +374,14 @@ export class Scheduler {
   /**
    * Forgets the default scheduler, the names, the settings given to {@link Scheduler.configure} and
    * the objects waiting for a scheduler. It stops nothing. Meant for tests, between cases.
+   *
+   * @example
+   * ```ts
+   * afterEach(async () => {
+   *   await Scheduler.stopAll();
+   *   Scheduler.reset();
+   * });
+   * ```
    */
   static reset(): void {
     resetSchedulers();
@@ -359,7 +430,7 @@ export class Scheduler {
    * scheduler.cron('report', '0 0 1 * *', buildReport, { timeoutMs: 30 * 60_000 }); // monthly, at most 30 min
    * ```
    */
-  cron<Data = unknown>(name: string, expression: string, handler: JobHandler<Data>, options: CronJobOptions = {}): this {
+  cron<Data = unknown>(name: string, expression: string, handler: JobHandler<Data>, options: JobOptionsFor<B, CronJobOptions> = {}): this {
     let schedule: Schedule;
     try {
       schedule = cronSchedule(expression, options.timezone ?? this.defaults.timezone);
@@ -397,7 +468,12 @@ export class Scheduler {
    * }, { timeoutMs: 4 * 60_000 });
    * ```
    */
-  every<Data = unknown>(name: string, interval: number | string, handler: JobHandler<Data>, options: EveryJobOptions = {}): this {
+  every<Data = unknown>(
+    name: string,
+    interval: number | string,
+    handler: JobHandler<Data>,
+    options: JobOptionsFor<B, EveryJobOptions> = {},
+  ): this {
     const ms = parseDuration(interval);
     if (ms < 1_000) throw new RangeError(`Job "${name}": the interval must be at least 1s (got ${ms} ms)`);
     return this.add(name, everySchedule(ms, options.offsetMs ?? 0), handler, options);
@@ -408,6 +484,7 @@ export class Scheduler {
    * `when` is a Date, ms since epoch, or an ISO date string.
    *
    * @throws RangeError when `when` is not a valid date.
+   * @throws TypeError when `overlap` is given: a one-off job has no previous run.
    *
    * @example
    * ```ts
@@ -415,7 +492,13 @@ export class Scheduler {
    * scheduler.at('reminder', new Date(Date.now() + 60 * 60_000), remind); // in one hour
    * ```
    */
-  at<Data = unknown>(name: string, when: Date | number | string, handler: JobHandler<Data>, options: JobOptions = {}): this {
+  at<Data = unknown>(
+    name: string,
+    when: Date | number | string,
+    handler: JobHandler<Data>,
+    options: JobOptionsFor<B, AtJobOptions> = {},
+  ): this {
+    if ((options as JobOptions).overlap !== undefined) throw new TypeError(`Job "${name}": a one-off job takes no overlap`);
     const time = when instanceof Date ? when.getTime() : typeof when === 'number' ? when : Date.parse(when);
     if (!Number.isFinite(time)) throw new RangeError(`Job "${name}": invalid date ${String(when)}`);
     return this.add(name, onceSchedule(time), handler, options);
@@ -653,6 +736,12 @@ export class Scheduler {
    * The run starts up to `jitterMs` later, on whichever instance claims it.
    *
    * @throws Error when the job is not registered here.
+   *
+   * @example
+   * ```ts
+   * scheduler.cron('digest', '0 8 * * 1-5', sendDigest, { timezone: 'Europe/Athens' });
+   * scheduler.nextRun('digest'); // the next weekday at 08:00 Athens time, as a Date
+   * ```
    */
   nextRun(name: string): Date | null {
     return this.nextRunOf(this.getJob(name));
@@ -702,13 +791,32 @@ export class Scheduler {
     return this;
   }
 
-  /** Like {@link Scheduler.on | on()}, for the next occurrence only. */
+  /**
+   * Like {@link Scheduler.on | on()}, for the next occurrence only.
+   *
+   * @example Wait for the first run after a deploy
+   * ```ts
+   * const first = new Promise<RunRecord>((resolve) => scheduler.once('success', resolve));
+   * await scheduler.start();
+   * log.info(`first run: ${(await first).job}`);
+   * ```
+   */
   once<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEvents[E]) => void): this {
     this.emitter.once(event, listener);
     return this;
   }
 
-  /** Removes a listener added with {@link Scheduler.on | on()} or {@link Scheduler.once | once()}. */
+  /**
+   * Removes a listener added with {@link Scheduler.on | on()} or {@link Scheduler.once | once()}.
+   * Pass the same function that was added.
+   *
+   * @example
+   * ```ts
+   * const onFailure = (run: RunFailureEvent) => pager.notify(run.error);
+   * scheduler.on('failure', onFailure);
+   * scheduler.off('failure', onFailure); // e.g. during maintenance
+   * ```
+   */
   off<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEvents[E]) => void): this {
     this.emitter.off(event, listener);
     return this;

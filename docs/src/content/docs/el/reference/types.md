@@ -59,18 +59,21 @@ type RunReason = 'scheduled' | 'manual' | 'catch-up' | 'takeover';
 | `'catch-up'` | Έπρεπε να εκτελεστεί ενώ όλα τα instances ήταν εκτός λειτουργίας |
 | `'takeover'` | Ένα εφεδρικό instance ξεκίνησε την επόμενη προσπάθεια μιας εκτέλεσης της οποίας ο runner χάθηκε |
 
-### `JobOptions`, `EveryJobOptions`, `CronJobOptions`
+### `JobOptions`, `EveryJobOptions`, `CronJobOptions`, `AtJobOptions`
 
 ```ts
-interface JobOptions {
+interface LeaseJobOptions {
+  overlap?: 'skip' | 'allow';
+  maxAttempts?: number;
+  catchUpMs?: number;
+}
+
+interface JobOptions extends LeaseJobOptions {
   jitterMs?: number;
   maxLateMs?: number;
   historySize?: number;
   historyTtlMs?: number;
-  overlap?: 'skip' | 'allow';
   timeoutMs?: number;
-  maxAttempts?: number;
-  catchUpMs?: number;
 }
 
 interface EveryJobOptions extends JobOptions {
@@ -80,6 +83,10 @@ interface EveryJobOptions extends JobOptions {
 interface CronJobOptions extends JobOptions {
   timezone?: string;
 }
+
+type AtJobOptions = Omit<JobOptions, 'overlap'>;
+
+type JobOptionsFor<B, Options = JobOptions> = /* Options, χωρίς τα LeaseJobOptions όταν το B δεν έχει μισθώσεις */;
 ```
 
 Δείτε [Επιλογές](../options/#επιλογές-εργασιών).
@@ -129,16 +136,22 @@ interface JobInfo {
 
 ## Εκτελέσεις
 
-### `RunRecord`
+### `RunKey`, `RunEvent`, `RunRecord`
 
-Μία προσπάθεια μίας εκτέλεσης. Επιστρέφεται από τα `history()`, `lastRun()` και `runNow()`, και αποτελεί το payload του `success`.
+Το `RunKey` ονομάζει μία εκτέλεση: μια εργασία και τον προγραμματισμένο χρόνο της. Το `RunEvent` προσθέτει πότε ήταν προγραμματισμένη και για ποιο instance πρόκειται· το `RunRecord` και τα συμβάντα εκτέλεσης (`RunStartEvent`, `SkipEvent`, `LostEvent`) το επεκτείνουν, οπότε μία συνάρτηση μπορεί να διαβάσει οποιοδήποτε από αυτά. Ένα `RunRecord` είναι μία προσπάθεια μίας εκτέλεσης. Επιστρέφεται από τα `history()`, `lastRun()` και `runNow()`, και αποτελεί το payload του `success`.
 
 ```ts
-interface RunRecord {
+interface RunKey {
   job: string;
   slot: number;
+}
+
+interface RunEvent extends RunKey {
   scheduledAt: Date;
   instanceId: string;
+}
+
+interface RunRecord extends RunEvent {
   manual: boolean;
   attempt: number;
   reason?: RunReason;
@@ -160,9 +173,18 @@ type RunStatus = 'running' | 'success' | 'failed' | 'interrupted';
 
 ## Τύποι Scheduler
 
-### `SchedulerOptions`
+### `SchedulerOptions`, `LeaseSchedulerOptions`
 
-Δείτε [Επιλογές](../options/#επιλογές-scheduler).
+```ts
+interface LeaseSchedulerOptions {
+  leaseMs?: number;
+  heartbeatMs?: number;
+}
+
+type SchedulerOptions<B extends Backend = Backend> = { backend: B; /* ... */ } & /* LeaseSchedulerOptions όταν το B μπορεί να έχει μισθώσεις */;
+```
+
+Ο `Scheduler` παίρνει τον τύπο του backend του, `Scheduler<B>`, οπότε οι επιλογές του και εκείνες των `every()`, `cron()` και `at()` εξαρτώνται από το backend. Ένα backend «έχει μισθώσεις» όταν το `runs` του μπορεί να είναι ορισμένο: PostgreSQL, SQLite, Redis ή Valkey με τη στρατηγική `lease`, και κάθε τιμή με τύπο μόνο `Backend`. Στα υπόλοιπα, τα `LeaseSchedulerOptions` και `LeaseJobOptions` δεν προσφέρονται. Δείτε [Επιλογές](../options/#επιλογές-scheduler).
 
 ### `Logger`
 
@@ -176,20 +198,39 @@ interface Logger {
 
 Τα `console`, pino και winston loggers ταιριάζουν όλα.
 
-### `RedisStrategyName`
+### `KeyValueStrategies`, `KeyValueStrategyName`, `KeyValueStrategy`
 
 ```ts
-type RedisStrategyName = 'lease' | 'stream-id' | 'idmp' | 'script';
+interface KeyValueStrategies {
+  redis: 'lease' | 'stream-id' | 'idmp' | 'script';
+  valkey: 'lease' | 'stream-id' | 'script';
+}
+type KeyValueStrategyName<Server extends keyof KeyValueStrategies = 'redis'> = KeyValueStrategies[Server];
+
+// Ένα όνομα, ή { name, ...οι ρυθμίσεις εκείνης της στρατηγικής }
+type KeyValueStrategy<Name = KeyValueStrategyName> =
+  | Name
+  | { name: 'idmp'; durationSec?: number; maxSize?: number }
+  | { name: 'script'; windowMs?: number }
+  | { name: 'lease' | 'stream-id' };
 ```
 
-### `IdmpOptions`
+Οι στρατηγικές των key-value backends, ανά server. Το `KeyValueStrategy` είναι η επιλογή `strategy` του `RedisBackend`· το `ValkeyBackend` δέχεται `KeyValueStrategy<KeyValueStrategyName<'valkey'>>`, χωρίς `idmp` επειδή το Valkey δεν μπορεί να το εκτελέσει. Οι ρυθμίσεις μιας στρατηγικής μπαίνουν μέσα της, οπότε δεν μπορούν να δοθούν σε άλλη στρατηγική. Το `lease` (η προεπιλογή) δίνει επιπλέον προστασία από επικαλυπτόμενες εκτελέσεις, εφεδρικούς εκτελεστές, catch-up και επαναλήψεις. Τα `stream-id`, `script` και `idmp` (Redis 8.6+) αποφασίζουν μόνο ποιος εκτελεί κάθε φορά. Η σελίδα [Redis και Valkey](../../backends/redis/) εξηγεί την καθεμία. Τα backends βάσεων δεδομένων και brokers δεν έχουν επιλογή στρατηγικής: τα PostgreSQL και SQLite ακολουθούν πάντα τους κανόνες του `lease`, και τα RabbitMQ και NATS κάνουν πάντα μια απλή διεκδίκηση.
+
+### `IdmpOptions`, `ScriptOptions`
 
 ```ts
 interface IdmpOptions {
   durationSec?: number; // 1 έως 86400, προεπιλογή 300
   maxSize?: number;     // 1 έως 10000, προεπιλογή 1000
 }
+
+interface ScriptOptions {
+  windowMs?: number;    // προεπιλογή 300000
+}
 ```
+
+Οι ρυθμίσεις των `{ name: 'idmp' }` και `{ name: 'script' }`.
 
 ## Συμβάντα
 
@@ -311,13 +352,13 @@ type ClaimOutcome =
 
 | Τύπος | Αντιστοιχεί σε |
 | --- | --- |
-| `RedisInput` | Οτιδήποτε γίνεται αποδεκτό ως `redis` |
-| `RedisCommandClient` | `{ send(command, args) }` |
-| `RedisConnectionOptions` | `{ host, port, username, password, db }` |
+| `KeyValueConnection` | Οτιδήποτε γίνεται αποδεκτό ως `redis` (`RedisBackend`) ή `valkey` (`ValkeyBackend`) |
+| `KeyValueClient` | `{ send(command, args) }` |
+| `KeyValueConnectionOptions` | `{ host, port, username, password, db }` |
 | `IORedisLike`, `NodeRedisLike`, `ValkeyGlideLike` | ioredis / iovalkey, node-redis, Valkey GLIDE |
 | `PgPoolLike`, `PgClientLike`, `PostgresJsLike` | `pg` Pool, `pg` Client, postgres.js |
 | `SqliteDatabaseLike`, `LibsqlClientLike` | `node:sqlite` / `better-sqlite3`, `@libsql/client` |
 | `SqlClient`, `SqlQuery`, `SqlRow`, `SqlValue` | Ο προσαρμογέας `{ all, transaction }` των SQL backends |
 | `RabbitMQConnectionLike`, `NatsConnectionLike` | Μια σύνδεση `amqplib`, μια σύνδεση NATS |
 
-Τύποι επιλογών backend: `RedisBackendOptions`, `PostgresBackendOptions`, `SqliteBackendOptions`, `RabbitMQBackendOptions`, `NatsBackendOptions`. Δείτε [Επιλογές](../options/).
+Τύποι επιλογών backend: `RedisBackendOptions`, `ValkeyBackendOptions`, `PostgresBackendOptions`, `SqliteBackendOptions`, `RabbitMQBackendOptions`, `NatsBackendOptions`. Δείτε [Επιλογές](../options/).

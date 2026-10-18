@@ -72,8 +72,8 @@ sequenceDiagram
 | --- | --- | --- |
 | Redis `lease`, PostgreSQL, SQLite | Όσο μια καθυστερημένη διεκδίκηση θα μπορούσε να ρωτήσει, ανεξαρτήτως του `historySize` | Τίποτα προς ρύθμιση |
 | Redis `stream-id` | Για πάντα | Τίποτα προς ρύθμιση |
-| Redis `idmp` | 5 min, και το πολύ 1000 εκτελέσεις | `idmp.durationSec`, `idmp.maxSize` |
-| Redis `script` | 5 min, και το πολύ `historySize` εκτελέσεις | `scriptWindowMs` |
+| Redis `idmp` | 5 min, και το πολύ 1000 εκτελέσεις | `strategy.durationSec`, `strategy.maxSize` |
+| Redis `script` | 5 min, και το πολύ `historySize` εκτελέσεις | `strategy.windowMs` |
 | RabbitMQ | 5 λεπτά | `slotTtlMs` |
 | NATS | 5 λεπτά | `duplicateWindowMs` |
 

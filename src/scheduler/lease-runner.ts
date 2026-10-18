@@ -196,7 +196,7 @@ export class LeaseRunner {
       if (lost) return;
       lost = true;
       this.executor.abortRun(run, 'lost', abortError('This run was taken over by another instance'));
-      core.emit('lost', { job: job.name, slot, attempt, instanceId: core.instanceId });
+      core.emit('lost', { job: job.name, slot, scheduledAt: new Date(slot), attempt, instanceId: core.instanceId });
     };
     const heartbeat = setInterval(() => {
       runs.heartbeat(job.name, slot, token, core.leaseMs).then(

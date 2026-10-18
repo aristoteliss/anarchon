@@ -70,7 +70,7 @@ new Scheduler({
 
 ## Χρονισμός μίσθωσης
 
-*Μόνο για backends μίσθωσης.*
+*Μόνο για backends μίσθωσης.* Με RabbitMQ, NATS, ή Redis/Valkey χωρίς τη στρατηγική `lease`, το `new Scheduler()` δεν προσφέρει τα `leaseMs` και `heartbeatMs`, και τα απορρίπτει αν οριστούν παρ' όλα αυτά.
 
 | Επιλογή | Προεπιλογή | Σημασία |
 | --- | --- | --- |
@@ -149,6 +149,7 @@ export const scheduler = new Scheduler({
 | Το `instanceId` είναι κενό string | `TypeError` |
 | Ένας αριθμός είναι αρνητικός, μηδέν όπου δεν επιτρέπεται, ή όχι ακέραιος | `RangeError` |
 | Το `heartbeatMs` δεν είναι μικρότερο από το μισό του `leaseMs` | `RangeError` |
+| `leaseMs` ή `heartbeatMs` με backend χωρίς μισθώσεις | `TypeError` |
 
 Τίποτα δεν συνδέεται κατά την εκτέλεση του constructor. Τα προβλήματα σύνδεσης εμφανίζονται όταν καλείτε το `start()`.
 

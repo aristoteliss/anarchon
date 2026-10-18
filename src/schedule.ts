@@ -23,6 +23,15 @@ const UNIT_MS: Record<string, number> = { ms: 1, s: 1_000, m: 60_000, h: 3_600_0
 
 /**
  * Accepts milliseconds (`10000`) or a duration string: `'10s'`, `'10m'`, `'35m'`, `'1h30m'`, `'2d'`, `'500ms'`.
+ *
+ * @throws RangeError for a string it can't read, or a number that isn't a positive whole number of ms.
+ *
+ * @example Durations from configuration
+ * ```ts
+ * parseDuration('1h30m');                                // 5400000
+ * const timeoutMs = parseDuration(process.env.JOB_TIMEOUT ?? '5m');
+ * scheduler.every('export', '1h', exportAll, { timeoutMs });
+ * ```
  */
 export function parseDuration(value: number | string): number {
   if (typeof value === 'number') {
@@ -43,6 +52,16 @@ export function parseDuration(value: number | string): number {
   return parseDuration(Math.round(total));
 }
 
+/**
+ * Writes milliseconds the way `parseDuration()` reads them, largest units first.
+ *
+ * @example
+ * ```ts
+ * formatDuration(5_400_000); // '1h30m'
+ * formatDuration(90_500);    // '1m30s500ms'
+ * log.info(`next run in ${formatDuration(scheduler.nextRun('sync')!.getTime() - Date.now())}`);
+ * ```
+ */
 export function formatDuration(ms: number): string {
   const parts: string[] = [];
   let rest = ms;

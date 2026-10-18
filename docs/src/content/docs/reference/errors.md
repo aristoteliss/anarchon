@@ -35,11 +35,16 @@ anarchon checks settings early and says what is wrong. Errors come at three mome
 | `Job "X": invalid date ...` | `at()` with something that isn't a date | Pass a `Date`, ms, or an ISO string |
 | `Job "X": jitterMs (N) must be under half the time between runs (M ms)` | Jitter too large for the interval | Lower `jitterMs`, or leave it unset |
 | `Job "X": maxLateMs (N) must be bigger than jitterMs (M)` | An instance waiting its full jitter would already be late | Raise `maxLateMs` or lower `jitterMs` |
-| `Job "X": jitterMs + maxLateMs (N ms) must be shorter than how long B remembers a run (M ms)...` | A late instance could claim a run the store has forgotten | Lower `maxLateMs`, or raise the backend's window (`idmp.durationSec`, `scriptWindowMs`, `slotTtlMs`, `duplicateWindowMs`) |
-| `Job "X": idmp.maxSize (N) runs × G ms between runs must cover jitterMs + maxLateMs` | `'idmp'` keeps too few run IDs for this interval | Raise `idmp.maxSize` or lower `maxLateMs` |
+| `Job "X": jitterMs + maxLateMs (N ms) must be shorter than how long B remembers a run (M ms)...` | A late instance could claim a run the store has forgotten | Lower `maxLateMs`, or raise the backend's window (`strategy.durationSec`, `strategy.windowMs`, `slotTtlMs`, `duplicateWindowMs`) |
+| `Job "X": the idmp strategy's maxSize (N) runs × G ms between runs must cover jitterMs + maxLateMs` | `'idmp'` keeps too few run IDs for this interval | Raise `strategy.maxSize` or lower `maxLateMs` |
 | `Job "X": historySize (N) runs × G ms between runs must cover jitterMs + maxLateMs ... for the "script" strategy` | `'script'` finds claimed runs in the stream, which is trimmed to `historySize` | Raise `historySize` or lower `maxLateMs` |
-| `Job "X": historyTtlMs must be longer than scriptWindowMs` | Same reason, by age | Raise `historyTtlMs` |
+| `Job "X": historyTtlMs must be longer than the script strategy's windowMs` | Same reason, by age | Raise `historyTtlMs` |
 | `Job "X": overlap must be "skip" or "allow"` | A typo in `overlap` | Use one of the two |
+| `Job "X": overlap needs a backend with leases (...); B has none` (also `maxAttempts`, `catchUpMs`) | A lease option on RabbitMQ, NATS, or Redis/Valkey without the `lease` strategy. Typed code doesn't compile; this error is for decorators and JavaScript | Remove the option, or use a backend with leases |
+| `leaseMs needs a backend with leases (...); B has none` (also `heartbeatMs`) | The same, on `new Scheduler()` | Remove the option, or use a backend with leases |
+| `Job "X": a one-off job takes no overlap` | `at()` with `overlap` | Remove it: a one-off job has no previous run |
+| `Job "X": historyTtlMs is not supported by B, which keeps history by count (historySize) only` | `historyTtlMs` on RabbitMQ or NATS, on the job or the scheduler | Use `historySize` |
+| `The "S" strategy has no setting "K"` | A setting of another strategy, e.g. `{ name: 'lease', windowMs }` | Move it to the strategy it belongs to |
 | `Job "X": with RabbitMQ, job names may only contain letters, digits, "_" and "-"` | The name becomes a queue name or a subject | Rename the job |
 | `offsetMs must be a whole number of ms` | A fractional offset | Use whole milliseconds |
 

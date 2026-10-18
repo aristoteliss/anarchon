@@ -198,6 +198,7 @@ off<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEven
 | --- | --- | --- |
 | `Scheduler` | class | Ο scheduler |
 | `RedisBackend` | class | [Redis και Valkey](../../backends/redis/) |
+| `ValkeyBackend` | class | [Redis και Valkey](../../backends/redis/) |
 | `PostgresBackend` | class | [PostgreSQL](../../backends/postgres/) |
 | `SqliteBackend` | class | [SQLite και libSQL](../../backends/sqlite/) |
 | `RabbitMQBackend` | class | [RabbitMQ](../../backends/rabbitmq/) |

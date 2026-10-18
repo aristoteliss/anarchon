@@ -79,7 +79,7 @@ If the connection drops after the publish and before the confirm arrives, the in
 
 ## History
 
-History is kept in a **stream queue** per job, `<prefix><job>.history`, sized from the job's `historySize`. This is why RabbitMQ 3.9 is needed: streams arrived in that version.
+History is kept in a **stream queue** per job, `<prefix><job>.history`, sized from the job's `historySize`. This is why RabbitMQ 3.9 is needed: streams arrived in that version. History is trimmed by size only, so `historyTtlMs` is refused.
 
 `history()`, `lastRun()` and `runNow()` work as on other backends. A run whose runner died keeps the status `running`, since nothing can tell it stopped.
 

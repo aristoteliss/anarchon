@@ -165,7 +165,7 @@ test('validation errors are clear', () => {
   assert.throws(() => s.cron('x', 'nope', () => {}), /invalid cron/);
   s.every('dup', '10s', () => {});
   assert.throws(() => s.every('dup', '10s', () => {}), /already registered/);
-  const idmp = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, strategy: 'idmp', idmp: { durationSec: 30 } }) });
+  const idmp = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, strategy: { name: 'idmp', durationSec: 30 } }) });
   assert.throws(() => idmp.every('x', '10m', () => {}), /shorter than how long redis:idmp remembers a run/);
   assert.throws(() => new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, strategy: 'nope' as never }) }), /Unknown strategy/);
 });

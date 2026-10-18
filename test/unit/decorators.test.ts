@@ -589,6 +589,15 @@ test("register() defaults apply to every job of the object, and a job's own opti
   }
 });
 
+test('register() defaults with overlap still add a one-off job, which has nothing to overlap', () => {
+  class Launch {
+    run() {}
+  }
+  decorate(Launch, 'run', At('launch', new Date(Date.now() + 60_000)));
+  const scheduler = newScheduler().register(new Launch(), { defaults: { overlap: 'allow' } });
+  assert.deepEqual(names(scheduler), ['launch']);
+});
+
 test('registering an object again with other options replaces its jobs, and a refused change keeps them', () => {
   class Tenant {
     sync() {}
