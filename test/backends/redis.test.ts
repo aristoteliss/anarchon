@@ -8,7 +8,7 @@ import IoValkey from 'iovalkey';
 import { createClient } from 'redis';
 import { describe, test } from 'vitest';
 
-import { type Backend, type KeyValueStrategyName, RedisBackend, ValkeyBackend } from '../../src';
+import { type Backend, isAnarchonError, type KeyValueStrategyName, type LeaseStore, RedisBackend, ValkeyBackend } from '../../src';
 import { probeRedis, REDIS_OLD_URL, REDIS_URL, supportsIdmp, uniqueId, VALKEY_URL } from '../support';
 
 // GLIDE logs every server error (expected here: losers' XADDs are refused) to stdout.
@@ -60,11 +60,97 @@ describe('Redis / Valkey specifics', () => {
       () => new RedisBackend({ strategy: { name: 'script', durationSec: 60 } }),
       /"script" strategy has no setting "durationSec"/,
     );
-    // @ts-expect-error settings go inside the strategy
-    new RedisBackend({ strategy: 'script', windowMs: 60_000 });
+    assert.throws(
+      // @ts-expect-error settings go inside the strategy
+      () => new RedisBackend({ strategy: 'script', windowMs: 60_000 }),
+      /unknown option "windowMs" \(did you mean "strategy"\?\): a strategy's settings go inside it/,
+    );
+    assert.throws(
+      () => new RedisBackend({ scriptWindowMs: 60_000 } as never),
+      /unknown option "scriptWindowMs" \(did you mean "strategy"\?\)/,
+    );
     assert.equal(new RedisBackend({ strategy: { name: 'idmp', durationSec: 60 } }).dedupeWindowMs, 60_000);
     assert.equal(new RedisBackend({ strategy: { name: 'script', windowMs: 90_000 } }).dedupeWindowMs, 90_000);
     assert.equal(new RedisBackend({ strategy: 'stream-id' }).dedupeWindowMs, Infinity);
+  });
+
+  test('the keys record their store format, and a newer format than this version reads is refused', async (t) => {
+    if (!(await probeRedis(REDIS_URL))) return t.skip(`nothing at ${REDIS_URL}`);
+    const redis = await createClient({ url: REDIS_URL }).connect();
+    try {
+      for (const strategy of ['lease', 'stream-id'] as const) {
+        const prefix = `test:${uniqueId('format')}:`;
+        const first = new RedisBackend({ redis: REDIS_URL, strategy, prefix });
+        await first.init();
+        await first.close();
+        assert.equal(await redis.get(`${prefix}format`), '1');
+        await redis.set(`${prefix}format`, '2');
+        const later = new RedisBackend({ redis: REDIS_URL, strategy, prefix });
+        await assert.rejects(later.init(), (error) => isAnarchonError(error, 'ANARCHON_STORE_FORMAT'));
+        await later.close();
+      }
+    } finally {
+      await redis.quit();
+    }
+  });
+
+  test('a takeover keeps the fields of a run it does not know, so an older instance never drops what a newer one wrote', async (t) => {
+    if (!(await probeRedis(REDIS_URL))) return t.skip(`nothing at ${REDIS_URL}`);
+    const prefix = `test:${uniqueId('fields')}:`;
+    const backend = new RedisBackend({ redis: REDIS_URL, prefix, strategy: 'lease' });
+    const redis = await createClient({ url: REDIS_URL }).connect();
+    try {
+      const runs = backend.runs as LeaseStore;
+      const slot = Date.now();
+      const base = {
+        job: 'job',
+        slot,
+        instanceId: 'A',
+        historySize: 100,
+        reason: 'scheduled' as const,
+        overlap: 'skip' as const,
+        maxAttempts: 3,
+      };
+      assert.equal((await runs.claim({ ...base, token: 'a', mode: 'new', leaseMs: 50 })).kind, 'won');
+      const key = runs.key('job', 'state');
+      const stored = JSON.parse((await redis.hGet(key, String(slot))) ?? '{}') as Record<string, unknown>;
+      await redis.hSet(key, String(slot), JSON.stringify({ ...stored, future: 'kept' }));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.deepEqual(await runs.claim({ ...base, token: 'b', instanceId: 'B', mode: 'takeover', leaseMs: 60_000 }), {
+        kind: 'won',
+        attempt: 2,
+      });
+      const after = JSON.parse((await redis.hGet(key, String(slot))) ?? '{}') as Record<string, unknown>;
+      assert.equal(after.future, 'kept');
+      assert.equal(after.a, 2);
+      assert.equal(after.i, 'B');
+    } finally {
+      await redis.quit();
+      await backend.close();
+    }
+  });
+
+  test('claims keep working after the server forgets its scripts (SCRIPT FLUSH, a failover)', async (t) => {
+    if (!(await probeRedis(REDIS_URL))) return t.skip(`nothing at ${REDIS_URL}`);
+    const redis = await createClient({ url: REDIS_URL }).connect();
+    try {
+      for (const strategy of ['lease', 'script'] as const) {
+        const backend = new RedisBackend({ redis: REDIS_URL, strategy, prefix: `test:${uniqueId('flush')}:` });
+        try {
+          await backend.init();
+          await backend.prepareJob('job');
+          const slot = futureSlot(60);
+          assert.equal(await backend.claim(input(slot, 'A')), true);
+          await redis.scriptFlush();
+          assert.equal(await backend.claim(input(slot + 1000, 'A')), true, `${strategy}: a claim after the flush`);
+          assert.equal(await backend.claim(input(slot + 1000, 'B')), false, `${strategy}: still one winner`);
+        } finally {
+          await backend.close();
+        }
+      }
+    } finally {
+      await redis.quit();
+    }
   });
 
   test('Valkey clients: iovalkey, Valkey GLIDE and node-redis', async (t) => {

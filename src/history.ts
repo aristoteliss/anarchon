@@ -2,7 +2,14 @@
 
 import type { RunReason, RunRecord, RunStatus, StoredResult } from './types';
 
-/** What every backend stores when a run is claimed. */
+/**
+ * What a backend stores when a run is claimed, in the shape {@link buildHistory} reads.
+ *
+ * @example A claim as a custom backend keeps it, from the ClaimInput it was given
+ * ```ts
+ * const claim: ClaimRecord = { slot: input.slot, by: input.instanceId, at: Date.now(), manual: false };
+ * ```
+ */
 export interface ClaimRecord {
   /** Scheduled time of the run (ms). */
   slot: number;
@@ -58,17 +65,38 @@ export function parseJson(text: string): unknown {
   }
 }
 
+/** What {@link buildHistory} joins into a job's history. */
+export interface HistoryInput {
+  /** The job's name. */
+  job: string;
+  /** The job's claims, in any order. */
+  claims: ReadonlyArray<ClaimRecord>;
+  /** The results the winners saved, in any order. A result belongs to the claim of the same slot, instance and attempt. */
+  results: Iterable<StoredResult>;
+  /** How many records to return, newest first. */
+  limit: number;
+  /**
+   * The status of a claim without a result. Default 'running'. A backend that knows the attempt
+   * ended without a result (its lease ran out) answers 'interrupted'.
+   */
+  pendingStatus?: (claim: ClaimRecord & { attempt: number }) => RunStatus;
+}
+
 /**
- * Joins claims with results, newest first. A claim without a result is 'running', unless the
- * backend can tell it was interrupted (pendingStatus).
+ * Joins a job's claims with their results into the records `history()` returns: newest first, one
+ * per attempt, at most `limit`. For a custom backend: store claims and results as they come, and
+ * build its `history()` with this, so its records match those of the built-in backends.
+ *
+ * @example The history() of a custom backend
+ * ```ts
+ * async history(job: string, limit: number): Promise<RunRecord[]> {
+ *   const claims = await this.db.claimsOf(job);   // ClaimRecord[]
+ *   const results = await this.db.resultsOf(job); // StoredResult[]
+ *   return buildHistory({ job, claims, results, limit });
+ * }
+ * ```
  */
-export function mergeRuns(
-  job: string,
-  claims: ClaimRecord[],
-  results: Iterable<StoredResult>,
-  limit: number,
-  pendingStatus: (claim: ClaimRecord & { attempt: number }) => RunStatus = () => 'running',
-): RunRecord[] {
+export function buildHistory({ job, claims, results, limit, pendingStatus = () => 'running' }: HistoryInput): RunRecord[] {
   const byKey = new Map<string, StoredResult>();
   for (const result of results) byKey.set(`${result.slot}|${result.by}|${result.attempt ?? 1}`, result);
   return [...claims]

@@ -60,7 +60,7 @@ In order, `stop()`:
 3. **Waits** for those jobs to end, up to `timeoutMs` (default 30 seconds).
 4. **Closes the connection**, if anarchon opened it. A client you passed in stays open.
 
-After `stop()` resolves, anarchon sends nothing more to the store. You can call `start()` again later.
+After `stop()` resolves, anarchon sends nothing more to the store. You can call `start()` again later. `history()` and `lastRun()` still work: after `stop()`, each read opens the connection for itself and closes it when it is done, so the process can exit.
 
 ### What happens to a job that was running
 

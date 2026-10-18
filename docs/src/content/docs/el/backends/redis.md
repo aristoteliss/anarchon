@@ -20,7 +20,7 @@ new Scheduler({ backend: new ValkeyBackend({ valkey: { host: 'localhost', port: 
 Η παράμετρος `redis` δέχεται ένα URL, ένα αντικείμενο επιλογών (options object) ή έναν client.
 
 ```ts
-new Scheduler({ backend: new RedisBackend({ redis: 'rediss://user:secret@host:6380/2' }) }); // TLS, διαπιστευτήρια, βάση δεδομένων 2
+new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL }) }); // rediss:// για TLS· χρήστης, κωδικός και βάση δεδομένων μπαίνουν στο URL
 new Scheduler({ backend: new RedisBackend({ redis: { host: 'cache', port: 6379, password: process.env.REDIS_PASSWORD, db: 1 } }) });
 ```
 
@@ -161,7 +161,7 @@ new ValkeyBackend({ strategy: { name: 'script', windowMs: 10 * 60_000 } });
 | `cron:<job>:manual` | stream | Μία εγγραφή ανά εκτέλεση `runNow()` |
 | `cron:<job>:results` | sorted set | Ένα αποτέλεσμα ανά εκτέλεση |
 
-Το `cron:` είναι το `prefix`.
+Το `cron:` είναι το `prefix`. Κάθε στρατηγική γράφει επίσης ένα κλειδί, `cron:format`: τη μορφή του store, ώστε τα δεδομένα ενός νεότερου anarchon να μη διαβάζονται ποτέ λάθος. Ένα backend αρνείται να ξεκινήσει όταν βρίσκει μορφή νεότερη από όσες διαβάζει (`ANARCHON_STORE_FORMAT`).
 
 ## Το ρολόι του server
 

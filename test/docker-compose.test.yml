@@ -52,7 +52,8 @@ services:
     profiles: [brokers]
     ports: ['127.0.0.1:5672:5672', '127.0.0.1:15672:15672']
     healthcheck:
-      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      # ping answers before the AMQP listener accepts connections; this waits for the listener
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'check_port_connectivity']
       interval: 5s
       retries: 20
 

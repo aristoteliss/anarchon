@@ -1,6 +1,7 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { Cron } from 'croner';
+import { coded } from './errors';
 
 /**
  * A schedule turns "now" into the next run time. Every instance computes the same run times
@@ -35,18 +36,19 @@ const UNIT_MS: Record<string, number> = { ms: 1, s: 1_000, m: 60_000, h: 3_600_0
  */
 export function parseDuration(value: number | string): number {
   if (typeof value === 'number') {
-    if (!Number.isInteger(value) || value <= 0) throw new RangeError(`Invalid duration: ${value} (use a positive whole number of ms)`);
+    if (!Number.isInteger(value) || value <= 0)
+      throw coded(new RangeError(`Invalid duration: ${value} (use a positive whole number of ms)`), 'ANARCHON_INVALID_ARGUMENT');
     return value;
   }
   const text = value.trim().toLowerCase();
   if (/^\d+$/.test(text)) return parseDuration(Number(text));
   if (!/^(\d+(\.\d+)?\s*(ms|s|m|h|d)\s*)+$/.test(text)) {
-    throw new RangeError(`Invalid duration: "${value}" (examples: "10s", "35m", "1h30m")`);
+    throw coded(new RangeError(`Invalid duration: "${value}" (examples: "10s", "35m", "1h30m")`), 'ANARCHON_INVALID_ARGUMENT');
   }
   let total = 0;
   for (const [, amount, unit] of text.matchAll(/(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)/g)) {
     const ms = UNIT_MS[unit as string];
-    if (ms === undefined) throw new RangeError(`Invalid duration unit: "${unit}"`);
+    if (ms === undefined) throw coded(new RangeError(`Invalid duration unit: "${unit}"`), 'ANARCHON_INVALID_ARGUMENT');
     total += Number(amount) * ms;
   }
   return parseDuration(Math.round(total));
@@ -85,7 +87,8 @@ export function formatDuration(ms: number): string {
  * All instances share the grid, so they agree on run times no matter when each one started.
  */
 export function everySchedule(intervalMs: number, offsetMs = 0): Schedule {
-  if (!Number.isInteger(offsetMs)) throw new RangeError(`offsetMs must be a whole number of ms (got ${offsetMs})`);
+  if (!Number.isInteger(offsetMs))
+    throw coded(new RangeError(`offsetMs must be a whole number of ms (got ${offsetMs})`), 'ANARCHON_INVALID_ARGUMENT');
   const offset = ((offsetMs % intervalMs) + intervalMs) % intervalMs;
   return {
     type: 'every',
@@ -102,7 +105,7 @@ export function everySchedule(intervalMs: number, offsetMs = 0): Schedule {
 
 /** Runs once, at `at` (ms since epoch). */
 export function onceSchedule(at: number): Schedule {
-  if (!Number.isFinite(at)) throw new RangeError('Invalid date for a one-off job');
+  if (!Number.isFinite(at)) throw coded(new RangeError('Invalid date for a one-off job'), 'ANARCHON_INVALID_ARGUMENT');
   return {
     type: 'once',
     description: `once at ${new Date(at).toISOString()}`,
@@ -120,7 +123,8 @@ export function onceSchedule(at: number): Schedule {
 export function cronSchedule(expression: string, timezone?: string): Schedule {
   const cron = new Cron(expression, timezone ? { timezone } : {});
   const runs = cron.nextRuns(64, new Date());
-  if (runs.length === 0) throw new RangeError(`Cron expression "${expression}" never runs in the future`);
+  if (runs.length === 0)
+    throw coded(new RangeError(`Cron expression "${expression}" never runs in the future`), 'ANARCHON_INVALID_ARGUMENT');
   let minGapMs = Infinity;
   let previous: number | undefined;
   for (const run of runs) {

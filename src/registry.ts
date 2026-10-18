@@ -1,7 +1,5 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-// Which schedulers there are (the default one, the named ones, the ones that can be created from
-// settings), and on which of them the jobs of each decorated object live.
 import {
   type DeclaredJob,
   declaredJobs,
@@ -11,7 +9,12 @@ import {
   type RegisterOptions,
   takeUnaddedWarnings,
 } from './decorators';
+// Which schedulers there are (the default one, the named ones, the ones that can be created from
+// settings), and on which of them the jobs of each decorated object live.
+import { coded } from './errors';
+import { CONFIGURE_OPTIONS, REGISTER_DEFAULTS, REGISTER_OPTIONS } from './option-keys';
 import type { Backend, SchedulerOptions } from './types';
+import { refuseUnknown } from './util';
 
 /**
  * Settings a scheduler is created from when a decorated job needs it: the options of
@@ -97,6 +100,23 @@ interface Placement {
 
 const DEFAULT_NAME = 'default';
 
+/**
+ * Every copy of anarchon loaded in this process, by file. The registry is per copy: a class
+ * decorated with one copy's decorators is never seen by another copy's schedulers.
+ */
+const shared = globalThis as unknown as Record<symbol, Set<string> | undefined>;
+const COPIES = Symbol.for('anarchon.copies');
+const copies = shared[COPIES] ?? new Set<string>();
+shared[COPIES] = copies;
+copies.add(__filename);
+if (copies.size > 1) {
+  process.emitWarning(
+    `anarchon is loaded from ${copies.size} places (${[...copies].join(', ')}): decorated jobs declared with one copy ` +
+      'are not added to the schedulers of another. Make your dependencies resolve to one version (npm ls anarchon).',
+    { code: 'ANARCHON_DUPLICATE_COPY' },
+  );
+}
+
 const hosts = new WeakMap<object, SchedulerHost>();
 const named = new Map<string, SchedulerHost>();
 /** Settings by scheduler name; the default scheduler's are under `undefined`. */
@@ -125,18 +145,21 @@ function settingsFor(name: string | undefined): ConfigureOptions | undefined {
   if (own || name === undefined) return own;
   const shared = settings.get(undefined);
   if (!shared || typeof shared.backend === 'function') return shared;
-  throw new Error(
-    `Scheduler "${name}" has no settings of its own, and the default settings hold a backend object, which two schedulers can't share. ` +
-      `Call Scheduler.configure("${name}", { ... }), or give the default settings a function: backend: (name) => ...`,
+  throw coded(
+    new Error(
+      `Scheduler "${name}" has no settings of its own, and the default settings hold a backend object, which two schedulers can't share. ` +
+        `Call Scheduler.configure("${name}", { ... }), or give the default settings a function: backend: (name) => ...`,
+    ),
+    'ANARCHON_NO_SCHEDULER',
   );
 }
 
 /** Creates a scheduler from settings, and starts it in the background with `autoStart`. */
 function create(name: string | undefined, { autoStart, backend, ...options }: ConfigureOptions): SchedulerHost {
-  if (!factory) throw new Error('No scheduler can be created yet');
+  if (!factory) throw coded(new Error('No scheduler can be created yet'), 'ANARCHON_INTERNAL');
   const built = typeof backend === 'function' ? backend(name ?? DEFAULT_NAME) : backend;
   const host = hosts.get(factory({ ...options, backend: built, ...(name === undefined ? {} : { name }) }));
-  if (!host) throw new Error('The scheduler that was created is not known to the registry');
+  if (!host) throw coded(new Error('The scheduler that was created is not known to the registry'), 'ANARCHON_INTERNAL');
   if (autoStart) host.startInBackground();
   return host;
 }
@@ -145,7 +168,7 @@ function create(name: string | undefined, { autoStart, backend, ...options }: Co
 function resolve(reference: string | object | undefined): SchedulerHost | undefined {
   if (typeof reference === 'object') {
     const host = hosts.get(reference);
-    if (!host) throw new TypeError('scheduler must be the name of a scheduler, or a Scheduler');
+    if (!host) throw coded(new TypeError('scheduler must be the name of a scheduler, or a Scheduler'), 'ANARCHON_INVALID_ARGUMENT');
     return host;
   }
   const existing = reference === undefined ? defaultScheduler : named.get(reference);
@@ -164,7 +187,10 @@ function resolve(reference: string | object | undefined): SchedulerHost | undefi
 function place(target: object, options: RegisterOptions, forced: SchedulerHost | undefined): boolean {
   const declared = declaredJobs(target);
   if (declared.length === 0) {
-    throw new TypeError('register() needs an object whose class has methods decorated with @Cron, @Every or @At');
+    throw coded(
+      new TypeError('register() needs an object whose class has methods decorated with @Cron, @Every or @At'),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
   }
   const plan: Array<{ host: SchedulerHost; job: DeclaredJob; name: string }> = [];
   for (const job of declared) {
@@ -211,9 +237,12 @@ onObjectCreated((target) => {
   } catch (error) {
     // The usual cause is a second object of one class, which register() with a prefix solves.
     if (!(error instanceof Error) || !/is already registered$/.test(error.message)) throw error;
-    throw new Error(
-      `${error.message}. To use several objects of one class, register each of them with a prefix of its own: scheduler.register(object, { prefix })`,
-      { cause: error },
+    throw coded(
+      new Error(
+        `${error.message}. To use several objects of one class, register each of them with a prefix of its own: scheduler.register(object, { prefix })`,
+        { cause: error },
+      ),
+      'ANARCHON_JOB_EXISTS',
     );
   }
 });
@@ -229,10 +258,13 @@ onObjectCreated((target) => {
  * ```
  */
 export function registerOn(host: SchedulerHost, target: object, options: RegisterOptions): void {
-  if (options.prefix !== undefined && typeof options.prefix !== 'string') throw new TypeError('register(): prefix must be a string');
+  refuseUnknown('register()', options, REGISTER_OPTIONS);
+  if (options.prefix !== undefined && typeof options.prefix !== 'string')
+    throw coded(new TypeError('register(): prefix must be a string'), 'ANARCHON_INVALID_ARGUMENT');
   if (options.defaults !== undefined && (typeof options.defaults !== 'object' || options.defaults === null)) {
-    throw new TypeError('register(): defaults must be an object of job options');
+    throw coded(new TypeError('register(): defaults must be an object of job options'), 'ANARCHON_INVALID_ARGUMENT');
   }
+  refuseUnknown('register() defaults', options.defaults, REGISTER_DEFAULTS);
   const placed = placements.get(target);
   const here = placed?.jobs.every((job) => job.host === host) ? placed : undefined;
   const asked = options.prefix !== undefined || options.defaults !== undefined;
@@ -251,7 +283,7 @@ export function registerOn(host: SchedulerHost, target: object, options: Registe
  */
 export function schedulerCreated(host: SchedulerHost): void {
   if (host.name !== undefined) {
-    if (named.has(host.name)) throw new Error(`A scheduler named "${host.name}" already exists`);
+    if (named.has(host.name)) throw coded(new Error(`A scheduler named "${host.name}" already exists`), 'ANARCHON_SCHEDULER_EXISTS');
     named.set(host.name, host);
   } else {
     defaultScheduler ??= host;
@@ -277,7 +309,7 @@ export function schedulerStarting(host: SchedulerHost): string[] {
     if (defaultScheduler !== host) return [];
   } else {
     const holder = named.get(host.name);
-    if (holder && holder !== host) throw new Error(`A scheduler named "${host.name}" already exists`);
+    if (holder && holder !== host) throw coded(new Error(`A scheduler named "${host.name}" already exists`), 'ANARCHON_SCHEDULER_EXISTS');
     named.set(host.name, host);
   }
   placeWaiting();
@@ -329,13 +361,20 @@ export function setDefaultScheduler(host: SchedulerHost | undefined): void {
  */
 export function configure(name: string | undefined, options: ConfigureOptions): void {
   if (name !== undefined && (typeof name !== 'string' || name === ''))
-    throw new TypeError('Scheduler.configure(): name must be a non-empty string');
+    throw coded(new TypeError('Scheduler.configure(): name must be a non-empty string'), 'ANARCHON_INVALID_ARGUMENT');
   if (typeof options !== 'object' || options === null || !options.backend) {
-    throw new TypeError('Scheduler.configure() needs a backend, e.g. backend: new RedisBackend({ redis: url })');
+    throw coded(
+      new TypeError('Scheduler.configure() needs a backend, e.g. backend: new RedisBackend({ redis: url })'),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
   }
+  refuseUnknown('Scheduler.configure()', options, CONFIGURE_OPTIONS);
   if (name === undefined ? defaultScheduler : named.get(name)) {
-    throw new Error(
-      `${name === undefined ? 'The default scheduler' : `The scheduler "${name}"`} already exists: configure it before it is created`,
+    throw coded(
+      new Error(
+        `${name === undefined ? 'The default scheduler' : `The scheduler "${name}"`} already exists: configure it before it is created`,
+      ),
+      'ANARCHON_SCHEDULER_EXISTS',
     );
   }
   settings.set(name, options);
@@ -355,10 +394,13 @@ export function configure(name: string | undefined, options: ConfigureOptions): 
 export function getScheduler(name: string | undefined): object {
   const host = resolve(name);
   if (host) return host.scheduler;
-  throw new Error(
-    name === undefined
-      ? 'There is no default scheduler: create one with new Scheduler(...), or give its settings to Scheduler.configure({ ... })'
-      : `There is no scheduler named "${name}": create it with new Scheduler({ name: "${name}", ... }), or give its settings to Scheduler.configure("${name}", { ... })`,
+  throw coded(
+    new Error(
+      name === undefined
+        ? 'There is no default scheduler: create one with new Scheduler(...), or give its settings to Scheduler.configure({ ... })'
+        : `There is no scheduler named "${name}": create it with new Scheduler({ name: "${name}", ... }), or give its settings to Scheduler.configure("${name}", { ... })`,
+    ),
+    'ANARCHON_NO_SCHEDULER',
   );
 }
 

@@ -1,5 +1,6 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
+import { coded } from './errors';
 import { parseDuration } from './schedule';
 import type { Scheduler } from './scheduler/scheduler';
 import type { AtJobOptions, CronJobOptions, EveryJobOptions, JobHandler, JobOptions } from './types';
@@ -210,7 +211,7 @@ function declare(decorator: string, declaration: Declaration): JobDecorator {
     // Jobs are found on the prototype of an object, which static and #private methods are not on.
     const onPrototype = standard ? second.kind === 'method' && !second.static && !second.private : typeof first !== 'function';
     if (typeof method !== 'function' || !onPrototype) {
-      throw new TypeError(`@${decorator} can only decorate a public instance method`);
+      throw coded(new TypeError(`@${decorator} can only decorate a public instance method`), 'ANARCHON_INVALID_ARGUMENT');
     }
     // Decorators are applied bottom-up; adding at the front keeps the order they are written in.
     declarations.set(method, [declaration, ...(declarations.get(method) ?? [])]);
@@ -252,11 +253,17 @@ function parse<Value, Options>(kind: ScheduleKind, args: unknown[]): Parsed<Valu
   // The name and the schedule can both be strings, so swapping them, or passing something else as the
   // second string, would otherwise surface later as an invalid schedule of a job with a strange name.
   if (nameFirst && (typeof first !== 'string' || (!kind.looksValid(second) && kind.looksValid(first)))) {
-    throw new TypeError(`@${kind.decorator}(${JSON.stringify(first)}, ${JSON.stringify(second)}): ${kind.usage}`);
+    throw coded(
+      new TypeError(`@${kind.decorator}(${JSON.stringify(first)}, ${JSON.stringify(second)}): ${kind.usage}`),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
   }
   const { name, scheduler, ...options } = ((nameFirst ? third : second) ?? {}) as DecoratedJobOptions<Options>;
   if (scheduler !== undefined && (typeof scheduler === 'string' ? scheduler === '' : typeof scheduler !== 'object' || scheduler === null)) {
-    throw new TypeError(`@${kind.decorator}: scheduler must be the name of a scheduler, or a Scheduler`);
+    throw coded(
+      new TypeError(`@${kind.decorator}: scheduler must be the name of a scheduler, or a Scheduler`),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
   }
   return {
     name: nameFirst ? (first as string) : name,

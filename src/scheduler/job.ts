@@ -1,7 +1,9 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { randomUUID } from 'node:crypto';
+import { coded } from '../errors';
 
+import { LEASE_JOB_OPTIONS } from '../option-keys';
 import type { Schedule } from '../schedule';
 import type { Backend, ClaimInput, JobHandler, JobOptions } from '../types';
 import { intInRange, nonNegativeInt, positiveInt } from '../util';
@@ -66,18 +68,21 @@ export interface JobDefaults {
   timezone?: string;
 }
 
-/** Checks a job's name, handler and options against its schedule and the backend, and builds it. */
 /** Throws when a backend without leases is given options only leases can honour. */
 export function refuseWithoutLeases(backend: Backend, options: object, keys: readonly string[], label = ''): void {
   if (backend.runs) return;
   const key = keys.find((k) => (options as Record<string, unknown>)[k] !== undefined);
   if (key) {
-    throw new TypeError(
-      `${label}${key} needs a backend with leases (Redis or Valkey with the "lease" strategy, PostgreSQL, SQLite); ${backend.name} has none`,
+    throw coded(
+      new TypeError(
+        `${label}${key} needs a backend with leases (Redis or Valkey with the "lease" strategy, PostgreSQL, SQLite); ${backend.name} has none`,
+      ),
+      'ANARCHON_UNSUPPORTED',
     );
   }
 }
 
+/** Checks a job's name, handler and options against its schedule and the backend, and builds it. */
 export function createJob(
   name: string,
   schedule: Schedule,
@@ -86,32 +91,42 @@ export function createJob(
   defaults: JobDefaults,
   backend: Backend,
 ): Job {
-  if (typeof name !== 'string' || name.trim() === '') throw new TypeError('Job name must be a non-empty string');
-  if (typeof handler !== 'function') throw new TypeError(`Job "${name}": handler must be a function`);
-  refuseWithoutLeases(backend, options, ['overlap', 'maxAttempts', 'catchUpMs'], `Job "${name}": `);
+  if (typeof name !== 'string' || name.trim() === '')
+    throw coded(new TypeError('Job name must be a non-empty string'), 'ANARCHON_INVALID_ARGUMENT');
+  if (typeof handler !== 'function') throw coded(new TypeError(`Job "${name}": handler must be a function`), 'ANARCHON_INVALID_ARGUMENT');
+  refuseWithoutLeases(backend, options, LEASE_JOB_OPTIONS, `Job "${name}": `);
 
   const jitterMs =
     options.jitterMs !== undefined
       ? nonNegativeInt('jitterMs', options.jitterMs)
       : Math.min(defaults.jitterMs, Math.floor(schedule.minGapMs / 4));
   if (jitterMs * 2 >= schedule.minGapMs) {
-    throw new RangeError(`Job "${name}": jitterMs (${jitterMs}) must be under half the time between runs (${schedule.minGapMs} ms)`);
+    throw coded(
+      new RangeError(`Job "${name}": jitterMs (${jitterMs}) must be under half the time between runs (${schedule.minGapMs} ms)`),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
   }
   const maxLateMs =
     options.maxLateMs !== undefined ? positiveInt('maxLateMs', options.maxLateMs) : Math.max(defaults.maxLateMs, jitterMs + 1_000);
   if (maxLateMs <= jitterMs) {
-    throw new RangeError(`Job "${name}": maxLateMs (${maxLateMs}) must be bigger than jitterMs (${jitterMs})`);
+    throw coded(
+      new RangeError(`Job "${name}": maxLateMs (${maxLateMs}) must be bigger than jitterMs (${jitterMs})`),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
   }
   if (jitterMs + maxLateMs >= backend.dedupeWindowMs) {
-    throw new RangeError(
-      `Job "${name}": jitterMs + maxLateMs (${jitterMs + maxLateMs} ms) must be shorter than how long ` +
-        `${backend.name} remembers a run (${backend.dedupeWindowMs} ms), or a late instance could run it again`,
+    throw coded(
+      new RangeError(
+        `Job "${name}": jitterMs + maxLateMs (${jitterMs + maxLateMs} ms) must be shorter than how long ` +
+          `${backend.name} remembers a run (${backend.dedupeWindowMs} ms), or a late instance could run it again`,
+      ),
+      'ANARCHON_UNSAFE_JOB',
     );
   }
   const historySize = options.historySize !== undefined ? positiveInt('historySize', options.historySize) : defaults.historySize;
   const historyTtlMs = options.historyTtlMs !== undefined ? positiveInt('historyTtlMs', options.historyTtlMs) : defaults.historyTtlMs;
   if (options.overlap !== undefined && options.overlap !== 'skip' && options.overlap !== 'allow') {
-    throw new TypeError(`Job "${name}": overlap must be "skip" or "allow"`);
+    throw coded(new TypeError(`Job "${name}": overlap must be "skip" or "allow"`), 'ANARCHON_INVALID_ARGUMENT');
   }
   const timeoutMs = options.timeoutMs !== undefined ? positiveInt('timeoutMs', options.timeoutMs) : undefined;
   const maxAttempts = intInRange('maxAttempts', options.maxAttempts ?? 3, 1, 100);

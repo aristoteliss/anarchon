@@ -19,7 +19,7 @@ const scheduler = new Scheduler({
 
 ```ts
 // A connection string. anarchon opens a small pool with `pg` and closes it on stop().
-new PostgresBackend({ connection: 'postgres://user:secret@db.internal:5432/app' });
+new PostgresBackend({ connection: process.env.DATABASE_URL }); // postgres://; user and password go in the URL
 
 // Nothing: postgres://localhost:5432/postgres, with the PG* environment variables filling the gaps
 new PostgresBackend();
@@ -66,8 +66,9 @@ They are created on `start()` if they don't exist. Two instances starting togeth
 | `<table>` | run | attempt, token, status, runner, lease end |
 | `<table>_attempts` | attempt | who, why, when it was claimed, how it ended (the history) |
 | `<table>_jobs` | job | the row that makes claims of one job take turns |
+| `<table>_meta` | setting | the store format, so a newer anarchon's data is never misread |
 
-If your application's database user can't create tables, create them once with a privileged user by running `start()` in a migration step, then grant `SELECT, INSERT, UPDATE, DELETE` on the three tables.
+If your application's database user can't create tables, create them once with a privileged user by running `start()` in a migration step, then grant `SELECT, INSERT, UPDATE, DELETE` on the four tables.
 
 To keep them out of your main schema:
 

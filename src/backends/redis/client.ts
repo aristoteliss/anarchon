@@ -1,5 +1,9 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
+import { coded } from '../../errors';
+import { keysOf } from '../../option-keys';
+import { refuseUnknown } from '../../util';
+
 /**
  * The only thing the Redis/Valkey backend needs from a client: send one raw command and get the reply.
  * Any client can be adapted to this, so the package is not tied to one client library.
@@ -110,12 +114,27 @@ export interface ValkeyGlideLike {
  *
  * @example
  * ```ts
- * new RedisBackend({ redis: 'rediss://cron:secret@cache.internal:6380/1' }); // TLS, user, password, db 1
+ * new RedisBackend({ redis: process.env.REDIS_URL }); // rediss:// for TLS; user, password and db go in the URL
  * new RedisBackend({ redis: { host: 'cache.internal', port: 6379 } });
  * new RedisBackend({ redis: existingIoredis });                             // shared with the app
  * ```
  */
 export type KeyValueConnection = KeyValueClient | IORedisLike | NodeRedisLike | ValkeyGlideLike | KeyValueConnectionOptions | string;
+
+const CONNECTION_OPTIONS = keysOf<KeyValueConnectionOptions>({ host: true, port: true, username: true, password: true, db: true });
+
+/**
+ * Refuses a key that connection options don't have (a client passes through). Settings beyond
+ * these, such as TLS, go in a URL or in a client you create yourself.
+ */
+export function checkConnectionOptions(label: string, input: KeyValueConnection | undefined): void {
+  if (input === undefined || typeof input !== 'object' || !isPlainObject(input) || isClient(input)) return;
+  refuseUnknown(label, input, CONNECTION_OPTIONS, {}, ' (for TLS and other client settings, pass a rediss:// URL or your own client)');
+}
+
+function isClient(value: object): boolean {
+  return isCommandClient(value) || isGlide(value) || isNodeRedis(value) || isIORedis(value);
+}
 
 export async function resolveRedis(input: KeyValueConnection | undefined): Promise<{ client: KeyValueClient; owned: boolean }> {
   if (input === undefined || typeof input === 'string') {
@@ -126,8 +145,11 @@ export async function resolveRedis(input: KeyValueConnection | undefined): Promi
   if (isNodeRedis(input)) return { client: fromNodeRedis(input), owned: false };
   if (isIORedis(input)) return { client: fromIORedis(input, false), owned: false };
   if (isPlainObject(input)) return { client: await createNodeRedis(input), owned: true };
-  throw new TypeError(
-    'redis must be connection options, a URL, an ioredis/iovalkey, node-redis or Valkey GLIDE client, or an object with send(command, args).',
+  throw coded(
+    new TypeError(
+      'redis must be connection options, a URL, an ioredis/iovalkey, node-redis or Valkey GLIDE client, or an object with send(command, args).',
+    ),
+    'ANARCHON_INVALID_ARGUMENT',
   );
 }
 
@@ -195,7 +217,10 @@ async function createNodeRedis(input: string | KeyValueConnectionOptions | undef
     // node-redis's typings are generic over its modules; only createClient is used here.
     mod = (await import('redis')) as unknown as typeof mod;
   } catch {
-    throw new Error('No Redis client was given and "redis" is not installed. Run `npm install redis`, or pass your own client as redis.');
+    throw coded(
+      new Error('No Redis client was given and "redis" is not installed. Run `npm install redis`, or pass your own client as redis.'),
+      'ANARCHON_MISSING_DRIVER',
+    );
   }
   const options =
     typeof input === 'string'

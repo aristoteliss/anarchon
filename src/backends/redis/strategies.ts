@@ -1,9 +1,11 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
+import { coded } from '../../errors';
 import type { ClaimInput, IdmpOptions, KeyValueStrategy } from '../../types';
 import { errorMessage } from '../../util';
 import type { KeyValueClient } from './client';
 import { parseEntries, toRecord, toStr } from './replies';
+import { ScriptRunner } from './scripts';
 
 export interface StreamClaim extends ClaimInput {
   /** Stream key of the job. */
@@ -103,9 +105,12 @@ export class IdmpStrategy implements ClaimStrategy {
     const match = /^(\d+)\.(\d+)/.exec(version);
     const ok = product === 'Redis' && !!match && (Number(match[1]) > 8 || (Number(match[1]) === 8 && Number(match[2]) >= 6));
     if (!ok) {
-      throw new Error(
-        `The "idmp" strategy needs Redis 8.6 or newer (this server is ${product} ${version}). ` +
-          'Use strategy "stream-id" or "script" instead; both work on any Redis 5+ and on Valkey.',
+      throw coded(
+        new Error(
+          `The "idmp" strategy needs Redis 8.6 or newer (this server is ${product} ${version}). ` +
+            'Use strategy "stream-id" or "script" instead; both work on any Redis 5+ and on Valkey.',
+        ),
+        'ANARCHON_SERVER',
       );
     }
   }
@@ -178,16 +183,18 @@ return ARGV[4]
 
 export class ScriptStrategy implements ClaimStrategy {
   readonly name = 'script';
-  private sha: string | undefined;
+  private readonly scripts: ScriptRunner;
 
   constructor(
-    private readonly redis: KeyValueClient,
+    redis: KeyValueClient,
     private readonly windowMs: number,
-  ) {}
+  ) {
+    this.scripts = new ScriptRunner(async () => redis);
+  }
 
   /** Loads the claim script, so claims can send its hash instead of its text. */
   async init(): Promise<void> {
-    this.sha = toStr(await this.redis.send('SCRIPT', ['LOAD', CLAIM_SCRIPT]));
+    await this.scripts.load(CLAIM_SCRIPT);
   }
 
   /** Nothing to prepare: the script's XADD creates the stream. */
@@ -195,22 +202,11 @@ export class ScriptStrategy implements ClaimStrategy {
 
   /** Runs the claim script. Won if the token it returns is ours. */
   async claim(input: StreamClaim): Promise<boolean> {
-    const args = [
-      1,
-      input.key,
-      String(input.slot),
-      String(Math.max(0, input.slot - this.windowMs)),
-      input.historySize,
-      input.token,
-      ...claimFields(input, false),
-    ];
-    let stored: unknown;
-    try {
-      stored = await this.redis.send('EVALSHA', [this.sha ?? '', ...args]);
-    } catch (error) {
-      if (!/NOSCRIPT/i.test(errorMessage(error))) throw error;
-      stored = await this.redis.send('EVAL', [CLAIM_SCRIPT, ...args]); // script cache was flushed
-    }
+    const stored = await this.scripts.run(
+      CLAIM_SCRIPT,
+      [input.key],
+      [String(input.slot), String(Math.max(0, input.slot - this.windowMs)), input.historySize, input.token, ...claimFields(input, false)],
+    );
     return toStr(stored) === input.token;
   }
 }

@@ -1,5 +1,8 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
+import { coded } from '../../errors';
+import { keysOf } from '../../option-keys';
+import { refuseUnknown } from '../../util';
 import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlQuery, type SqlRow, type SqlValue } from './base';
 
 /**
@@ -96,6 +99,8 @@ export interface PostgresBackendOptions {
   table?: string;
 }
 
+const POSTGRES_OPTIONS = keysOf<PostgresBackendOptions>({ connection: true, table: true });
+
 const dialect: SqlDialect = {
   bigint: 'BIGINT',
   nowMs: `(floor(extract(epoch from clock_timestamp()) * 1000))::bigint`,
@@ -154,6 +159,7 @@ export class PostgresBackend extends SqlBackend {
 
   /** Validates the table name. Nothing connects until init(). */
   constructor(options: PostgresBackendOptions = {}) {
+    refuseUnknown('PostgresBackend', options, POSTGRES_OPTIONS);
     super(options.table ?? 'anarchon_runs');
     this.input = options.connection;
   }
@@ -165,10 +171,13 @@ export class PostgresBackend extends SqlBackend {
     try {
       pg = await import('pg');
     } catch {
-      throw new Error('The Postgres backend needs "pg": run `npm install pg`, or pass your own client as connection.');
+      throw coded(
+        new Error('The Postgres backend needs "pg": run `npm install pg`, or pass your own client as connection.'),
+        'ANARCHON_MISSING_DRIVER',
+      );
     }
     const Pool = pg.Pool ?? pg.default?.Pool;
-    if (!Pool) throw new Error('"pg" was loaded but exports no Pool class.');
+    if (!Pool) throw coded(new Error('"pg" was loaded but exports no Pool class.'), 'ANARCHON_MISSING_DRIVER');
     const pool = new Pool(input ? { connectionString: input } : {});
     pool.on('error', () => {}); // idle client errors; the next query reconnects
     return { client: { ...fromPgPool(pool), close: () => pool.end() }, owned: true };
@@ -177,7 +186,8 @@ export class PostgresBackend extends SqlBackend {
   protected async checkServer(client: SqlClient): Promise<void> {
     const [row] = await client.all('SHOW server_version_num', []);
     const version = Number(row?.server_version_num);
-    if (!(version >= 90_500)) throw new Error(`The Postgres backend needs PostgreSQL 9.5 or newer (server_version_num ${version}).`);
+    if (!(version >= 90_500))
+      throw coded(new Error(`The Postgres backend needs PostgreSQL 9.5 or newer (server_version_num ${version}).`), 'ANARCHON_SERVER');
   }
 }
 
@@ -261,14 +271,17 @@ export function fromPostgresJs(sql: PostgresJsLike): SqlClient {
 function toSqlClient(input: PgPoolLike | PgClientLike | PostgresJsLike | SqlClient): SqlClient {
   if (typeof (input as SqlClient).all === 'function') {
     if (typeof (input as SqlClient).transaction !== 'function')
-      throw new TypeError('A custom SQL client needs both all() and transaction()');
+      throw coded(new TypeError('A custom SQL client needs both all() and transaction()'), 'ANARCHON_INVALID_ARGUMENT');
     return input as SqlClient;
   }
   if (typeof (input as PostgresJsLike).unsafe === 'function') return fromPostgresJs(input as PostgresJsLike);
   if (typeof (input as PgPoolLike).query === 'function') {
     return 'idleCount' in input ? fromPgPool(input as PgPoolLike) : fromPgClient(input as PgClientLike);
   }
-  throw new TypeError('connection must be a connection string, a pg Pool or Client, a postgres.js sql instance, or { all, transaction }');
+  throw coded(
+    new TypeError('connection must be a connection string, a pg Pool or Client, a postgres.js sql instance, or { all, transaction }'),
+    'ANARCHON_INVALID_ARGUMENT',
+  );
 }
 
 export type { SqlClient, SqlValue };

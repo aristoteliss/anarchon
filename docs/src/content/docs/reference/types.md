@@ -359,6 +359,7 @@ The minimal shape anarchon needs from each client library. You pass a real clien
 | `PgPoolLike`, `PgClientLike`, `PostgresJsLike` | `pg` Pool, `pg` Client, postgres.js |
 | `SqliteDatabaseLike`, `LibsqlClientLike` | `node:sqlite` / `better-sqlite3`, `@libsql/client` |
 | `SqlClient`, `SqlQuery`, `SqlRow`, `SqlValue` | The `{ all, transaction }` adapter of the SQL backends |
+| `SqlDialect` | What a subclass of `SqlBackend` gives for another SQL database |
 | `RabbitMQConnectionLike`, `NatsConnectionLike` | An `amqplib` connection, a NATS connection |
 
 Backend option types: `RedisBackendOptions`, `ValkeyBackendOptions`, `PostgresBackendOptions`, `SqliteBackendOptions`, `RabbitMQBackendOptions`, `NatsBackendOptions`. See [Options](../options/).

@@ -72,7 +72,8 @@
     "test:last:review": "node scripts/test-log.mjs review",
     "test:last:log": "less -R test/test-run.log",
     "test:last:fails": "node scripts/test-log.mjs fails",
-    "test:release": "pnpm rebuild && node scripts/release-check.mjs",
+    "test:release": "pnpm rebuild && node scripts/api-snapshot.mjs --check && node scripts/release-check.mjs",
+    "api:update": "pnpm rebuild && node scripts/api-snapshot.mjs --update",
     "verify:all": "pnpm test:servers && pnpm lint && pnpm check && pnpm test:all && pnpm test:release",
     "scenarios": "tsx test/e2e/scenarios/report.ts stream-id lease postgres sqlite",
     "docs:dev": "pnpm --filter anarchon-docs dev",
@@ -89,6 +90,11 @@
     "example:decorators:legacy": "TSX_TSCONFIG_PATH=examples/tsconfig.legacy.json tsx examples/decorators-legacy.ts",
     "example:decorators:options": "tsx examples/decorators-options.ts",
     "example:decorators:startup": "tsx examples/decorators-startup.ts",
+    "example:billing": "tsx examples/billing.ts",
+    "example:cache": "tsx examples/cache-refresh.ts",
+    "example:export": "tsx examples/nightly-export.ts",
+    "example:tenants": "tsx examples/tenants.ts",
+    "example:brokers": "tsx examples/broker-notifications.ts",
     "example:run-data": "tsx examples/run-data.ts",
     "prepublishOnly": "pnpm rebuild"
   },
@@ -130,10 +136,10 @@
     "@nats-io/transport-node": "^3.4.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
     "@valkey/valkey-glide": "^2.5.3",
-    "@vitest/coverage-v8": "^5.0.3",
+    "@vitest/coverage-v8": "^5.0.5",
     "amqplib": "^2.2.0",
     "better-sqlite3": "^13.0.3",
     "express": "^5.3.0",
@@ -144,6 +150,6 @@
     "redis": "^6.3.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   }
 }

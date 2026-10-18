@@ -1,10 +1,12 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import type { Channel, ChannelModel, ConfirmChannel, ConsumeMessage, Options } from 'amqplib';
+import { coded } from '../errors';
 
-import { type ClaimRecord, claimPayload, mergeRuns, parseJson, toClaim, toResult } from '../history';
+import { buildHistory, type ClaimRecord, claimPayload, parseJson, toClaim, toResult } from '../history';
+import { keysOf } from '../option-keys';
 import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
-import { assertSimpleName, positiveInt, refuseHistoryTtl, versionAtLeast } from '../util';
+import { assertSimpleName, positiveInt, refuseHistoryTtl, refuseUnknown, versionAtLeast } from '../util';
 
 /**
  * The parts of an amqplib connection this backend uses: what `amqplib.connect()` returns fits.
@@ -43,7 +45,7 @@ export interface RabbitMQBackendOptions {
    *
    * @example
    * ```ts
-   * new RabbitMQBackend({ url: process.env.AMQP_URL }); // amqps://user:secret@rabbit.internal/vhost
+   * new RabbitMQBackend({ url: process.env.AMQP_URL }); // amqps:// for TLS; user, password and vhost go in the URL
    * ```
    */
   url?: string;
@@ -80,6 +82,8 @@ export interface RabbitMQBackendOptions {
    */
   slotTtlMs?: number;
 }
+
+const RABBITMQ_OPTIONS = keysOf<RabbitMQBackendOptions>({ url: true, connection: true, prefix: true, slotTtlMs: true });
 
 const BYTES_PER_RUN = 1_024; // claim + result records, with room to spare
 
@@ -129,6 +133,7 @@ export class RabbitMQBackend implements Backend {
 
   /** Validates the options. Nothing connects until init(). */
   constructor(options: RabbitMQBackendOptions = {}) {
+    refuseUnknown('RabbitMQBackend', options, RABBITMQ_OPTIONS);
     this.url = options.url ?? 'amqp://localhost';
     this.prefix = options.prefix ?? 'cron.';
     this.userConnection = options.connection;
@@ -146,7 +151,10 @@ export class RabbitMQBackend implements Backend {
     const connection = await this.getConnection();
     const { product = 'RabbitMQ', version = '0' } = connection.connection.serverProperties ?? {};
     if (!versionAtLeast(String(version), 3, 9)) {
-      throw new Error(`The RabbitMQ backend needs RabbitMQ 3.9 or newer for stream queues (this server is ${product} ${version}).`);
+      throw coded(
+        new Error(`The RabbitMQ backend needs RabbitMQ 3.9 or newer for stream queues (this server is ${product} ${version}).`),
+        'ANARCHON_SERVER',
+      );
     }
   }
 
@@ -227,7 +235,7 @@ export class RabbitMQBackend implements Backend {
           if (result) results.push(result);
         }
       }
-      return mergeRuns(job, claims, results, limit);
+      return buildHistory({ job, claims, results, limit });
     } catch (error) {
       if ((error as { code?: number }).code === 404) return []; // job never ran here
       throw error;
@@ -246,8 +254,6 @@ export class RabbitMQBackend implements Backend {
     if (!this.userConnection) await connection?.then((c) => c.close()).catch(() => {});
   }
 
-  // ---------------------------------------------------------------- internals
-
   private getConnection(): Promise<ChannelModel> {
     if (this.connection) return this.connection;
     const pending: Promise<ChannelModel> = (async () => {
@@ -256,7 +262,7 @@ export class RabbitMQBackend implements Backend {
       try {
         amqp = (await import('amqplib')) as typeof amqp;
       } catch {
-        throw new Error('The RabbitMQ backend needs "amqplib": run `npm install amqplib`.');
+        throw coded(new Error('The RabbitMQ backend needs "amqplib": run `npm install amqplib`.'), 'ANARCHON_MISSING_DRIVER');
       }
       const connection: ChannelModel = await (amqp.connect ?? amqp.default.connect)(this.url);
       connection.on('error', () => {}); // also reported through 'close'
@@ -319,7 +325,7 @@ export class RabbitMQBackend implements Backend {
   private async append(job: string, record: unknown): Promise<void> {
     const channel = await this.getConfirmChannel();
     if (!(await this.publish(channel, this.historyQueue(job), record))) {
-      throw new Error(`RabbitMQ refused a history record for job "${job}"`);
+      throw coded(new Error(`RabbitMQ refused a history record for job "${job}"`), 'ANARCHON_STORE');
     }
   }
 

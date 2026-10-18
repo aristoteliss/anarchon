@@ -73,3 +73,57 @@ test('lease options stay available on a lease backend, and wherever the backend 
   const asDefault: Scheduler = new Scheduler({ backend: new RabbitMQBackend() });
   assert.equal(asDefault.backend.name, 'rabbitmq');
 });
+
+/** A backend that, like the real ones, opens its connection on first use and reopens after close(). */
+function lazyBackend() {
+  const state = { open: false };
+  const use = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    state.open = true;
+  };
+  const backend: Backend = {
+    ...memoryBackend(),
+    init: use,
+    prepareJob: use,
+    history: async () => {
+      await use();
+      return [];
+    },
+    close: async () => {
+      state.open = false;
+    },
+  };
+  return { backend, state };
+}
+
+test('a read after stop() opens the connection for itself and closes it again', async () => {
+  const { backend, state } = lazyBackend();
+  const scheduler = new Scheduler({ backend });
+  scheduler.every('a', '1h', () => {});
+  await scheduler.start();
+  await scheduler.stop();
+  assert.equal(state.open, false);
+
+  await Promise.all([scheduler.history('a'), scheduler.lastRun('a'), scheduler.history('a', 5)]);
+  assert.equal(state.open, false, 'nothing left open, so the process can exit');
+});
+
+test('reads before start() keep the connection open until stop(), for processes that only read', async () => {
+  const { backend, state } = lazyBackend();
+  const reader = new Scheduler({ backend });
+  await reader.history('a');
+  assert.equal(state.open, true);
+  await reader.stop();
+  assert.equal(state.open, false);
+});
+
+test('stop() while start() is still connecting leaves no connection open', async () => {
+  const { backend, state } = lazyBackend();
+  const scheduler = new Scheduler({ backend });
+  scheduler.every('a', '1h', () => {});
+  const starting = scheduler.start();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await scheduler.stop();
+  await starting;
+  assert.equal(state.open, false);
+});

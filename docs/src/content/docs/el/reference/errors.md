@@ -11,6 +11,38 @@ description: Τα σφάλματα που ρίχνει το anarchon, τι ση�
 | `start()` | Το store δεν είναι προσβάσιμο, είναι πολύ παλιό, ή λείπει ένας driver. Το promise απορρίπτεται |
 | Κατά την εκτέλεση | Προβλήματα με το store. Αναφέρονται ως [συμβάντα `error`](../events/#error), δεν ρίχνονται ποτέ |
 
+## Κωδικοί σφαλμάτων
+
+Κάθε σφάλμα που ρίχνει το anarchon έχει `code`. Ελέγχετε τον κωδικό, όχι το μήνυμα: τα μηνύματα μπορεί να αλλάξουν διατύπωση σε οποιαδήποτε έκδοση, οι κωδικοί μένουν. Το σφάλμα κρατά την κλάση του (`TypeError`, `RangeError` ή `Error`).
+
+```ts
+import { isAnarchonError } from 'anarchon';
+
+try {
+  scheduler.every(name, interval, handler, options);
+} catch (error) {
+  if (isAnarchonError(error, 'ANARCHON_UNKNOWN_OPTION')) return badRequest(error.message);
+  throw error;
+}
+```
+
+| Κωδικός | Σημασία |
+| --- | --- |
+| `ANARCHON_INVALID_ARGUMENT` | Μια τιμή ή ένα όρισμα που δεν μπορεί να χρησιμοποιηθεί: αριθμός εκτός ορίων, μη έγκυρη έκφραση cron ή ημερομηνία, backend που λείπει |
+| `ANARCHON_UNKNOWN_OPTION` | Μια επιλογή που το αντικείμενο δεν έχει, συχνά ορθογραφικό λάθος |
+| `ANARCHON_UNSUPPORTED` | Μια έγκυρη επιλογή που το backend ή η στρατηγική δεν μπορεί να τηρήσει, όπως το `overlap` στο RabbitMQ |
+| `ANARCHON_UNSAFE_JOB` | Ρυθμίσεις εργασίας που θα επέτρεπαν σε ένα καθυστερημένο instance να εκτελέσει μια εργασία δύο φορές |
+| `ANARCHON_SERVER` | Ο server είναι πολύ παλιός, ή του λείπει μια δυνατότητα που χρειάζεται το backend |
+| `ANARCHON_MISSING_DRIVER` | Το πακέτο driver ενός backend δεν είναι εγκατεστημένο |
+| `ANARCHON_STATE` | Μια κλήση που η κατάσταση του scheduler δεν επιτρέπει, όπως `runNow()` πριν από το `start()` |
+| `ANARCHON_JOB_EXISTS`, `ANARCHON_UNKNOWN_JOB` | Ένα όνομα εργασίας που είναι πιασμένο, ή δεν είναι καταχωρισμένο |
+| `ANARCHON_SCHEDULER_EXISTS`, `ANARCHON_NO_SCHEDULER` | Ένα όνομα scheduler που είναι πιασμένο, ή που δεν αντιστοιχεί ούτε σε scheduler ούτε σε ρυθμίσεις |
+| `ANARCHON_STORE` | Το store αρνήθηκε μια εγγραφή |
+| `ANARCHON_STORE_FORMAT` | Το store περιέχει δεδομένα που έγραψε μια νεότερη έκδοση του anarchon: τρέξτε μία έκδοση σε όλα τα instances |
+| `ANARCHON_INTERNAL` | Σφάλμα του anarchon: παρακαλούμε αναφέρετέ το |
+
+Νέοι κωδικοί μπορεί να προστεθούν σε minor έκδοση, οπότε κρατήστε έναν κλάδο default όταν κάνετε switch πάνω τους.
+
 ## Δημιουργία scheduler
 
 | Μήνυμα | Αιτία | Διόρθωση |
@@ -44,6 +76,7 @@ description: Τα σφάλματα που ρίχνει το anarchon, τι ση�
 | `leaseMs needs a backend with leases (...); B has none` (επίσης `heartbeatMs`) | Το ίδιο, στο `new Scheduler()` | Αφαιρέστε την επιλογή, ή χρησιμοποιήστε backend με μισθώσεις |
 | `Job "X": a one-off job takes no overlap` | `at()` με `overlap` | Αφαιρέστε το: μια εφάπαξ εργασία δεν έχει προηγούμενη εκτέλεση |
 | `Job "X": historyTtlMs is not supported by B, which keeps history by count (historySize) only` | `historyTtlMs` σε RabbitMQ ή NATS, στην εργασία ή στον scheduler | Χρησιμοποιήστε το `historySize` |
+| `X: unknown option "K" (did you mean "M"?)` | Μια επιλογή με λάθος όνομα ή σε λάθος θέση: το `X` είναι `new Scheduler()`, `Job "name"`, `register()`, ένα backend, κ.ο.κ. Ελέγχονται και επιλογές από ρυθμίσεις ή JavaScript | Χρησιμοποιήστε το όνομα που προτείνει, ή αφαιρέστε την επιλογή |
 | `The "S" strategy has no setting "K"` | Ρύθμιση άλλης στρατηγικής, π.χ. `{ name: 'lease', windowMs }` | Μεταφέρετέ τη στη στρατηγική όπου ανήκει |
 | `Job "X": with RabbitMQ, job names may only contain letters, digits, "_" and "-"` | Το όνομα γίνεται όνομα ουράς ή subject | Μετονομάστε την εργασία |
 | `offsetMs must be a whole number of ms` | Δεκαδικό offset | Χρησιμοποιήστε ακέραια χιλιοστά του δευτερολέπτου |

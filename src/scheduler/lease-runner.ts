@@ -1,6 +1,7 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { randomUUID } from 'node:crypto';
+import { coded } from '../errors';
 
 import type { ClaimOutcome, RunReason, RunRecord, RunStore, SkipEvent } from '../types';
 import { sleep } from '../util';
@@ -135,7 +136,7 @@ export class LeaseRunner {
       });
       if (outcome.kind === 'won') return core.track(this.executeLeased(job, slot, token, 1, 'manual', data));
     }
-    throw new Error(`Could not start a manual run of "${job.name}"`);
+    throw coded(new Error(`Could not start a manual run of "${job.name}"`), 'ANARCHON_STORE');
   }
 
   /** Stops backing up every run, or the runs of one job. */

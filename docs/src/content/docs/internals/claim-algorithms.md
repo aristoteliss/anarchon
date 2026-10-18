@@ -61,7 +61,7 @@ flowchart TD
 
 Because nothing else runs while the script does, two instances can't both see "none" or both see "lease ran out". The first script to run writes the state; the second reads it.
 
-Note that the script uses **Redis's own clock** (`TIME`). Instances never compare clocks with each other.
+The script uses **Redis's own clock** (`TIME`). Instances never compare clocks with each other.
 
 ## Redis: `stream-id`
 

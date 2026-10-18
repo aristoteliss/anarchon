@@ -8,7 +8,7 @@ import { Client, Pool } from 'pg';
 import postgres from 'postgres';
 import { describe, test } from 'vitest';
 
-import { type Backend, PostgresBackend, Scheduler, type SqlClient, SqliteBackend, type SqlRow } from '../../src';
+import { type Backend, isAnarchonError, PostgresBackend, Scheduler, type SqlClient, SqliteBackend, type SqlRow } from '../../src';
 import { makeBackend, POSTGRES_URL, probePostgres, probeSqlite, SQLITE_DIR, sqlSpecs, uniqueId } from '../support';
 
 const futureSlot = (seconds: number) => Math.ceil(Date.now() / 1000) * 1000 + seconds * 1000;
@@ -126,6 +126,42 @@ describe('Postgres and SQLite', () => {
     } finally {
       await backend.close();
     }
+  });
+
+  test('the tables record their store format, and a newer format than this version reads is refused', async (t) => {
+    const ran: string[] = [];
+    if (await probePostgres(POSTGRES_URL)) {
+      const table = `t_${uniqueId('format')}`;
+      const pool = new Pool({ connectionString: POSTGRES_URL });
+      try {
+        const first = new PostgresBackend({ connection: POSTGRES_URL, table });
+        await first.init();
+        await first.close();
+        assert.deepEqual((await pool.query(`SELECT value FROM ${table}_meta WHERE name = 'format'`)).rows, [{ value: '1' }]);
+        await pool.query(`UPDATE ${table}_meta SET value = '2' WHERE name = 'format'`);
+        const later = new PostgresBackend({ connection: POSTGRES_URL, table });
+        await assert.rejects(later.init(), (error) => isAnarchonError(error, 'ANARCHON_STORE_FORMAT') && /format 2/.test(error.message));
+        ran.push('postgres');
+      } finally {
+        await pool.end();
+      }
+    }
+    if (await probeSqlite()) {
+      const { DatabaseSync } = await import('node:sqlite');
+      const file = join(SQLITE_DIR, `anarchon-${uniqueId('format')}.db`);
+      const first = new SqliteBackend({ database: file, table: 'runs' });
+      await first.init();
+      await first.close();
+      const db = new DatabaseSync(file);
+      assert.deepEqual({ ...db.prepare(`SELECT value FROM runs_meta WHERE name = 'format'`).get() }, { value: '1' });
+      db.exec(`UPDATE runs_meta SET value = '2' WHERE name = 'format'`);
+      db.close();
+      await assert.rejects(new SqliteBackend({ database: file, table: 'runs' }).init(), (error) =>
+        isAnarchonError(error, 'ANARCHON_STORE_FORMAT'),
+      );
+      ran.push('sqlite');
+    }
+    if (ran.length === 0) t.skip('no PostgreSQL and no node:sqlite');
   });
 
   describe('history keeps one record per attempt, and a small historySize is fine', async () => {

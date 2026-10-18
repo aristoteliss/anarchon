@@ -163,6 +163,16 @@ Other examples in the repository:
 | [`examples/run-data.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/run-data.ts) | [Run data](../../guides/run-data/): the scheduler's, a job's, a function read at each run, `runNow()` and `setData()` |
 | [`examples/nestjs`](https://github.com/aristoteliss/anarchon/tree/main/examples/nestjs) | A small [NestJS](../nestjs/#declaring-jobs-with-decorators) app whose providers declare jobs with decorators. Checked on NestJS 11 and 12 |
 
+Real-life setups: each is a situation solved with a different set of options, and its header explains every choice.
+
+| Example | Situation | Options approach |
+| --- | --- | --- |
+| [`examples/billing.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/billing.ts) | Charge customers once a day, and still charge after an outage | `maxAttempts: 1`, `catchUpMs`, `timeoutMs`, `timezone`, writes keyed by `ctx.slot` |
+| [`examples/cache-refresh.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/cache-refresh.ts) | A cheap refresh every few seconds on three instances | `jitterMs` to spread it, a short `maxLateMs`, `catchUpMs: 0`, a small `historySize` |
+| [`examples/nightly-export.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/nightly-export.ts) | A long export interrupted by a deploy | `ctx.signal` between pages, a checkpoint per run, `ctx.attempt`, `stop({ timeoutMs })` |
+| [`examples/tenants.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/tenants.ts) | The same jobs per tenant, each in its own time zone | one job per tenant, `timezone` and `data` per job, a data function, `remove()`, `runNow()` with data |
+| [`examples/broker-notifications.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/broker-notifications.ts) | Only RabbitMQ or NATS: no leases | every run sends everything outstanding, `maxLateMs` under the broker's memory, no lease options |
+
 ## Seeing what an instance does
 
 Turn on the built-in log while you investigate:

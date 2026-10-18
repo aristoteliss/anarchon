@@ -360,7 +360,7 @@ import { NatsBackend, PostgresBackend, RabbitMQBackend, RedisBackend, Scheduler,
 
 new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
 new Scheduler({ backend: new ValkeyBackend({ valkey: 'redis://localhost:6390' }) });
-new Scheduler({ backend: new PostgresBackend({ connection: 'postgres://user:pass@db/app' }) });
+new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
 new Scheduler({ backend: new SqliteBackend({ database: './anarchon.db' }) });
 new Scheduler({ backend: new RabbitMQBackend({ url: 'amqp://localhost' }) });
 new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222' }) });
@@ -385,7 +385,7 @@ new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222' }) }
 `new ValkeyBackend(options)` takes the same options, with `valkey` in place of `redis`. Its `strategy` can't be `'idmp'`, which Valkey doesn't support: that is a type error, not an error from `start()`.
 
 Notes:
-- **Postgres and SQLite** create two tables on start: `anarchon_runs` (one row per run: attempt, token, status, lease end) and `anarchon_runs_attempts` (one row per attempt: the history). Postgres adds `anarchon_runs_jobs`. Pick another name with `table` (Postgres may include a schema). Leases use the database's clock.
+- **Postgres and SQLite** create two tables on start: `anarchon_runs` (one row per run: attempt, token, status, lease end) and `anarchon_runs_attempts` (one row per attempt: the history). Postgres adds `anarchon_runs_jobs`, and both keep the store format in `anarchon_runs_meta`. Pick another name with `table` (Postgres may include a schema). Leases use the database's clock.
 - **SQLite** only coordinates processes that open the same file: one machine, or a volume with working file locks (not NFS). For several machines, use Postgres or a libSQL server (`@libsql/client` with a remote URL).
 - **RabbitMQ and NATS** remember a run for `slotTtlMs` / `duplicateWindowMs` (default 5 min), so `jitterMs + maxLateMs` must be shorter. Job names may only use letters, digits, `_` and `-`. History is kept by count only, so `historyTtlMs` is refused; NATS keeps the largest `historySize` of the backend and its jobs for every job. A claim whose answer is lost (connection dropped mid-publish) is skipped by that instance rather than risk running twice.
 
@@ -429,6 +429,16 @@ npx tsx examples/run-data.ts            # run data: the scheduler's, a job's, a 
 pnpm --filter anarchon-example-nestjs start         # a very small NestJS app whose providers declare jobs with decorators (examples/nestjs)
 pnpm --filter anarchon-example-nestjs start:nest11  # the same source on NestJS 11
 pnpm --filter anarchon-example-nestjs test          # checks the app on NestJS 11 and 12
+```
+
+Real-life setups, each a situation solved with a different set of options (the header of each file explains every choice):
+
+```sh
+npx tsx examples/billing.ts               # charge once a day: never twice (maxAttempts 1), caught up after an outage (catchUpMs)
+npx tsx examples/cache-refresh.ts         # a cheap refresh every 3 s on 3 instances: jitter, a short maxLateMs, no catch-up
+npx tsx examples/nightly-export.ts        # a long export interrupted by a deploy, resumed from a checkpoint by another instance
+npx tsx examples/tenants.ts               # per-tenant jobs and time zones, a fresh token per run, tenants added and removed live
+npx tsx examples/broker-notifications.ts  # RabbitMQ or NATS only, no leases: each run sends everything outstanding
 ```
 
 All but `basic.ts` need no server (`quick-start.ts` always uses a SQLite file): they use a SQLite file in the temp folder unless `BACKEND=redis` or

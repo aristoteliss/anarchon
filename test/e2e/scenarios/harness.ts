@@ -184,8 +184,6 @@ const completed = (e: Execution) => e.end !== null && !e.aborted && !e.killed;
 const onTimeRun = (e: Ev) => e.type === 'run-start' && (e.reason ?? 'scheduled') === 'scheduled';
 const describe = (e: Execution) => `${e.instance}#${e.attempt}${e.reason !== 'scheduled' ? `(${e.reason})` : ''}`;
 
-// ------------------------------------------------------------------ scenarios
-
 export interface ScenarioResult {
   name: string;
   summary: string;

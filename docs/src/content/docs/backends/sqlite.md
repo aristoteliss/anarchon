@@ -76,6 +76,7 @@ Created on `start()`:
 | --- | --- | --- |
 | `<table>` | run | attempt, token, status, runner, lease end |
 | `<table>_attempts` | attempt | who, why, when, how it ended (the history) |
+| `<table>_meta` | setting | the store format, so a newer anarchon's data is never misread |
 
 ## How one instance wins
 
@@ -123,6 +124,7 @@ Things to know about a remote libSQL server:
 
 - It is still SQLite: **one writer at a time for the whole database**, across every table. Heavy write traffic from the rest of your app on the same database slows claims down.
 - Transactions run over HTTP. If a process dies in the middle of a claim transaction, the server keeps that transaction's write lock until it gives up on it, a few seconds later. During that time other writers wait. anarchon keeps transactions rare (only claims that can win), so this window is small, but it exists.
+- Keep `leaseMs` well above the slowest claim under load. With many instances, every write waits its turn on the one server: a lease of a few seconds can run out while a healthy runner's heartbeat waits, and a backup then takes the run over. The default, 30 seconds, leaves ample room.
 - Each claim is several network round trips, so it is slower than Redis or PostgreSQL.
 
 For several machines, PostgreSQL or Redis is the sturdier choice if you have either.

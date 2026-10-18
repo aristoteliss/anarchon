@@ -1,9 +1,9 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { EventEmitter } from 'node:events';
-import { hostname } from 'node:os';
-
-import type { RegisterOptions } from '../decorators';
+import type { DeclaredJob, RegisterOptions } from '../decorators';
+import { coded } from '../errors';
+import { AT_JOB_OPTIONS, CRON_JOB_OPTIONS, EVERY_JOB_OPTIONS, keysOf } from '../option-keys';
 import {
   type ConfigureOptions,
   configure,
@@ -30,22 +30,25 @@ import type {
   JobInfo,
   JobOptions,
   JobOptionsFor,
-  LeaseSchedulerOptions,
   Logger,
   RunRecord,
   SchedulerErrorEvent,
   SchedulerEvents,
   SchedulerOptions,
 } from '../types';
-import { errorMessage, intInRange, nonNegativeInt, positiveInt } from '../util';
+import { errorMessage, intInRange, refuseUnknown } from '../util';
 import { ClaimOnlyRunner } from './claim-only-runner';
 import type { SchedulerCore } from './core';
 import { layerData } from './data';
 import { Executor } from './executor';
-import { createJob, type Job, type JobDefaults, refuseWithoutLeases } from './job';
+import { createJob, type Job, type JobDefaults } from './job';
 import { LeaseRunner } from './lease-runner';
 import { logRuns } from './logging';
+import { readOptions } from './options';
 import { JobTimers } from './timers';
+
+const RUN_NOW_OPTIONS = keysOf<{ data?: JobData }>({ data: true });
+const STOP_OPTIONS = keysOf<{ timeoutMs?: number }>({ timeoutMs: true });
 
 /**
  * Runs cron and interval jobs once per scheduled time across any number of instances. No leader and
@@ -152,6 +155,10 @@ export class Scheduler<B extends Backend = Backend> {
   private abort = new AbortController();
   private ready: Promise<void> | undefined;
   private stopping: Promise<void> | undefined;
+  /** stop() has run and start() hasn't since: a read opens the connection only for itself. */
+  private stopped = false;
+  /** Reads (history, lastRun) in progress. */
+  private reads = 0;
 
   /**
    * Creates a scheduler. Nothing connects and nothing runs until {@link Scheduler.start | start()}.
@@ -178,40 +185,20 @@ export class Scheduler<B extends Backend = Backend> {
    * ```
    */
   constructor(options: SchedulerOptions<B>) {
-    // Also for callers without types, who can leave the options out altogether.
-    if (!options?.backend) {
-      throw new TypeError('A scheduler needs a backend, e.g. backend: new RedisBackend({ redis: url }). No store is assumed');
-    }
-    if (options.name !== undefined && (typeof options.name !== 'string' || options.name === '')) {
-      throw new TypeError('name must be a non-empty string');
-    }
-    this.name = options.name;
-    this.dataSource = options.data;
-    this.instanceId = options.instanceId ?? `${hostname()}:${process.pid}`;
-    if (typeof this.instanceId !== 'string' || this.instanceId === '') throw new TypeError('instanceId must be a non-empty string');
-    this.backend = options.backend;
-    refuseWithoutLeases(this.backend, options, ['leaseMs', 'heartbeatMs']);
-    const lease = options as LeaseSchedulerOptions;
-    this.defaults = {
-      jitterMs: nonNegativeInt('jitterMs', options.jitterMs ?? 2_000),
-      maxLateMs: positiveInt('maxLateMs', options.maxLateMs ?? 60_000),
-      historySize: positiveInt('historySize', options.historySize ?? 1_000),
-      timezone: options.timezone,
-    };
-    if (options.historyTtlMs !== undefined) this.defaults.historyTtlMs = positiveInt('historyTtlMs', options.historyTtlMs);
-    const leaseMs = positiveInt('leaseMs', lease.leaseMs ?? 30_000);
-    const heartbeatMs = positiveInt('heartbeatMs', lease.heartbeatMs ?? Math.min(5_000, Math.floor(leaseMs / 6)));
-    if (heartbeatMs * 2 >= leaseMs) {
-      throw new RangeError(`heartbeatMs (${heartbeatMs}) must be under half of leaseMs (${leaseMs}), so a lease is renewed at least twice`);
-    }
-    this.logger = options.logger ?? console;
+    const settings = readOptions(options);
+    this.name = settings.name;
+    this.backend = settings.backend;
+    this.instanceId = settings.instanceId;
+    this.dataSource = settings.data;
+    this.defaults = settings.defaults;
+    this.logger = settings.logger;
 
     const core: SchedulerCore = {
       instanceId: this.instanceId,
       backend: this.backend,
-      leaseMs,
-      heartbeatMs,
-      unrefTimers: options.unrefTimers ?? false,
+      leaseMs: settings.leaseMs,
+      heartbeatMs: settings.heartbeatMs,
+      unrefTimers: settings.unrefTimers,
       isRunning: () => this.state === 'running',
       isIdle: () => this.state === 'idle',
       schedulerData: () => this.dataSource,
@@ -225,24 +212,11 @@ export class Scheduler<B extends Backend = Backend> {
     this.claimOnly = new ClaimOnlyRunner(core, this.executor);
     this.leases = this.backend.runs ? new LeaseRunner(core, this.executor, this.backend.runs) : undefined;
     this.timers = new JobTimers(core, (job, slot) => void this.track(this.fire(job, slot)));
-    if (options.log) logRuns((event, listener) => this.on(event, listener), this.logger);
+    if (settings.log) logRuns((event, listener) => this.on(event, listener), this.logger);
     this.host = {
       scheduler: this,
       name: this.name,
-      add: (job, name, { timezone, ...defaults }) => {
-        // The object's data and the job's are two layers, not one replacing the other.
-        const data = layerData(defaults.data, job.options.data) as JobData | undefined;
-        const options = { ...defaults, ...job.options, ...(data === undefined ? {} : { data }) };
-        if (job.type === 'cron') {
-          this.cron(name, job.expression, job.handler, { ...(timezone === undefined ? {} : { timezone }), ...options });
-        } else if (job.type === 'every') {
-          this.every(name, job.interval, job.handler, options);
-        } else {
-          // register() defaults cover every job of the object; a one-off job has nothing to overlap.
-          const { overlap, ...once } = defaults;
-          this.at(name, job.when, job.handler, { ...once, ...job.options, ...(data === undefined ? {} : { data }) });
-        }
-      },
+      add: (job, name, defaults) => this.addDeclared(job, name, defaults),
       remove: (name) => this.remove(name),
       has: (name) => this.registry.has(name),
       // Not at once: a scheduler is created while an object's jobs are being added, and starting
@@ -411,8 +385,6 @@ export class Scheduler<B extends Backend = Backend> {
     setDefaultScheduler(scheduler ? hostOf(scheduler) : undefined);
   }
 
-  // ---------------------------------------------------------------- jobs
-
   /**
    * Adds a cron job. The expression has 5 fields (minute hour day month weekday), or 6 with seconds
    * first. Times are in `options.timezone`, else the scheduler's `timezone`, else the server's zone.
@@ -431,11 +403,12 @@ export class Scheduler<B extends Backend = Backend> {
    * ```
    */
   cron<Data = unknown>(name: string, expression: string, handler: JobHandler<Data>, options: JobOptionsFor<B, CronJobOptions> = {}): this {
+    refuseUnknown(`Job "${name}"`, options, CRON_JOB_OPTIONS);
     let schedule: Schedule;
     try {
       schedule = cronSchedule(expression, options.timezone ?? this.defaults.timezone);
     } catch (error) {
-      throw new Error(`Job "${name}": invalid cron "${expression}": ${errorMessage(error)}`);
+      throw coded(new Error(`Job "${name}": invalid cron "${expression}": ${errorMessage(error)}`), 'ANARCHON_INVALID_ARGUMENT');
     }
     return this.add(name, schedule, handler, options);
   }
@@ -474,8 +447,10 @@ export class Scheduler<B extends Backend = Backend> {
     handler: JobHandler<Data>,
     options: JobOptionsFor<B, EveryJobOptions> = {},
   ): this {
+    refuseUnknown(`Job "${name}"`, options, EVERY_JOB_OPTIONS);
     const ms = parseDuration(interval);
-    if (ms < 1_000) throw new RangeError(`Job "${name}": the interval must be at least 1s (got ${ms} ms)`);
+    if (ms < 1_000)
+      throw coded(new RangeError(`Job "${name}": the interval must be at least 1s (got ${ms} ms)`), 'ANARCHON_INVALID_ARGUMENT');
     return this.add(name, everySchedule(ms, options.offsetMs ?? 0), handler, options);
   }
 
@@ -498,9 +473,11 @@ export class Scheduler<B extends Backend = Backend> {
     handler: JobHandler<Data>,
     options: JobOptionsFor<B, AtJobOptions> = {},
   ): this {
-    if ((options as JobOptions).overlap !== undefined) throw new TypeError(`Job "${name}": a one-off job takes no overlap`);
+    if ((options as JobOptions).overlap !== undefined)
+      throw coded(new TypeError(`Job "${name}": a one-off job takes no overlap`), 'ANARCHON_UNSUPPORTED');
+    refuseUnknown(`Job "${name}"`, options, AT_JOB_OPTIONS);
     const time = when instanceof Date ? when.getTime() : typeof when === 'number' ? when : Date.parse(when);
-    if (!Number.isFinite(time)) throw new RangeError(`Job "${name}": invalid date ${String(when)}`);
+    if (!Number.isFinite(time)) throw coded(new RangeError(`Job "${name}": invalid date ${String(when)}`), 'ANARCHON_INVALID_ARGUMENT');
     return this.add(name, onceSchedule(time), handler, options);
   }
 
@@ -580,8 +557,6 @@ export class Scheduler<B extends Backend = Backend> {
     return true;
   }
 
-  // ---------------------------------------------------------------- lifecycle
-
   /**
    * Connects to the backend and starts scheduling. Jobs can be added before or after. Calling it
    * again while running does nothing.
@@ -607,8 +582,9 @@ export class Scheduler<B extends Backend = Backend> {
   async start(): Promise<void> {
     if (this.state === 'running') return;
     for (const warning of schedulerStarting(this.host)) this.logger.warn(`[anarchon] ${warning}`);
-    if (this.state !== 'idle') throw new Error(`Cannot start while ${this.state}`);
+    if (this.state !== 'idle') throw coded(new Error(`Cannot start while ${this.state}`), 'ANARCHON_STATE');
     this.state = 'starting';
+    this.stopped = false;
     try {
       await this.ensureReady();
       await Promise.all([...this.registry.values()].map((job) => this.prepare(job)));
@@ -617,7 +593,13 @@ export class Scheduler<B extends Backend = Backend> {
       await this.closeBackend();
       throw error;
     }
-    if ((this.state as string) !== 'starting') return; // stop() was called meanwhile
+    if ((this.state as string) !== 'starting') {
+      // stop() was called meanwhile, and closed the backend while it was still being connected or
+      // prepared: what reconnected after that must be closed too.
+      await this.stopping;
+      if ((this.state as string) === 'idle') await this.closeBackend();
+      return;
+    }
     this.abort = new AbortController();
     this.state = 'running';
     for (const job of this.registry.values()) this.schedule(job);
@@ -640,6 +622,7 @@ export class Scheduler<B extends Backend = Backend> {
    * ```
    */
   stop(options: { timeoutMs?: number } = {}): Promise<void> {
+    refuseUnknown('stop()', options, STOP_OPTIONS);
     schedulerStopped(this.host);
     this.stopping ??= this.doStop(options.timeoutMs ?? 30_000).finally(() => {
       this.stopping = undefined;
@@ -663,8 +646,9 @@ export class Scheduler<B extends Backend = Backend> {
    * ```
    */
   async runNow(name: string, options: { data?: JobData } = {}): Promise<RunRecord> {
+    refuseUnknown('runNow()', options, RUN_NOW_OPTIONS);
     const job = this.getJob(name);
-    if (this.state !== 'running') throw new Error('Call start() before runNow()');
+    if (this.state !== 'running') throw coded(new Error('Call start() before runNow()'), 'ANARCHON_STATE');
     await this.prepare(job);
     return this.leases ? this.leases.runManual(job, options.data) : this.claimOnly.runManual(job, options.data);
   }
@@ -686,12 +670,12 @@ export class Scheduler<B extends Backend = Backend> {
     return this;
   }
 
-  // ---------------------------------------------------------------- read API
-
   /**
    * The latest runs of a job across all instances, newest first: who ran it, when it started, when
    * it finished and how it ended. One record per attempt, so a run that was taken over shows twice.
-   * Works for any job name, even one not registered here, and before start().
+   * Works for any job name, even one not registered here, before start() and after stop(). Before
+   * start(), the connection it opens stays open until stop(); after stop(), it is closed again
+   * when the read is done, so the process can still exit.
    *
    * @param limit 1 to 10000. Default 20.
    *
@@ -713,8 +697,15 @@ export class Scheduler<B extends Backend = Backend> {
    */
   async history(name: string, limit = 20): Promise<RunRecord[]> {
     intInRange('limit', limit, 1, 10_000);
-    await this.ensureReady();
-    return this.backend.history(name, limit);
+    this.reads++;
+    try {
+      await this.ensureReady();
+      return await this.backend.history(name, limit);
+    } finally {
+      this.reads--;
+      // After stop(), nothing else will close what this read opened, and it would keep the process alive.
+      if (this.reads === 0 && this.stopped && this.state === 'idle') await this.closeBackend();
+    }
   }
 
   /**
@@ -769,8 +760,6 @@ export class Scheduler<B extends Backend = Backend> {
     }));
   }
 
-  // ---------------------------------------------------------------- events
-
   /**
    * Listens for what happens on this instance. See {@link SchedulerEvents} for every event and its
    * payload. A listener that throws is logged and doesn't affect the run.
@@ -822,10 +811,24 @@ export class Scheduler<B extends Backend = Backend> {
     return this;
   }
 
-  // ---------------------------------------------------------------- scheduling
+  /** Adds a job declared with a decorator, with the `register()` defaults of its object under its own options. */
+  private addDeclared(job: DeclaredJob, name: string, { timezone, ...defaults }: NonNullable<RegisterOptions['defaults']>): void {
+    // The object's data and the job's are two layers, not one replacing the other.
+    const data = layerData(defaults.data, job.options.data) as JobData | undefined;
+    const options = { ...defaults, ...job.options, ...(data === undefined ? {} : { data }) };
+    if (job.type === 'cron') {
+      this.cron(name, job.expression, job.handler, { ...(timezone === undefined ? {} : { timezone }), ...options });
+    } else if (job.type === 'every') {
+      this.every(name, job.interval, job.handler, options);
+    } else {
+      // register() defaults cover every job of the object; a one-off job has nothing to overlap.
+      const { overlap, ...once } = defaults;
+      this.at(name, job.when, job.handler, { ...once, ...job.options, ...(data === undefined ? {} : { data }) });
+    }
+  }
 
   private add(name: string, schedule: Schedule, handler: JobHandler<never>, options: JobOptions): this {
-    if (this.registry.has(name)) throw new Error(`Job "${name}" is already registered`);
+    if (this.registry.has(name)) throw coded(new Error(`Job "${name}" is already registered`), 'ANARCHON_JOB_EXISTS');
     const job = createJob(name, schedule, handler, options, this.defaults, this.backend);
     this.registry.set(name, job);
     if (this.state === 'running') this.schedule(job);
@@ -850,8 +853,6 @@ export class Scheduler<B extends Backend = Backend> {
     return this.leases ? this.leases.run(job, slot, 'scheduled') : this.claimOnly.run(job, slot);
   }
 
-  // ---------------------------------------------------------------- plumbing
-
   private async doStop(timeoutMs: number): Promise<void> {
     if (this.state === 'running' || this.state === 'starting') {
       this.state = 'stopping';
@@ -862,6 +863,7 @@ export class Scheduler<B extends Backend = Backend> {
       this.leases?.stopRenewing();
     }
     this.state = 'idle';
+    this.stopped = true;
     await this.closeBackend();
   }
 
@@ -925,7 +927,7 @@ export class Scheduler<B extends Backend = Backend> {
 
   private getJob(name: string): Job {
     const job = this.registry.get(name);
-    if (!job) throw new Error(`Unknown job "${name}"`);
+    if (!job) throw coded(new Error(`Unknown job "${name}"`), 'ANARCHON_UNKNOWN_JOB');
     return job;
   }
 

@@ -5,7 +5,7 @@
  *
  *   npx tsx examples/basic.ts
  *   REDIS_URL=redis://localhost:6390 npx tsx examples/basic.ts   # Valkey works the same
- *   BACKEND=postgres POSTGRES_URL=postgres://user:pass@localhost/db npx tsx examples/basic.ts
+ *   BACKEND=postgres POSTGRES_URL=postgres://localhost/app npx tsx examples/basic.ts
  *   BACKEND=sqlite npx tsx examples/basic.ts                       # ./anarchon.db, same machine only
  *
  * Each run happens on exactly one of them, and different runs land on different instances.

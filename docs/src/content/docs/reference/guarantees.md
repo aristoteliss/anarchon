@@ -137,6 +137,12 @@ scheduler.every(
 );
 ```
 
+## Upgrades
+
+- **Rolling deploys within a major version are supported.** Instances on two releases of the same major version can share one store while the new one rolls out: data is only extended, and each version keeps the fields it doesn't know.
+- **The store records its format.** If a release ever has to change the layout in a way older versions can't read, its changelog says so, every instance must be stopped before the upgrade, and an older instance that meets the new data refuses to start (`ANARCHON_STORE_FORMAT`) instead of misreading it.
+- **Run one version on all instances of a service** once the deploy is done. Run times come from the cron library anarchon depends on, and instances must compute the same ones.
+
 ## Next
 
 - [Writing handlers](../../guides/writing-handlers/)

@@ -59,15 +59,15 @@ interface Backend {
 This backend keeps everything in memory. It only coordinates schedulers in the **same process**, which makes it useful for unit tests and for seeing the contract in the smallest form.
 
 ```ts
-import type { Backend, ClaimInput, RunRecord, StoredResult } from 'anarchon';
+import { type Backend, buildHistory, type ClaimInput, type ClaimRecord, type RunRecord, type StoredResult } from 'anarchon';
 
 export class MemoryBackend implements Backend {
   readonly name = 'memory';
   /** Claims are never forgotten here, so there is no limit on how late an instance may be. */
   readonly dedupeWindowMs = Infinity;
 
-  private readonly claims = new Map<string, ClaimInput & { at: number; manual: boolean }>();
-  private readonly results = new Map<string, StoredResult>();
+  private readonly claims = new Map<string, ClaimRecord & { job: string; token: string }>();
+  private readonly results = new Map<string, StoredResult[]>();
 
   async init(): Promise<void> {}
   async prepareJob(): Promise<void> {}
@@ -78,37 +78,23 @@ export class MemoryBackend implements Backend {
     const key = `${input.job}|${input.slot}`;
     const existing = this.claims.get(key);
     if (existing) return existing.token === input.token; // the same claim sent again is still ours
-    this.claims.set(key, { ...input, at: Date.now(), manual: false });
+    this.claims.set(key, { job: input.job, token: input.token, slot: input.slot, by: input.instanceId, at: Date.now(), manual: false });
     return true;
   }
 
-  async recordManualRun(input: ClaimInput): Promise<void> {
-    this.claims.set(`${input.job}|${input.slot}|manual`, { ...input, at: Date.now(), manual: true });
+  async recordManualRun(input: ClaimInput): Promise<undefined> {
+    const claim = { job: input.job, token: input.token, slot: input.slot, by: input.instanceId, at: Date.now(), manual: true };
+    this.claims.set(`${input.job}|${input.slot}|manual`, claim);
+    return undefined; // the slot asked for is the one used
   }
 
   async saveResult(job: string, result: StoredResult): Promise<void> {
-    this.results.set(`${job}|${result.slot}|${result.by}`, result);
+    this.results.set(job, [...(this.results.get(job) ?? []), result]);
   }
 
   async history(job: string, limit: number): Promise<RunRecord[]> {
-    return [...this.claims.values()]
-      .filter((claim) => claim.job === job)
-      .sort((a, b) => b.slot - a.slot)
-      .slice(0, limit)
-      .map((claim) => {
-        const result = this.results.get(`${job}|${claim.slot}|${claim.instanceId}`);
-        return {
-          job,
-          slot: claim.slot,
-          scheduledAt: new Date(claim.slot),
-          instanceId: claim.instanceId,
-          manual: claim.manual,
-          attempt: 1,
-          status: result?.status ?? 'running',
-          startedAt: new Date(result?.startedAt ?? claim.at),
-          ...(result ? { finishedAt: new Date(result.finishedAt), durationMs: result.durationMs, error: result.error } : {}),
-        };
-      });
+    const claims = [...this.claims.values()].filter((claim) => claim.job === job);
+    return buildHistory({ job, claims, results: this.results.get(job) ?? [], limit });
   }
 }
 ```
@@ -187,6 +173,39 @@ const backend = new SqliteBackend({
 });
 ```
 
+## Another SQL database
+
+For a SQL database, extend `SqlBackend` instead of writing the contract yourself: it brings the tables, the claim transaction, leases and history. You give the connection, a check of the server, and a `SqlDialect`: what differs between databases (the integer type, the server's clock, row locking, placeholders).
+
+```ts
+import { fromSqliteDatabase, SqlBackend, type SqlClient, type SqlDialect } from 'anarchon';
+
+class EmbeddedSqlBackend extends SqlBackend {
+  readonly name = 'embedded-sql';
+  protected readonly dialect: SqlDialect = {
+    bigint: 'INTEGER',
+    nowMs: `CAST(ROUND((julianday('now') - 2440587.5) * 86400000.0) AS INTEGER)`,
+    forUpdate: '',
+    placeholders: (sql) => sql,
+    extraTables: () => [],
+    serialize: async () => {},
+    isAlreadyCreated: () => false,
+  };
+
+  constructor() {
+    super('embedded_runs');
+  }
+
+  protected async connect(): Promise<{ client: SqlClient; owned: boolean }> {
+    return { client: fromSqliteDatabase(openDatabase()), owned: true };
+  }
+
+  protected async checkServer(): Promise<void> {}
+}
+```
+
+`nowMs` must read the database server's clock, so all instances agree on lease times; `forUpdate` and `serialize` must make two claims of one job take turns. The PostgreSQL and SQLite backends are the reference.
+
 ## Testing a backend
 
 Whatever the store, test the contract directly:
@@ -196,6 +215,18 @@ Whatever the store, test the contract directly:
 3. **History.** A claim plus a saved result comes back from `history()` as one record with the right instance and status.
 
 anarchon's own suite runs these against every built-in backend.
+
+## Compatibility
+
+A backend you write keeps working across minor releases of anarchon:
+
+- **New members of `Backend` and `RunStore` are optional.** The scheduler has a fallback for a backend without them, so your class compiles and runs unchanged. A required member is only added in a major release.
+- **New fields of what you receive are optional to read.** `ClaimInput`, `RunClaim` and `JobLimits` may gain fields; a backend that ignores them keeps working.
+- **New fields of what you return are optional.** Build `history()` with `buildHistory()`, and the records gain new fields without changes on your side.
+- **`ClaimOutcome` may gain kinds.** Return the kinds you know; the scheduler handles a kind it doesn't know like `'done'`.
+- **Errors you throw** reach the user as they are. Give them a `code` of your own if callers should tell them apart.
+
+What your backend stores is yours to keep compatible: during a rolling deploy, two versions of your backend may share the store.
 
 ## Next
 

@@ -1,0 +1,830 @@
+// backends/nats.d.ts
+import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
+export interface NatsConnectionLike {
+    close(): Promise<void>;
+}
+export interface NatsBackendOptions {
+    servers?: string | string[];
+    connection?: NatsConnectionLike;
+    stream?: string;
+    prefix?: string;
+    duplicateWindowMs?: number;
+    historySize?: number;
+    replicas?: number;
+}
+export declare class NatsBackend implements Backend {
+    readonly name = "nats";
+    readonly dedupeWindowMs: number;
+    private readonly servers;
+    private readonly userConnection;
+    private readonly stream;
+    private readonly prefix;
+    private historySize;
+    private streamHistorySize;
+    private readonly replicas;
+    private state;
+    constructor(options?: NatsBackendOptions);
+    checkJob(job: JobLimits): void;
+    init(): Promise<void>;
+    prepareJob(_job: string, historySize: number): Promise<void>;
+    claim(input: ClaimInput): Promise<boolean>;
+    recordManualRun(input: ClaimInput): Promise<undefined>;
+    saveResult(job: string, result: StoredResult): Promise<void>;
+    history(job: string, limit: number): Promise<RunRecord[]>;
+    close(): Promise<void>;
+    private getState;
+    private ensureStream;
+    private subject;
+}
+
+// backends/rabbitmq.d.ts
+import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
+export interface RabbitMQConnectionLike {
+    createChannel(): Promise<unknown>;
+    createConfirmChannel(): Promise<unknown>;
+    close(): Promise<void>;
+    on(event: string, listener: (...args: never[]) => void): unknown;
+    readonly connection: {
+        readonly serverProperties: {
+            version?: string;
+            product?: string;
+        };
+    };
+}
+export interface RabbitMQBackendOptions {
+    url?: string;
+    connection?: RabbitMQConnectionLike;
+    prefix?: string;
+    slotTtlMs?: number;
+}
+export declare class RabbitMQBackend implements Backend {
+    readonly name = "rabbitmq";
+    readonly dedupeWindowMs: number;
+    private readonly url;
+    private readonly prefix;
+    private readonly userConnection;
+    private connection;
+    private confirm;
+    private readonly won;
+    constructor(options?: RabbitMQBackendOptions);
+    checkJob(job: JobLimits): void;
+    init(): Promise<void>;
+    prepareJob(job: string, historySize: number): Promise<void>;
+    claim(input: ClaimInput): Promise<boolean>;
+    recordClaim(input: ClaimInput): Promise<void>;
+    recordManualRun(input: ClaimInput): Promise<undefined>;
+    saveResult(job: string, result: StoredResult): Promise<void>;
+    history(job: string, limit: number): Promise<RunRecord[]>;
+    close(): Promise<void>;
+    private getConnection;
+    private getConfirmChannel;
+    private declare;
+    private publish;
+    private append;
+    private lastOffset;
+    private readFrom;
+    private slotQueue;
+    private historyQueue;
+}
+
+// backends/redis/client.d.ts
+export interface KeyValueClient {
+    send(command: string, args: ReadonlyArray<string | number>): Promise<unknown>;
+    close?(): Promise<void>;
+}
+export interface KeyValueConnectionOptions {
+    host?: string;
+    port?: number;
+    username?: string;
+    password?: string;
+    db?: number;
+}
+export interface IORedisLike {
+    call(command: string, args: Array<string | number>): Promise<unknown>;
+    status: string;
+    quit(): Promise<unknown>;
+}
+export interface NodeRedisLike {
+    sendCommand(args: string[]): Promise<unknown>;
+    isOpen: boolean;
+}
+export interface ValkeyGlideLike {
+    customCommand(args: string[]): Promise<unknown>;
+}
+export type KeyValueConnection = KeyValueClient | IORedisLike | NodeRedisLike | ValkeyGlideLike | KeyValueConnectionOptions | string;
+export declare function checkConnectionOptions(label: string, input: KeyValueConnection | undefined): void;
+export declare function resolveRedis(input: KeyValueConnection | undefined): Promise<{
+    client: KeyValueClient;
+    owned: boolean;
+}>;
+export declare function fromIORedis(client: IORedisLike, owned?: boolean): KeyValueClient;
+export declare function fromNodeRedis(client: NodeRedisLike): KeyValueClient;
+export declare function fromValkeyGlide(client: ValkeyGlideLike): KeyValueClient;
+
+// backends/redis/index.d.ts
+import type { Backend, ClaimInput, JobLimits, KeyValueStrategy, KeyValueStrategyName, RunRecord, RunStore, StoredResult } from '../../types';
+import { type KeyValueConnection } from './client';
+export interface RedisBackendOptions<S extends KeyValueStrategyName = KeyValueStrategyName> {
+    redis?: KeyValueConnection;
+    strategy?: S | KeyValueStrategy<S>;
+    prefix?: string;
+}
+export declare class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName> implements Backend {
+    readonly name: string;
+    readonly strategy: S;
+    readonly dedupeWindowMs: number;
+    readonly runs: S extends 'lease' ? RunStore : undefined;
+    private readonly lease?;
+    private readonly prefix;
+    private readonly input;
+    private readonly idmp;
+    private readonly scriptWindowMs;
+    private connection;
+    private ready;
+    constructor(options?: RedisBackendOptions<S>);
+    checkJob(job: JobLimits): void;
+    init(): Promise<void>;
+    prepareJob(job: string): Promise<void>;
+    claim(input: ClaimInput): Promise<boolean>;
+    recordManualRun(input: ClaimInput): Promise<number | undefined>;
+    saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void>;
+    history(job: string, limit: number): Promise<RunRecord[]>;
+    close(): Promise<void>;
+    private getConnection;
+    private getStrategy;
+    private streamKey;
+    private manualKey;
+    private resultsKey;
+}
+export interface ValkeyBackendOptions<S extends KeyValueStrategyName<'valkey'> = KeyValueStrategyName<'valkey'>> extends Omit<RedisBackendOptions<S>, 'redis'> {
+    valkey?: KeyValueConnection;
+}
+export declare class ValkeyBackend<S extends KeyValueStrategyName<'valkey'> = KeyValueStrategyName<'valkey'>> extends RedisBackend<S> {
+    readonly name: string;
+    constructor(options?: ValkeyBackendOptions<S>);
+}
+export * from './client';
+export { LeaseStore } from './lease';
+
+// backends/redis/lease.d.ts
+import type { ClaimOutcome, RunClaim, RunRecord, RunStore, StoredResult } from '../../types';
+import type { KeyValueClient } from './client';
+export declare class LeaseStore implements RunStore {
+    private readonly redis;
+    private readonly prefix;
+    private readonly scripts;
+    constructor(redis: () => Promise<KeyValueClient>, prefix: string);
+    key(job: string, part: 'state' | 'active' | 'slots' | 'runs' | 'results'): string;
+    claim(input: RunClaim): Promise<ClaimOutcome>;
+    heartbeat(job: string, slot: number, token: string, leaseMs: number): Promise<boolean>;
+    finish(job: string, slot: number, token: string, status: 'success' | 'failed' | 'interrupted'): Promise<boolean>;
+    release(job: string, slot: number, token: string): Promise<boolean>;
+    active(job: string): Promise<Array<{
+        slot: number;
+        attempt: number;
+        alive: boolean;
+    }>>;
+    saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void>;
+    history(job: string, limit: number): Promise<RunRecord[]>;
+}
+
+// backends/sql/base.d.ts
+import type { Backend, ClaimInput, ClaimOutcome, RunClaim, RunRecord, RunStore, StoredResult } from '../../types';
+export type SqlValue = string | number | null;
+export type SqlRow = Record<string, unknown>;
+export interface SqlQuery {
+    all(sql: string, params: ReadonlyArray<SqlValue>): Promise<SqlRow[]>;
+}
+export interface SqlClient extends SqlQuery {
+    transaction<T>(fn: (tx: SqlQuery) => Promise<T>): Promise<T>;
+    close?(): Promise<void>;
+}
+export interface SqlDialect {
+    readonly bigint: string;
+    readonly nowMs: string;
+    readonly forUpdate: string;
+    placeholders(sql: string): string;
+    readonly extraTables: (table: string) => string[];
+    serialize(tx: SqlQuery, table: string, job: string): Promise<void>;
+    isAlreadyCreated(error: unknown): boolean;
+}
+export declare function isIdentifier(name: string): boolean;
+export declare class Mutex {
+    private tail;
+    run<T>(fn: () => Promise<T>): Promise<T>;
+}
+export declare abstract class SqlBackend implements Backend, RunStore {
+    abstract readonly name: string;
+    readonly dedupeWindowMs: number;
+    readonly runs: RunStore;
+    protected readonly table: string;
+    protected readonly attempts: string;
+    private connection;
+    private ready;
+    protected constructor(table: string);
+    protected abstract connect(): Promise<{
+        client: SqlClient;
+        owned: boolean;
+    }>;
+    protected abstract readonly dialect: SqlDialect;
+    protected abstract checkServer(client: SqlClient): Promise<void>;
+    init(): Promise<void>;
+    prepareJob(): Promise<void>;
+    claim(input: ClaimInput): Promise<boolean>;
+    claim(input: RunClaim): Promise<ClaimOutcome>;
+    heartbeat(job: string, slot: number, token: string, leaseMs: number): Promise<boolean>;
+    finish(job: string, slot: number, token: string, status: 'success' | 'failed' | 'interrupted'): Promise<boolean>;
+    release(job: string, slot: number, token: string): Promise<boolean>;
+    active(job: string): Promise<Array<{
+        slot: number;
+        attempt: number;
+        alive: boolean;
+    }>>;
+    recordManualRun(input: ClaimInput): Promise<number>;
+    saveResult(job: string, result: StoredResult, _historySize: number, historyTtlMs?: number): Promise<void>;
+    history(job: string, limit: number): Promise<RunRecord[]>;
+    close(): Promise<void>;
+    private claimRun;
+    private takeoverWithoutWriting;
+    private startRun;
+    private recordAttempt;
+    private run;
+    private getReady;
+    private createTables;
+}
+
+// backends/sql/postgres.d.ts
+import { SqlBackend, type SqlClient, type SqlDialect, type SqlRow, type SqlValue } from './base';
+export interface PgPoolLike {
+    query(text: string, values?: unknown[]): Promise<{
+        rows: SqlRow[];
+    }>;
+    connect(): Promise<{
+        query(text: string, values?: unknown[]): Promise<{
+            rows: SqlRow[];
+        }>;
+        release(error?: unknown): void;
+    }>;
+    readonly idleCount: number;
+}
+export interface PgClientLike {
+    query(text: string, values?: unknown[]): Promise<{
+        rows: SqlRow[];
+    }>;
+}
+export interface PostgresJsLike {
+    unsafe(query: string, params?: unknown[]): PromiseLike<ArrayLike<SqlRow>>;
+    begin<T>(fn: (sql: {
+        unsafe(query: string, params?: unknown[]): PromiseLike<ArrayLike<SqlRow>>;
+    }) => Promise<T>): PromiseLike<T>;
+}
+export interface PostgresBackendOptions {
+    connection?: string | PgPoolLike | PgClientLike | PostgresJsLike | SqlClient;
+    table?: string;
+}
+export declare class PostgresBackend extends SqlBackend {
+    readonly name = "postgres";
+    protected readonly dialect: SqlDialect;
+    private readonly input;
+    constructor(options?: PostgresBackendOptions);
+    protected connect(): Promise<{
+        client: SqlClient;
+        owned: boolean;
+    }>;
+    protected checkServer(client: SqlClient): Promise<void>;
+}
+export declare function fromPgPool(pool: PgPoolLike): SqlClient;
+export declare function fromPgClient(client: PgClientLike): SqlClient;
+export declare function fromPostgresJs(sql: PostgresJsLike): SqlClient;
+export type { SqlClient, SqlValue };
+
+// backends/sql/sqlite.d.ts
+import { SqlBackend, type SqlClient, type SqlDialect, type SqlValue } from './base';
+export interface SqliteDatabaseLike {
+    prepare(sql: string): {
+        all(...params: unknown[]): unknown[];
+        run(...params: unknown[]): unknown;
+        reader?: boolean;
+    };
+    exec(sql: string): unknown;
+}
+export interface LibsqlClientLike {
+    readonly protocol?: string;
+    execute(statement: {
+        sql: string;
+        args: SqlValue[];
+    }): Promise<{
+        rows: ArrayLike<unknown>;
+    }>;
+    transaction(mode: 'write'): Promise<{
+        execute(statement: {
+            sql: string;
+            args: SqlValue[];
+        }): Promise<{
+            rows: ArrayLike<unknown>;
+        }>;
+        commit(): Promise<void>;
+        rollback(): Promise<void>;
+        close(): void;
+    }>;
+}
+export interface SqliteBackendOptions {
+    database?: string | SqliteDatabaseLike | LibsqlClientLike | SqlClient;
+    table?: string;
+    busyTimeoutMs?: number;
+}
+export declare class SqliteBackend extends SqlBackend {
+    readonly name = "sqlite";
+    protected readonly dialect: SqlDialect;
+    private readonly input;
+    private readonly busyTimeoutMs;
+    constructor(options?: SqliteBackendOptions);
+    protected connect(): Promise<{
+        client: SqlClient;
+        owned: boolean;
+    }>;
+    protected checkServer(client: SqlClient): Promise<void>;
+}
+export declare function fromSqliteDatabase(db: SqliteDatabaseLike): SqlClient;
+export declare function fromLibsql(client: LibsqlClientLike): SqlClient;
+export type { SqlClient, SqlValue };
+
+// decorators.d.ts
+import type { Scheduler } from './scheduler/scheduler';
+import type { AtJobOptions, CronJobOptions, EveryJobOptions, JobHandler, JobOptions } from './types';
+export interface JobPlacement {
+    scheduler?: string | Scheduler;
+}
+export type DecoratedJobOptions<Options> = Options & JobPlacement & {
+    name?: string;
+};
+type Declaration = {
+    name?: string;
+    scheduler?: string | object;
+} & ({
+    type: 'cron';
+    expression: string;
+    options: CronJobOptions;
+} | {
+    type: 'every';
+    interval: number | string;
+    options: EveryJobOptions;
+} | {
+    type: 'at';
+    when: Date | number | string;
+    options: AtJobOptions;
+});
+export type DeclaredJob = Declaration & {
+    name: string;
+    handler: JobHandler;
+};
+export interface JobDecorator {
+    <Data>(method: JobHandler<Data>, context: ClassMethodDecoratorContext): void;
+    <Method extends JobHandler<never>>(target: object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<Method>): void;
+}
+type AnyClass = abstract new (...args: never[]) => object;
+export interface ScheduledDecorator {
+    <Class extends AnyClass>(target: Class, context: ClassDecoratorContext<Class>): void;
+    <Class extends AnyClass>(target: Class): Class;
+}
+export interface RegisterOptions {
+    prefix?: string;
+    defaults?: JobOptions & Pick<CronJobOptions, 'timezone'>;
+}
+export declare function onObjectCreated(handler: (target: object) => void): void;
+export declare function declaredJobs(target: object): DeclaredJob[];
+export declare function markAdded(target: object): void;
+export declare function takeUnaddedWarnings(): string[];
+export declare function forgetUnadded(): void;
+export declare function Cron(expression: string, options?: DecoratedJobOptions<CronJobOptions>): JobDecorator;
+export declare function Cron(name: string, expression: string, options?: CronJobOptions & JobPlacement): JobDecorator;
+export declare function Every(interval: number | string, options?: DecoratedJobOptions<EveryJobOptions>): JobDecorator;
+export declare function Every(name: string, interval: number | string, options?: EveryJobOptions & JobPlacement): JobDecorator;
+export declare function At(when: Date | number | string, options?: DecoratedJobOptions<AtJobOptions>): JobDecorator;
+export declare function At(name: string, when: Date | number | string, options?: AtJobOptions & JobPlacement): JobDecorator;
+export declare function Scheduled(): ScheduledDecorator;
+export {};
+
+// errors.d.ts
+export type ErrorCode = 'ANARCHON_INVALID_ARGUMENT' | 'ANARCHON_UNKNOWN_OPTION' | 'ANARCHON_UNSUPPORTED' | 'ANARCHON_UNSAFE_JOB' | 'ANARCHON_SERVER' | 'ANARCHON_MISSING_DRIVER' | 'ANARCHON_STATE' | 'ANARCHON_JOB_EXISTS' | 'ANARCHON_UNKNOWN_JOB' | 'ANARCHON_SCHEDULER_EXISTS' | 'ANARCHON_NO_SCHEDULER' | 'ANARCHON_STORE' | 'ANARCHON_STORE_FORMAT' | 'ANARCHON_INTERNAL';
+export declare function coded<E extends Error>(error: E, code: ErrorCode): E & {
+    readonly code: ErrorCode;
+};
+export declare function isAnarchonError(error: unknown, code?: ErrorCode): error is Error & {
+    readonly code: ErrorCode;
+};
+
+// history.d.ts
+import type { RunReason, RunRecord, RunStatus, StoredResult } from './types';
+export interface ClaimRecord {
+    slot: number;
+    by: string;
+    at: number;
+    manual: boolean;
+    attempt?: number;
+    reason?: RunReason;
+}
+export declare function claimPayload(input: {
+    slot: number;
+    instanceId: string;
+    token: string;
+}, manual: boolean): {
+    type: 'claim';
+    slot: number;
+    by: string;
+    token: string;
+    at: number;
+    manual: boolean;
+};
+export declare function toClaim(raw: Record<string, unknown>): ClaimRecord | null;
+export declare function toResult(raw: unknown): StoredResult | null;
+export declare function parseJson(text: string): unknown;
+export interface HistoryInput {
+    job: string;
+    claims: ReadonlyArray<ClaimRecord>;
+    results: Iterable<StoredResult>;
+    limit: number;
+    pendingStatus?: (claim: ClaimRecord & {
+        attempt: number;
+    }) => RunStatus;
+}
+export declare function buildHistory({ job, claims, results, limit, pendingStatus }: HistoryInput): RunRecord[];
+
+// index.d.ts
+export type { NatsBackendOptions, NatsConnectionLike } from './backends/nats';
+export { NatsBackend } from './backends/nats';
+export type { RabbitMQBackendOptions, RabbitMQConnectionLike } from './backends/rabbitmq';
+export { RabbitMQBackend } from './backends/rabbitmq';
+export type { IORedisLike, KeyValueClient, KeyValueConnection, KeyValueConnectionOptions, NodeRedisLike, RedisBackendOptions, ValkeyBackendOptions, ValkeyGlideLike, } from './backends/redis';
+export { fromIORedis, fromNodeRedis, fromValkeyGlide, LeaseStore, RedisBackend, ValkeyBackend } from './backends/redis';
+export type { SqlClient, SqlDialect, SqlQuery, SqlRow, SqlValue } from './backends/sql/base';
+export { SqlBackend } from './backends/sql/base';
+export type { PgClientLike, PgPoolLike, PostgresBackendOptions, PostgresJsLike } from './backends/sql/postgres';
+export { fromPgClient, fromPgPool, fromPostgresJs, PostgresBackend } from './backends/sql/postgres';
+export type { LibsqlClientLike, SqliteBackendOptions, SqliteDatabaseLike } from './backends/sql/sqlite';
+export { fromLibsql, fromSqliteDatabase, SqliteBackend } from './backends/sql/sqlite';
+export type { DecoratedJobOptions, JobDecorator, JobPlacement, RegisterOptions, ScheduledDecorator } from './decorators';
+export { At, Cron, Every, Scheduled } from './decorators';
+export type { ErrorCode } from './errors';
+export { isAnarchonError } from './errors';
+export type { ClaimRecord, HistoryInput } from './history';
+export { buildHistory } from './history';
+export type { ConfigureOptions } from './registry';
+export { formatDuration, parseDuration } from './schedule';
+export { Scheduler } from './scheduler';
+export type { AtJobOptions, Backend, ClaimInput, ClaimOutcome, CronJobOptions, EveryJobOptions, IdmpOptions, JobContext, JobData, JobDataProvider, JobHandler, JobInfo, JobLimits, JobOptions, KeyValueStrategies, KeyValueStrategy, KeyValueStrategyName, Logger, LostEvent, RunClaim, RunEvent, RunFailureEvent, RunInterruptedEvent, RunKey, RunReason, RunRecord, RunStartEvent, RunStatus, RunStore, SchedulerErrorEvent, SchedulerEvents, SchedulerOptions, ScriptOptions, SkipEvent, StoredResult, } from './types';
+
+// registry.d.ts
+import { type DeclaredJob, type RegisterOptions } from './decorators';
+import type { Backend, SchedulerOptions } from './types';
+export interface ConfigureOptions extends Omit<SchedulerOptions, 'backend' | 'name'> {
+    backend: Backend | ((name: string) => Backend);
+    autoStart?: boolean;
+}
+export interface SchedulerHost {
+    readonly scheduler: object;
+    readonly name: string | undefined;
+    add(job: DeclaredJob, name: string, defaults: NonNullable<RegisterOptions['defaults']>): void;
+    remove(name: string): boolean;
+    has(name: string): boolean;
+    startInBackground(): void;
+}
+export declare function setSchedulerFactory(create: (options: SchedulerOptions) => object): void;
+export declare function registerOn(host: SchedulerHost, target: object, options: RegisterOptions): void;
+export declare function schedulerCreated(host: SchedulerHost): void;
+export declare function schedulerStarting(host: SchedulerHost): string[];
+export declare function schedulerStopped(host: SchedulerHost): void;
+export declare function setDefaultScheduler(host: SchedulerHost | undefined): void;
+export declare function configure(name: string | undefined, options: ConfigureOptions): void;
+export declare function getScheduler(name: string | undefined): object;
+export declare function knownSchedulers(): object[];
+export declare function resetSchedulers(): void;
+export declare function hostOf(scheduler: object): SchedulerHost | undefined;
+
+// schedule.d.ts
+export interface Schedule {
+    readonly type: 'cron' | 'every' | 'once';
+    readonly description: string;
+    readonly minGapMs: number;
+    next(after: number): number | null;
+    prev(atOrBefore: number): number | null;
+}
+export declare function parseDuration(value: number | string): number;
+export declare function formatDuration(ms: number): string;
+export declare function everySchedule(intervalMs: number, offsetMs?: number): Schedule;
+export declare function onceSchedule(at: number): Schedule;
+export declare function cronSchedule(expression: string, timezone?: string): Schedule;
+
+// scheduler/index.d.ts
+export { Scheduler } from './scheduler';
+
+// scheduler/scheduler.d.ts
+import type { RegisterOptions } from '../decorators';
+import { type ConfigureOptions } from '../registry';
+import type { AtJobOptions, Backend, CronJobOptions, EveryJobOptions, JobData, JobHandler, JobInfo, JobOptionsFor, RunRecord, SchedulerEvents, SchedulerOptions } from '../types';
+export declare class Scheduler<B extends Backend = Backend> {
+    readonly instanceId: string;
+    readonly backend: B;
+    readonly name: string | undefined;
+    private readonly defaults;
+    private readonly logger;
+    private readonly registry;
+    private readonly emitter;
+    private readonly inflight;
+    private readonly host;
+    private dataSource;
+    private readonly timers;
+    private readonly executor;
+    private readonly claimOnly;
+    private readonly leases;
+    private state;
+    private abort;
+    private ready;
+    private stopping;
+    private stopped;
+    private reads;
+    constructor(options: SchedulerOptions<B>);
+    static configure(options: ConfigureOptions): void;
+    static configure(name: string, options: ConfigureOptions): void;
+    static get(name?: string): Scheduler;
+    static all(): Scheduler[];
+    static startAll(): Promise<void>;
+    static stopAll(options?: {
+        timeoutMs?: number;
+    }): Promise<void>;
+    static reset(): void;
+    static setDefault(scheduler: Scheduler | undefined): void;
+    cron<Data = unknown>(name: string, expression: string, handler: JobHandler<Data>, options?: JobOptionsFor<B, CronJobOptions>): this;
+    every<Data = unknown>(name: string, interval: number | string, handler: JobHandler<Data>, options?: JobOptionsFor<B, EveryJobOptions>): this;
+    at<Data = unknown>(name: string, when: Date | number | string, handler: JobHandler<Data>, options?: JobOptionsFor<B, AtJobOptions>): this;
+    register(target: object, options?: RegisterOptions): this;
+    remove(name: string): boolean;
+    start(): Promise<void>;
+    stop(options?: {
+        timeoutMs?: number;
+    }): Promise<void>;
+    runNow(name: string, options?: {
+        data?: JobData;
+    }): Promise<RunRecord>;
+    setData(data: JobData | undefined): this;
+    history(name: string, limit?: number): Promise<RunRecord[]>;
+    lastRun(name: string): Promise<RunRecord | null>;
+    nextRun(name: string): Date | null;
+    jobs(): JobInfo[];
+    on<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEvents[E]) => void): this;
+    once<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEvents[E]) => void): this;
+    off<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEvents[E]) => void): this;
+    private addDeclared;
+    private add;
+    private schedule;
+    private fire;
+    private doStop;
+    private waitForRuns;
+    private ensureReady;
+    private prepare;
+    private closeBackend;
+    private track;
+    private emit;
+    private getJob;
+    private nextRunOf;
+}
+
+// types/backend.d.ts
+import type { RunReason } from './jobs';
+import type { RunKey, RunRecord } from './runs';
+export type ClaimOutcome = {
+    kind: 'won';
+    attempt: number;
+}
+ | {
+    kind: 'running';
+    attempt: number;
+}
+ | {
+    kind: 'done';
+}
+ | {
+    kind: 'overlap';
+    slot: number;
+}
+ | {
+    kind: 'none';
+}
+ | {
+    kind: 'late';
+    lateMs: number;
+};
+export interface RunClaim extends ClaimInput {
+    mode: 'new' | 'takeover';
+    reason: RunReason;
+    leaseMs: number;
+    overlap: 'skip' | 'allow';
+    maxAttempts: number;
+    maxLateMs?: number;
+    keepMs?: number;
+}
+export interface RunStore {
+    claim(input: RunClaim): Promise<ClaimOutcome>;
+    heartbeat(job: string, slot: number, token: string, leaseMs: number): Promise<boolean>;
+    finish(job: string, slot: number, token: string, status: 'success' | 'failed' | 'interrupted'): Promise<boolean>;
+    release(job: string, slot: number, token: string): Promise<boolean>;
+    active(job: string): Promise<Array<{
+        slot: number;
+        attempt: number;
+        alive: boolean;
+    }>>;
+}
+export interface ClaimInput extends RunKey {
+    token: string;
+    instanceId: string;
+    historySize: number;
+    historyTtlMs?: number;
+}
+export interface StoredResult {
+    slot: number;
+    by: string;
+    attempt?: number;
+    status: 'success' | 'failed' | 'interrupted';
+    startedAt: number;
+    finishedAt: number;
+    durationMs: number;
+    error?: string;
+}
+export interface JobLimits {
+    name: string;
+    jitterMs: number;
+    maxLateMs: number;
+    minGapMs: number;
+    historySize: number;
+    historyTtlMs?: number;
+}
+export interface Backend {
+    readonly name: string;
+    readonly dedupeWindowMs: number;
+    checkJob?(job: JobLimits): void;
+    init(): Promise<void>;
+    prepareJob(job: string, historySize: number): Promise<void>;
+    claim(input: ClaimInput): Promise<boolean>;
+    recordClaim?(input: ClaimInput): Promise<void>;
+    recordManualRun(input: ClaimInput): Promise<number | undefined>;
+    saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void>;
+    history(job: string, limit: number): Promise<RunRecord[]>;
+    readonly runs?: RunStore;
+    close(): Promise<void>;
+}
+
+// types/index.d.ts
+export type * from './backend';
+export type * from './jobs';
+export type * from './runs';
+export type * from './scheduler';
+export type * from './strategies';
+
+// types/jobs.d.ts
+export interface JobContext<Data = unknown> {
+    name: string;
+    slot: number;
+    scheduledAt: Date;
+    instanceId: string;
+    manual: boolean;
+    data: Data;
+    signal: AbortSignal;
+    attempt: number;
+    reason: RunReason;
+}
+export type RunReason = 'scheduled' | 'manual' | 'catch-up' | 'takeover';
+export type JobHandler<Data = unknown> = (ctx: JobContext<Data>) => unknown;
+export type JobDataProvider = (run: Omit<JobContext, 'data'>) => unknown;
+export type JobData = object | string | number | boolean | null | JobDataProvider;
+export interface LeaseJobOptions {
+    overlap?: 'skip' | 'allow';
+    maxAttempts?: number;
+    catchUpMs?: number;
+}
+export interface JobOptions extends LeaseJobOptions {
+    jitterMs?: number;
+    maxLateMs?: number;
+    historySize?: number;
+    historyTtlMs?: number;
+    data?: JobData;
+    timeoutMs?: number;
+}
+export interface CronJobOptions extends JobOptions {
+    timezone?: string;
+}
+export interface EveryJobOptions extends JobOptions {
+    offsetMs?: number;
+}
+export type AtJobOptions = Omit<JobOptions, 'overlap'>;
+
+// types/runs.d.ts
+import type { RunReason } from './jobs';
+export interface RunKey {
+    job: string;
+    slot: number;
+}
+export interface RunEvent extends RunKey {
+    scheduledAt: Date;
+    instanceId: string;
+}
+export type RunStatus = 'running' | 'success' | 'failed' | 'interrupted';
+export interface RunRecord extends RunEvent {
+    manual: boolean;
+    attempt: number;
+    reason?: RunReason;
+    status: RunStatus;
+    startedAt: Date;
+    finishedAt?: Date;
+    durationMs?: number;
+    error?: string;
+}
+export interface JobInfo {
+    name: string;
+    type: 'cron' | 'every' | 'once';
+    schedule: string;
+    nextRunAt: Date | null;
+    runningHere: number;
+}
+export interface RunStartEvent extends RunEvent {
+    manual: boolean;
+    attempt: number;
+    reason: RunReason;
+}
+export interface LostEvent extends RunEvent {
+    attempt: number;
+}
+export interface RunFailureEvent extends RunRecord {
+    cause: unknown;
+}
+export interface RunInterruptedEvent extends RunRecord {
+    cause: unknown;
+    handedOver: boolean;
+}
+export interface SkipEvent extends RunEvent {
+    reason: 'taken' | 'late' | 'overlap';
+    lateMs?: number;
+}
+export interface SchedulerErrorEvent extends Partial<RunKey> {
+    error: unknown;
+}
+export interface SchedulerEvents {
+    start: RunStartEvent;
+    success: RunRecord;
+    failure: RunFailureEvent;
+    interrupted: RunInterruptedEvent;
+    skip: SkipEvent;
+    lost: LostEvent;
+    error: SchedulerErrorEvent;
+}
+
+// types/scheduler.d.ts
+import type { Backend } from './backend';
+import type { AtJobOptions, JobData, JobOptions, LeaseJobOptions } from './jobs';
+export interface Logger {
+    info?(message: string, ...meta: unknown[]): void;
+    warn(message: string, ...meta: unknown[]): void;
+    error(message: string, ...meta: unknown[]): void;
+}
+interface CommonSchedulerOptions<B extends Backend> {
+    name?: string;
+    data?: JobData;
+    backend: B;
+    instanceId?: string;
+    jitterMs?: number;
+    maxLateMs?: number;
+    historySize?: number;
+    historyTtlMs?: number;
+    log?: boolean;
+    timezone?: string;
+    logger?: Logger;
+    unrefTimers?: boolean;
+}
+export interface LeaseSchedulerOptions {
+    leaseMs?: number;
+    heartbeatMs?: number;
+}
+type HasNoLeases<B> = 'runs' extends keyof B ? (B[keyof B & 'runs'] extends undefined ? true : false) : true;
+export type SchedulerOptions<B extends Backend = Backend> = CommonSchedulerOptions<B> & (HasNoLeases<B> extends true ? unknown : LeaseSchedulerOptions);
+export type JobOptionsFor<B, Options extends AtJobOptions = JobOptions> = HasNoLeases<B> extends true ? Omit<Options, keyof LeaseJobOptions> : Options;
+export {};
+
+// types/strategies.d.ts
+export interface KeyValueStrategies {
+    redis: 'lease' | 'stream-id' | 'idmp' | 'script';
+    valkey: 'lease' | 'stream-id' | 'script';
+}
+export type KeyValueStrategyName<Server extends keyof KeyValueStrategies = 'redis'> = KeyValueStrategies[Server];
+type StrategySettings<Name> = Name extends 'idmp' ? IdmpOptions : Name extends 'script' ? ScriptOptions : unknown;
+export type KeyValueStrategy<Name extends string = KeyValueStrategyName> = {
+    [N in Name]: N | ({
+        name: N;
+    } & StrategySettings<N>);
+}[Name];
+export interface IdmpOptions {
+    durationSec?: number;
+    maxSize?: number;
+}
+export interface ScriptOptions {
+    windowMs?: number;
+}
+export {};

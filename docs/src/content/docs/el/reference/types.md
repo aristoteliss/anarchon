@@ -359,6 +359,7 @@ type ClaimOutcome =
 | `PgPoolLike`, `PgClientLike`, `PostgresJsLike` | `pg` Pool, `pg` Client, postgres.js |
 | `SqliteDatabaseLike`, `LibsqlClientLike` | `node:sqlite` / `better-sqlite3`, `@libsql/client` |
 | `SqlClient`, `SqlQuery`, `SqlRow`, `SqlValue` | Ο προσαρμογέας `{ all, transaction }` των SQL backends |
+| `SqlDialect` | Ό,τι δίνει μια υποκλάση του `SqlBackend` για μια άλλη βάση SQL |
 | `RabbitMQConnectionLike`, `NatsConnectionLike` | Μια σύνδεση `amqplib`, μια σύνδεση NATS |
 
 Τύποι επιλογών backend: `RedisBackendOptions`, `ValkeyBackendOptions`, `PostgresBackendOptions`, `SqliteBackendOptions`, `RabbitMQBackendOptions`, `NatsBackendOptions`. Δείτε [Επιλογές](../options/).

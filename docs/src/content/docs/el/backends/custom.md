@@ -59,15 +59,15 @@ interface Backend {
 Αυτό το backend διατηρεί τα πάντα στη μνήμη. Συντονίζει schedulers μόνο στην **ίδια διεργασία**, γεγονός που το καθιστά χρήσιμο για unit tests και για την κατανόηση του συμβολαίου στην πιο απλή του μορφή.
 
 ```ts
-import type { Backend, ClaimInput, RunRecord, StoredResult } from 'anarchon';
+import { type Backend, buildHistory, type ClaimInput, type ClaimRecord, type RunRecord, type StoredResult } from 'anarchon';
 
 export class MemoryBackend implements Backend {
   readonly name = 'memory';
   /** Τα claims δεν ξεχνιούνται ποτέ εδώ, επομένως δεν υπάρχει όριο στο πόσο καθυστερημένο μπορεί να είναι ένα instance. */
   readonly dedupeWindowMs = Infinity;
 
-  private readonly claims = new Map<string, ClaimInput & { at: number; manual: boolean }>();
-  private readonly results = new Map<string, StoredResult>();
+  private readonly claims = new Map<string, ClaimRecord & { job: string; token: string }>();
+  private readonly results = new Map<string, StoredResult[]>();
 
   async init(): Promise<void> {}
   async prepareJob(): Promise<void> {}
@@ -78,37 +78,23 @@ export class MemoryBackend implements Backend {
     const key = `${input.job}|${input.slot}`;
     const existing = this.claims.get(key);
     if (existing) return existing.token === input.token; // το ίδιο claim που στάλθηκε ξανά εξακολουθεί να είναι δικό μας
-    this.claims.set(key, { ...input, at: Date.now(), manual: false });
+    this.claims.set(key, { job: input.job, token: input.token, slot: input.slot, by: input.instanceId, at: Date.now(), manual: false });
     return true;
   }
 
-  async recordManualRun(input: ClaimInput): Promise<void> {
-    this.claims.set(`${input.job}|${input.slot}|manual`, { ...input, at: Date.now(), manual: true });
+  async recordManualRun(input: ClaimInput): Promise<undefined> {
+    const claim = { job: input.job, token: input.token, slot: input.slot, by: input.instanceId, at: Date.now(), manual: true };
+    this.claims.set(`${input.job}|${input.slot}|manual`, claim);
+    return undefined; // the slot asked for is the one used
   }
 
   async saveResult(job: string, result: StoredResult): Promise<void> {
-    this.results.set(`${job}|${result.slot}|${result.by}`, result);
+    this.results.set(job, [...(this.results.get(job) ?? []), result]);
   }
 
   async history(job: string, limit: number): Promise<RunRecord[]> {
-    return [...this.claims.values()]
-      .filter((claim) => claim.job === job)
-      .sort((a, b) => b.slot - a.slot)
-      .slice(0, limit)
-      .map((claim) => {
-        const result = this.results.get(`${job}|${claim.slot}|${claim.instanceId}`);
-        return {
-          job,
-          slot: claim.slot,
-          scheduledAt: new Date(claim.slot),
-          instanceId: claim.instanceId,
-          manual: claim.manual,
-          attempt: 1,
-          status: result?.status ?? 'running',
-          startedAt: new Date(result?.startedAt ?? claim.at),
-          ...(result ? { finishedAt: new Date(result.finishedAt), durationMs: result.durationMs, error: result.error } : {}),
-        };
-      });
+    const claims = [...this.claims.values()].filter((claim) => claim.job === job);
+    return buildHistory({ job, claims, results: this.results.get(job) ?? [], limit });
   }
 }
 ```
@@ -187,6 +173,39 @@ const backend = new SqliteBackend({
 });
 ```
 
+## Μια άλλη βάση SQL
+
+Για μια βάση SQL, επεκτείνετε το `SqlBackend` αντί να γράψετε το συμβόλαιο μόνοι σας: φέρνει τους πίνακες, τη συναλλαγή διεκδίκησης, τις μισθώσεις και το ιστορικό. Εσείς δίνετε τη σύνδεση, έναν έλεγχο του server, και ένα `SqlDialect`: ό,τι διαφέρει από βάση σε βάση (ο τύπος ακεραίων, το ρολόι του server, το κλείδωμα γραμμών, τα placeholders).
+
+```ts
+import { fromSqliteDatabase, SqlBackend, type SqlClient, type SqlDialect } from 'anarchon';
+
+class EmbeddedSqlBackend extends SqlBackend {
+  readonly name = 'embedded-sql';
+  protected readonly dialect: SqlDialect = {
+    bigint: 'INTEGER',
+    nowMs: `CAST(ROUND((julianday('now') - 2440587.5) * 86400000.0) AS INTEGER)`,
+    forUpdate: '',
+    placeholders: (sql) => sql,
+    extraTables: () => [],
+    serialize: async () => {},
+    isAlreadyCreated: () => false,
+  };
+
+  constructor() {
+    super('embedded_runs');
+  }
+
+  protected async connect(): Promise<{ client: SqlClient; owned: boolean }> {
+    return { client: fromSqliteDatabase(openDatabase()), owned: true };
+  }
+
+  protected async checkServer(): Promise<void> {}
+}
+```
+
+Το `nowMs` πρέπει να διαβάζει το ρολόι του server της βάσης, ώστε όλα τα instances να συμφωνούν στους χρόνους μίσθωσης· τα `forUpdate` και `serialize` πρέπει να κάνουν δύο διεκδικήσεις της ίδιας εργασίας να εκτελούνται η μία μετά την άλλη. Τα backends PostgreSQL και SQLite είναι το πρότυπο.
+
 ## Δοκιμή ενός backend
 
 Ανεξάρτητα από το store, ελέγξτε το συμβόλαιο απευθείας:
@@ -196,6 +215,18 @@ const backend = new SqliteBackend({
 3. **Ιστορικό.** Ένα claim συν ένα αποθηκευμένο αποτέλεσμα επιστρέφεται από το `history()` ως μία εγγραφή με το σωστό instance και status.
 
 Η σουίτα δοκιμών του ίδιου του anarchon εκτελεί αυτούς τους ελέγχους σε κάθε ενσωματωμένο backend.
+
+## Συμβατότητα
+
+Ένα backend που γράφετε συνεχίζει να λειτουργεί σε όλες τις minor εκδόσεις του anarchon:
+
+- **Τα νέα μέλη των `Backend` και `RunStore` είναι προαιρετικά.** Ο scheduler έχει εναλλακτική λύση για backend χωρίς αυτά, οπότε η κλάση σας μεταγλωττίζεται και τρέχει χωρίς αλλαγές. Υποχρεωτικό μέλος προστίθεται μόνο σε major έκδοση.
+- **Τα νέα πεδία όσων λαμβάνετε είναι προαιρετικά να διαβαστούν.** Τα `ClaimInput`, `RunClaim` και `JobLimits` μπορεί να αποκτήσουν πεδία· ένα backend που τα αγνοεί συνεχίζει να λειτουργεί.
+- **Τα νέα πεδία όσων επιστρέφετε είναι προαιρετικά.** Φτιάξτε το `history()` με το `buildHistory()`, και οι εγγραφές αποκτούν νέα πεδία χωρίς αλλαγές από την πλευρά σας.
+- **Το `ClaimOutcome` μπορεί να αποκτήσει νέα είδη.** Επιστρέφετε τα είδη που γνωρίζετε· ο scheduler χειρίζεται ένα άγνωστο είδος όπως το `'done'`.
+- **Τα σφάλματα που ρίχνετε** φτάνουν στον χρήστη όπως είναι. Δώστε τους δικό σας `code` αν οι καλούντες πρέπει να τα ξεχωρίζουν.
+
+Ό,τι αποθηκεύει το backend σας είναι δική σας ευθύνη να μένει συμβατό: σε ένα rolling deploy, δύο εκδόσεις του backend σας μπορεί να μοιράζονται το store.
 
 ## Επόμενα βήματα
 

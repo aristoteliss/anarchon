@@ -35,6 +35,13 @@ pnpm test:slow # test/e2e: cluster and failure scenarios with real processes
   in Greek (`docs/src/content/docs/` and `docs/src/content/docs/el/`), and an entry in
   `CHANGELOG.md`.
 - A change to the documentation needs `pnpm docs:check` and `pnpm docs:build`.
+- A change to the public API needs `pnpm api:update`: it records the new declarations in
+  `api/anarchon.api.txt`, and `pnpm test:release` fails while they differ. Review that diff:
+  removing or renaming anything users or custom backends rely on is a breaking change.
+- A new option goes in its `keysOf` list (`src/option-keys.ts`, or next to its interface), or it
+  is refused at runtime as unknown. A new error is thrown with a code (`coded()`, `src/errors.ts`).
+- The compatibility rules (backend contract, stored data, unions that may grow) are in
+  [AGENTS.md](AGENTS.md#compatibility).
 - Comments explain non-obvious concurrency or protocol constraints only.
 
 CI runs the same commands on every pull request (`.github/workflows/ci.yml`).

@@ -87,6 +87,10 @@ Look for a warning that starts with `[anarchon] @Every ... is not scheduled` in 
 
 Most often the project compiles with legacy decorators (`"experimentalDecorators": true`) and the class has no `@Scheduled()`. In that style a method decorator can't act when an object is created, so add `@Scheduled()` to the class or call `scheduler.register(object)`. The other cause is that no object of the class is created at all. `scheduler.jobs()` lists what was added.
 
+### What does the warning `ANARCHON_DUPLICATE_COPY` mean?
+
+anarchon is installed twice in your app, usually because a dependency asks for another version. Each copy has its own list of schedulers, so jobs declared with one copy's decorators are never added to a scheduler of the other. `npm ls anarchon` (or `pnpm why anarchon`) shows where the copies come from; make them resolve to one version.
+
 ### Why is there no `@Timeout` decorator?
 
 A timeout counts from the start of each process, so every instance would compute a different time and run the job. `@At` takes an absolute time that all instances agree on.

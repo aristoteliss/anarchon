@@ -1,6 +1,8 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import { sleep } from '../../util';
+import { coded } from '../../errors';
+import { keysOf } from '../../option-keys';
+import { refuseUnknown, sleep } from '../../util';
 import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlRow, type SqlValue } from './base';
 
 /**
@@ -95,6 +97,8 @@ export interface SqliteBackendOptions {
   busyTimeoutMs?: number;
 }
 
+const SQLITE_OPTIONS = keysOf<SqliteBackendOptions>({ database: true, table: true, busyTimeoutMs: true });
+
 /**
  * SQLite drivers block the thread while they wait for a lock. Two connections in one process could
  * then wait on each other forever (one holds a transaction across an await, the other blocks the
@@ -152,6 +156,7 @@ export class SqliteBackend extends SqlBackend {
 
   /** Validates the table name. Nothing is opened until init(). */
   constructor(options: SqliteBackendOptions = {}) {
+    refuseUnknown('SqliteBackend', options, SQLITE_OPTIONS);
     super(options.table ?? 'anarchon_runs');
     this.input = options.database ?? './anarchon.db';
     this.busyTimeoutMs = options.busyTimeoutMs ?? 5_000;
@@ -188,7 +193,7 @@ export class SqliteBackend extends SqlBackend {
       .split('.')
       .map(Number);
     if (major < 3 || (major === 3 && minor < 35)) {
-      throw new Error(`The SQLite backend needs SQLite 3.35 or newer for RETURNING (this one is ${row?.v}).`);
+      throw coded(new Error(`The SQLite backend needs SQLite 3.35 or newer for RETURNING (this one is ${row?.v}).`), 'ANARCHON_SERVER');
     }
   }
 }
@@ -277,13 +282,16 @@ export function fromLibsql(client: LibsqlClientLike): SqlClient {
 function toSqlClient(input: SqliteDatabaseLike | LibsqlClientLike | SqlClient): SqlClient {
   if (typeof (input as SqlClient).all === 'function') {
     if (typeof (input as SqlClient).transaction !== 'function')
-      throw new TypeError('A custom SQL client needs both all() and transaction()');
+      throw coded(new TypeError('A custom SQL client needs both all() and transaction()'), 'ANARCHON_INVALID_ARGUMENT');
     return input as SqlClient;
   }
   if (typeof (input as LibsqlClientLike).execute === 'function') return fromLibsql(input as LibsqlClientLike);
   if (typeof (input as SqliteDatabaseLike).prepare === 'function') return fromSqliteDatabase(input as SqliteDatabaseLike);
-  throw new TypeError(
-    'database must be a file path, a node:sqlite or better-sqlite3 database, a @libsql/client client, or { all, transaction }',
+  throw coded(
+    new TypeError(
+      'database must be a file path, a node:sqlite or better-sqlite3 database, a @libsql/client client, or { all, transaction }',
+    ),
+    'ANARCHON_INVALID_ARGUMENT',
   );
 }
 
@@ -300,9 +308,12 @@ async function openFile(path: string): Promise<SqliteDatabaseLike> {
       const Database = mod.default ?? mod;
       return new Database(path);
     } catch {
-      throw new Error(
-        `Could not open "${path}": this Node has no node:sqlite (Node 22.13+, or 22.5+ with --experimental-sqlite) and "better-sqlite3" isn't installed. ` +
-          `(${(builtinError as Error).message})`,
+      throw coded(
+        new Error(
+          `Could not open "${path}": this Node has no node:sqlite (Node 22.13+, or 22.5+ with --experimental-sqlite) and "better-sqlite3" isn't installed. ` +
+            `(${(builtinError as Error).message})`,
+        ),
+        'ANARCHON_MISSING_DRIVER',
       );
     }
   }

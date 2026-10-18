@@ -19,7 +19,7 @@ const scheduler = new Scheduler({
 
 ```ts
 // Connection string. Το anarchon ανοίγει ένα μικρό pool με το `pg` και το κλείνει στο stop().
-new PostgresBackend({ connection: 'postgres://user:secret@db.internal:5432/app' });
+new PostgresBackend({ connection: process.env.DATABASE_URL }); // postgres://· χρήστης και κωδικός μπαίνουν στο URL
 
 // Τίποτα: postgres://localhost:5432/postgres, με τις μεταβλητές περιβάλλοντος PG* να συμπληρώνουν τα κενά
 new PostgresBackend();
@@ -66,8 +66,9 @@ new PostgresBackend({ connection: sql });
 | `<table>` | εκτέλεση (run) | attempt, token, status, runner, λήξη μίσθωσης |
 | `<table>_attempts` | προσπάθεια (attempt) | ποιος, γιατί, πότε διεκδικήθηκε, πώς ολοκληρώθηκε (ιστορικό) |
 | `<table>_jobs` | εργασία (job) | η γραμμή που εξασφαλίζει ότι τα claims μιας εργασίας εκτελούνται διαδοχικά |
+| `<table>_meta` | ρύθμιση | η μορφή του store, ώστε τα δεδομένα ενός νεότερου anarchon να μη διαβάζονται ποτέ λάθος |
 
-Αν ο χρήστης βάσης δεδομένων της εφαρμογής σας δεν έχει δικαιώματα δημιουργίας πινάκων, δημιουργήστε τους μία φορά με έναν προνομιούχο χρήστη εκτελώντας το `start()` σε ένα βήμα migration, και στη συνέχεια εκχωρήστε δικαιώματα `SELECT, INSERT, UPDATE, DELETE` στους τρεις πίνακες.
+Αν ο χρήστης βάσης δεδομένων της εφαρμογής σας δεν έχει δικαιώματα δημιουργίας πινάκων, δημιουργήστε τους μία φορά με έναν προνομιούχο χρήστη εκτελώντας το `start()` σε ένα βήμα migration, και στη συνέχεια εκχωρήστε δικαιώματα `SELECT, INSERT, UPDATE, DELETE` στους τέσσερις πίνακες.
 
 Για να τους διατηρήσετε εκτός του κύριου schema σας:
 

@@ -2,10 +2,12 @@
 
 import type { JetStreamClient, JetStreamManager } from '@nats-io/jetstream';
 import type { NatsConnection } from '@nats-io/transport-node';
+import { coded } from '../errors';
 
-import { type ClaimRecord, claimPayload, mergeRuns, parseJson, toClaim, toResult } from '../history';
+import { buildHistory, type ClaimRecord, claimPayload, parseJson, toClaim, toResult } from '../history';
+import { keysOf } from '../option-keys';
 import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
-import { assertSimpleName, errorMessage, positiveInt, refuseHistoryTtl } from '../util';
+import { assertSimpleName, errorMessage, positiveInt, refuseHistoryTtl, refuseUnknown } from '../util';
 
 /**
  * The parts of a NATS connection this backend uses: a connection from `@nats-io/transport-node`
@@ -109,6 +111,16 @@ export interface NatsBackendOptions {
   replicas?: number;
 }
 
+const NATS_OPTIONS = keysOf<NatsBackendOptions>({
+  servers: true,
+  connection: true,
+  stream: true,
+  prefix: true,
+  duplicateWindowMs: true,
+  historySize: true,
+  replicas: true,
+});
+
 /**
  * NATS JetStream. Every instance publishes its claim with the header `Nats-Msg-Id: <job>:<slot>`.
  * JetStream stores the first one and answers repeats with `duplicate: true` (within the stream's
@@ -154,6 +166,7 @@ export class NatsBackend implements Backend {
 
   /** Validates the options. Nothing connects until init(). */
   constructor(options: NatsBackendOptions = {}) {
+    refuseUnknown('NatsBackend', options, NATS_OPTIONS);
     this.servers = options.servers ?? 'nats://localhost:4222';
     this.userConnection = options.connection;
     this.stream = options.stream ?? 'CRON';
@@ -251,7 +264,7 @@ export class NatsBackend implements Backend {
       // The server keeps an ordered consumer for minutes after its last use.
       await consumer.delete().catch(() => {});
     }
-    return mergeRuns(job, claims, results, limit);
+    return buildHistory({ job, claims, results, limit });
   }
 
   /** Closes the connection if this backend opened it. One that was passed in stays open. */
@@ -266,8 +279,6 @@ export class NatsBackend implements Backend {
     }
   }
 
-  // ---------------------------------------------------------------- internals
-
   private getState(): Promise<{ nc: NatsConnection; js: JetStreamClient; jsm: JetStreamManager }> {
     this.state ??= (async () => {
       let transport: typeof import('@nats-io/transport-node');
@@ -276,8 +287,11 @@ export class NatsBackend implements Backend {
         transport = await import('@nats-io/transport-node');
         jetstreamModule = await import('@nats-io/jetstream');
       } catch {
-        throw new Error(
-          'The NATS backend needs "@nats-io/transport-node" and "@nats-io/jetstream": run `npm install @nats-io/transport-node @nats-io/jetstream`.',
+        throw coded(
+          new Error(
+            'The NATS backend needs "@nats-io/transport-node" and "@nats-io/jetstream": run `npm install @nats-io/transport-node @nats-io/jetstream`.',
+          ),
+          'ANARCHON_MISSING_DRIVER',
         );
       }
       const nc: NatsConnection =
@@ -287,7 +301,10 @@ export class NatsBackend implements Backend {
         jsm = await jetstreamModule.jetstreamManager(nc);
       } catch (error) {
         if (!this.userConnection) await nc.close().catch(() => {});
-        throw new Error(`The NATS backend needs JetStream enabled on the server (nats-server -js): ${errorMessage(error)}`);
+        throw coded(
+          new Error(`The NATS backend needs JetStream enabled on the server (nats-server -js): ${errorMessage(error)}`),
+          'ANARCHON_SERVER',
+        );
       }
       await this.ensureStream(jsm);
       return { nc, jsm, js: jetstreamModule.jetstream(nc) as JetStreamClient };

@@ -20,7 +20,7 @@ new Scheduler({ backend: new ValkeyBackend({ valkey: { host: 'localhost', port: 
 `redis` accepts a URL, an options object, or a client.
 
 ```ts
-new Scheduler({ backend: new RedisBackend({ redis: 'rediss://user:secret@host:6380/2' }) }); // TLS, credentials, database 2
+new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL }) }); // rediss:// for TLS; user, password and database go in the URL
 new Scheduler({ backend: new RedisBackend({ redis: { host: 'cache', port: 6379, password: process.env.REDIS_PASSWORD, db: 1 } }) });
 ```
 
@@ -161,7 +161,7 @@ With the **claim-only** strategies there are three:
 | `cron:<job>:manual` | stream | One entry per `runNow()` run |
 | `cron:<job>:results` | sorted set | One result per run |
 
-`cron:` is the `prefix`.
+`cron:` is the `prefix`. Every strategy also writes one key, `cron:format`: the store format, so a newer anarchon's data is never misread. A backend refuses to start when it finds a format newer than it reads (`ANARCHON_STORE_FORMAT`).
 
 ## The server's clock
 

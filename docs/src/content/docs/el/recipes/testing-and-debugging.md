@@ -163,6 +163,16 @@ npx tsx examples/walkthrough.ts
 | [`examples/run-data.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/run-data.ts) | [Δεδομένα εκτέλεσης](../../guides/run-data/): του scheduler, μιας εργασίας, μια συνάρτηση που διαβάζεται σε κάθε εκτέλεση, `runNow()` και `setData()` |
 | [`examples/nestjs`](https://github.com/aristoteliss/anarchon/tree/main/examples/nestjs) | Μια μικρή εφαρμογή [NestJS](../nestjs/#δήλωση-εργασιών-με-decorators) της οποίας οι providers δηλώνουν εργασίες με decorators. Ελεγμένη σε NestJS 11 και 12 |
 
+Ρυθμίσεις από την πραγματική ζωή: η καθεμία είναι μια κατάσταση που λύνεται με διαφορετικό συνδυασμό επιλογών, και η κεφαλίδα του αρχείου εξηγεί κάθε επιλογή.
+
+| Παράδειγμα | Κατάσταση | Προσέγγιση επιλογών |
+| --- | --- | --- |
+| [`examples/billing.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/billing.ts) | Χρέωση πελατών μία φορά την ημέρα, και μετά από διακοπή λειτουργίας | `maxAttempts: 1`, `catchUpMs`, `timeoutMs`, `timezone`, εγγραφές με κλειδί το `ctx.slot` |
+| [`examples/cache-refresh.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/cache-refresh.ts) | Μια φθηνή ανανέωση κάθε λίγα δευτερόλεπτα σε τρία instances | `jitterMs` για να μοιράζεται, μικρό `maxLateMs`, `catchUpMs: 0`, μικρό `historySize` |
+| [`examples/nightly-export.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/nightly-export.ts) | Μια μεγάλη εξαγωγή που διακόπτεται από ένα deploy | `ctx.signal` ανάμεσα στις σελίδες, checkpoint ανά εκτέλεση, `ctx.attempt`, `stop({ timeoutMs })` |
+| [`examples/tenants.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/tenants.ts) | Οι ίδιες εργασίες ανά tenant, ο καθένας στη ζώνη ώρας του | μία εργασία ανά tenant, `timezone` και `data` ανά εργασία, συνάρτηση δεδομένων, `remove()`, `runNow()` με δεδομένα |
+| [`examples/broker-notifications.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/broker-notifications.ts) | Μόνο RabbitMQ ή NATS: χωρίς μισθώσεις | κάθε εκτέλεση στέλνει ό,τι εκκρεμεί, `maxLateMs` κάτω από τη μνήμη του broker, χωρίς επιλογές μίσθωσης |
+
 ## Παρακολούθηση της λειτουργίας ενός instance
 
 Ενεργοποιήστε το ενσωματωμένο log όσο ερευνάτε:

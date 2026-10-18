@@ -58,6 +58,18 @@ scheduler.cron('nightly', '0 2 * * *', run, { jitterMs: 30_000 }); // starts bet
 scheduler.every('precise', '1m', run, { jitterMs: 0 });    // starts on the dot, always the fastest instance
 ```
 
+**Works on** every backend. **Use it when:**
+
+- **A heavy job should land on a random instance:** a larger jitter spreads the runs, so one instance doesn't do every nightly rebuild.
+- **The start time matters to the second:** `jitterMs: 0`. The fastest instance then wins every time; that is the price.
+- **Many instances call one dependency at the same moment:** jitter spreads the first requests over a few seconds.
+
+```ts
+scheduler.cron('rebuild-search-index', '0 3 * * *', rebuild, { jitterMs: 5 * 60_000 });           // spread over 5 min
+scheduler.cron('market-open', '30 9 * * 1-5', open, { timezone: 'America/New_York', jitterMs: 0 }); // on the second
+scheduler.every('poll-partner-api', '1m', poll, { jitterMs: 20_000 });                            // gentle on their rate limit
+```
+
 ## `maxLateMs`
 
 When an instance gets to a run more than `maxLateMs` after its slot, it skips it and emits a `skip` event with reason `'late'`.
@@ -70,6 +82,19 @@ scheduler.every('quote-refresh', '30s', refresh, { maxLateMs: 10_000 });
 ```
 
 It must be bigger than `jitterMs`.
+
+**Works on** every backend. On RabbitMQ, NATS and Redis/Valkey without `lease`, `jitterMs + maxLateMs` must also be shorter than how long the backend remembers a claimed run, or a late instance could win the same run again; anarchon checks it when the job is added. **Use it when:**
+
+- **A stale run is worse than none:** quotes, presence, anything whose inputs age in seconds. Keep it short.
+- **A late run is still useful:** a cleanup or a report can run half an hour late. Raise it.
+
+```ts
+scheduler.every('presence-sweep', '10s', sweep, { maxLateMs: 5_000 });            // 5 s late means stale presence: drop it
+scheduler.cron('cleanup-temp', '0 4 * * *', cleanup, { maxLateMs: 30 * 60_000 }); // fine half an hour late
+
+// On RabbitMQ, raise slotTtlMs (5 min by default) first, so the broker remembers runs long enough
+new Scheduler({ backend: new RabbitMQBackend({ url, slotTtlMs: 20 * 60_000 }), maxLateMs: 15 * 60_000 });
+```
 
 ## `timeoutMs`
 
@@ -84,6 +109,16 @@ The timeout doesn't kill your handler. JavaScript can't stop a running function 
 :::
 
 Set a timeout on any job that can hang. With `overlap: 'skip'`, a hung run keeps renewing its lease and blocks every later run of that job.
+
+**Works on** every backend. **Use it when:**
+
+- **The job calls anything over the network:** a hung connection must not hold the job forever. Pass `ctx.signal` along.
+- **The job must end before its next run is due:** set it below the interval, so a slow run fails and the next one starts on time.
+
+```ts
+scheduler.every('sync-crm', '15m', (ctx) => crm.sync({ signal: ctx.signal }), { timeoutMs: 10 * 60_000 });
+scheduler.cron('send-digest', '0 8 * * *', sendDigest, { timeoutMs: 30 * 60_000 }); // a stuck SMTP server can't block tomorrow
+```
 
 ## `overlap`
 
@@ -111,6 +146,16 @@ Skipped runs are not queued. The run at :03 never happens; the next run to start
 scheduler.every('sample-metrics', '5s', sample, { overlap: 'allow' });
 ```
 
+**Works on** lease backends: PostgreSQL, SQLite, Redis or Valkey with `lease`. On the others, runs can always overlap; if two must not, guard inside the job (a database lock, for example). **Use it when:**
+
+- **`'skip'`:** runs of the job write the same data: a sync, an export, a reindex. Two at once would fight.
+- **`'allow'`:** each run stands alone: a ping, a metrics sample, a check whose result is only logged.
+
+```ts
+scheduler.every('reindex', '5m', reindex);                              // 'skip': two reindexes would fight
+scheduler.every('ping-endpoints', '30s', ping, { overlap: 'allow' });    // each ping stands alone
+```
+
 ## `maxAttempts`
 
 *Needs a lease backend.*
@@ -127,6 +172,17 @@ scheduler.cron('charge-cards', '0 6 * * *', charge, { maxAttempts: 1 }); // neve
 
 When the limit is used up, the run is marked `interrupted` and left.
 
+**Works on** lease backends. **Use it when:**
+
+- **`1`:** the side effect must never happen twice and isn't idempotent: payments, messages without a deduplication key. A run that stopped halfway needs a person, not a retry.
+- **`3` (the default):** the job is safe to redo, or resumes from a checkpoint.
+- **More:** a long, idempotent job on infrastructure where instances come and go.
+
+```ts
+scheduler.cron('charge-cards', '0 6 * * *', charge, { maxAttempts: 1 });   // a half-done charge needs a person
+scheduler.every('rebuild-cache', '1h', rebuild, { maxAttempts: 5 });        // safe to redo: keep trying elsewhere
+```
+
 ## `catchUpMs`
 
 *Needs a lease backend.*
@@ -142,6 +198,18 @@ scheduler.every('refresh-cache', '5s', refresh, { catchUpMs: 0 });              
 
 Only the **latest** run is caught up, not every run that was missed.
 
+**Works on** lease backends. **Use it when:**
+
+- **A daily or monthly business job must happen even after a long outage:** hours, or a day.
+- **An hourly job:** up to about the interval, so a caught-up run doesn't land right before the next one.
+- **A frequent job:** `0`, since the next run is moments away.
+
+```ts
+scheduler.cron('monthly-invoices', '0 6 1 * *', invoice, { catchUpMs: 24 * 60 * 60_000 }); // a whole day to recover
+scheduler.every('hourly-rollup', '1h', rollup, { catchUpMs: 50 * 60_000 });                 // until the next is nearly due
+scheduler.every('heartbeat', '10s', beat, { catchUpMs: 0 });                                 // never
+```
+
 ## `historySize` and `historyTtlMs`
 
 `historySize` is about how many runs to keep per job, and `historyTtlMs` also drops records older than a given age.
@@ -155,7 +223,32 @@ RabbitMQ and NATS trim history by count only, so they refuse `historyTtlMs`. NAT
 
 On lease backends a small `historySize` is always safe: a run is never forgotten while a late claim could still ask for it. On claim-only backends the store's memory of claimed runs also has to cover late instances; anarchon checks this when you add the job and throws if the settings are unsafe. See [Timing and clocks](../../internals/timing-and-clocks/).
 
-## Typical combinations
+**Works on** every backend; `historyTtlMs` not on RabbitMQ or NATS. **Use it when:**
+
+- **A frequent job:** keep a few hundred runs at most; nobody reads more.
+- **Audits or compliance:** keep a year by age, with a count large enough to hold it.
+
+```ts
+scheduler.every('heartbeat', '10s', beat, { historySize: 60 });  // the last 10 minutes
+scheduler.cron('payouts', '0 7 * * *', payout, { historySize: 400, historyTtlMs: 365 * 24 * 60 * 60_000 }); // a year
+```
+
+## Values by kind of job
+
+A starting point for common jobs. "default" means leave it unset.
+
+| Kind of job | `jitterMs` | `maxLateMs` | `timeoutMs` | `overlap` | `maxAttempts` | `catchUpMs` | Runnable example |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Payments, billing | default | default | yes | default | `1` | hours | [`billing.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/billing.ts) |
+| Daily report or digest | minutes | 30 min | yes | default | default | hours | |
+| Export or ETL longer than its interval | default | default | under the interval | default | default | up to the interval | [`nightly-export.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/nightly-export.ts) |
+| Cache refresh every few seconds | about a third of the interval | short | short | default | default | `0` | [`cache-refresh.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/cache-refresh.ts) |
+| Metrics sample, ping | `0` | short | short | `'allow'` | `1` | `0` | |
+| Sending what an outbox holds | default | under the backend's memory | yes | | | | [`broker-notifications.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/broker-notifications.ts) |
+| One-off migration (`at()`) | `0` | long | long | | `1` | long | |
+
+An empty cell means the job doesn't need the option. The outbox job needs no lease option at all, so it runs on any backend, RabbitMQ and NATS included; `overlap` doesn't apply to `at()`.
+
 
 ```ts
 // A heavy nightly job: at most 2 h, started at most twice, never two at once

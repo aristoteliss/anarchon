@@ -208,6 +208,7 @@ off<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEven
 | `Cron`, `Every`, `At` | decorators | [Δήλωση εργασιών στις μεθόδους μιας κλάσης](../../guides/decorators/) |
 | `Scheduled` | decorator | Για κλάσεις που γίνονται compile με [legacy decorators](../../guides/decorators/#οι-legacy-decorators-χρειάζονται-το-scheduled) |
 | `parseDuration`, `formatDuration` | functions | `'1h30m'` σε ms, και αντίστροφα |
+| `buildHistory` | function | Συνδέει τις διεκδικήσεις και τα αποτελέσματα μιας εργασίας σε εγγραφές ιστορικού, για ένα [δικό σας backend](../../backends/custom/) |
 | `fromIORedis`, `fromNodeRedis`, `fromValkeyGlide` | functions | Προσαρμογή ενός Redis client σε `{ send }` |
 | `fromPgPool`, `fromPgClient`, `fromPostgresJs` | functions | Προσαρμογή ενός Postgres client σε `{ all, transaction }` |
 | `fromSqliteDatabase`, `fromLibsql` | functions | Προσαρμογή μιας SQLite βάσης δεδομένων ή libSQL client |

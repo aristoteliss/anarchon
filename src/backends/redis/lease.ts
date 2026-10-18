@@ -1,10 +1,10 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import { mergeRuns, parseJson, toResult } from '../../history';
+import { buildHistory, parseJson, toResult } from '../../history';
 import type { ClaimOutcome, RunClaim, RunRecord, RunStore, StoredResult } from '../../types';
-import { errorMessage } from '../../util';
 import type { KeyValueClient } from './client';
 import { parseEntries, toStr } from './replies';
+import { ScriptRunner } from './scripts';
 
 /**
  * Lease strategy for Redis and Valkey (any version with Lua, so Redis 5+).
@@ -58,9 +58,12 @@ local keep, mode, reason = tonumber(ARGV[7]), ARGV[8], ARGV[9]
 local ttl, maxLate, keepMs = tonumber(ARGV[10]) or 0, tonumber(ARGV[11]) or 0, tonumber(ARGV[12]) or 0
 
 local attempt, limit, released = 1, maxAttempts, 0
+-- A run starts from what is stored, so fields a newer version wrote survive a takeover by this one.
+local stored = {}
 local raw = redis.call('HGET', state, slot)
 if raw then
   local run = cjson.decode(raw)
+  stored = run
   if run.t == token and run.s == 'running' then return {'won', run.a} end -- our own claim, sent again
   if run.s ~= 'running' then return {'done', run.a} end
   if run.l >= now then return {'running', run.a} end
@@ -97,7 +100,8 @@ else
   end
 end
 
-local run = { a = attempt, m = limit, t = token, s = 'running', i = by, l = now + leaseMs }
+local run = stored
+run.a, run.m, run.t, run.s, run.i, run.l = attempt, limit, token, 'running', by, now + leaseMs
 if released > 0 then run.r = released end
 redis.call('HSET', state, slot, cjson.encode(run))
 redis.call('SADD', active, slot)
@@ -204,12 +208,18 @@ interface StoredRun {
  * ```
  */
 export class LeaseStore implements RunStore {
-  private readonly shas = new Map<string, string>();
+  private readonly scripts: ScriptRunner;
 
+  /**
+   * @internal Created by `RedisBackend` and `ValkeyBackend` with the 'lease' strategy; reach it as
+   * `backend.runs`. The constructor's parameters may change in any release.
+   */
   constructor(
     private readonly redis: () => Promise<KeyValueClient>,
     private readonly prefix: string,
-  ) {}
+  ) {
+    this.scripts = new ScriptRunner(redis);
+  }
 
   /** A key of one job. All of them share the hash tag `{<prefix><job>}`, so Redis Cluster keeps them on one node. */
   key(job: string, part: 'state' | 'active' | 'slots' | 'runs' | 'results'): string {
@@ -218,7 +228,7 @@ export class LeaseStore implements RunStore {
 
   /** Runs the CLAIM script: the whole decision is atomic. */
   async claim(input: RunClaim): Promise<ClaimOutcome> {
-    const reply = (await this.eval(
+    const reply = (await this.scripts.run(
       CLAIM,
       [this.key(input.job, 'state'), this.key(input.job, 'active'), this.key(input.job, 'slots'), this.key(input.job, 'runs')],
       [
@@ -256,22 +266,22 @@ export class LeaseStore implements RunStore {
 
   /** Moves the lease end to now + leaseMs, if the run still carries this token. */
   async heartbeat(job: string, slot: number, token: string, leaseMs: number): Promise<boolean> {
-    return Number(await this.eval(HEARTBEAT, [this.key(job, 'state')], [slot, token, leaseMs])) === 1;
+    return Number(await this.scripts.run(HEARTBEAT, [this.key(job, 'state')], [slot, token, leaseMs])) === 1;
   }
 
   /** Marks the run ended and takes it out of the active set, if it still carries this token. */
   async finish(job: string, slot: number, token: string, status: 'success' | 'failed' | 'interrupted'): Promise<boolean> {
-    return Number(await this.eval(FINISH, [this.key(job, 'state'), this.key(job, 'active')], [slot, token, status])) === 1;
+    return Number(await this.scripts.run(FINISH, [this.key(job, 'state'), this.key(job, 'active')], [slot, token, status])) === 1;
   }
 
   /** Ends a live lease now and counts a hand-over, if the run still carries this token. */
   async release(job: string, slot: number, token: string): Promise<boolean> {
-    return Number(await this.eval(RELEASE, [this.key(job, 'state')], [slot, token])) === 1;
+    return Number(await this.scripts.run(RELEASE, [this.key(job, 'state')], [slot, token])) === 1;
   }
 
   /** The job's unfinished runs, each with whether its lease is alive on the server's clock. */
   async active(job: string): Promise<Array<{ slot: number; attempt: number; alive: boolean }>> {
-    const reply = await this.eval(ACTIVE, [this.key(job, 'state'), this.key(job, 'active')], []);
+    const reply = await this.scripts.run(ACTIVE, [this.key(job, 'state'), this.key(job, 'active')], []);
     return (Array.isArray(reply) ? reply : []).map((row) => {
       const [slot, attempt, alive] = row as [unknown, unknown, unknown];
       return { slot: Number(toStr(slot)), attempt: Number(toStr(attempt)), alive: Number(toStr(alive)) === 1 };
@@ -319,30 +329,20 @@ export class LeaseStore implements RunStore {
     const members = await redis.send('ZRANGEBYSCORE', [this.key(job, 'results'), min, max + 1]);
     const results = (Array.isArray(members) ? members : []).flatMap((m) => toResult(parseJson(toStr(m))) ?? []);
     const slots = [...new Set(claims.map((c) => c.slot))];
-    const reply = (await this.eval(STATES, [this.key(job, 'state')], slots)) as unknown[];
+    const reply = (await this.scripts.run(STATES, [this.key(job, 'state')], slots)) as unknown[];
     const now = Number(toStr(reply[0]));
     const states = new Map(slots.map((slot, i) => [slot, (parseJson(toStr(reply[i + 1]) || 'null') as StoredRun | null) ?? null] as const));
 
-    const records = mergeRuns(job, claims, results, limit, (claim) => {
-      const run = states.get(claim.slot);
-      const current = run && run.a === claim.attempt;
-      return current && run.s === 'running' && run.l >= now ? 'running' : 'interrupted';
+    return buildHistory({
+      job,
+      claims,
+      results,
+      limit,
+      pendingStatus: (claim) => {
+        const run = states.get(claim.slot);
+        const current = run && run.a === claim.attempt;
+        return current && run.s === 'running' && run.l >= now ? 'running' : 'interrupted';
+      },
     });
-    return records;
-  }
-
-  private async eval(script: string, keys: string[], args: Array<string | number>): Promise<unknown> {
-    const redis = await this.redis();
-    let sha = this.shas.get(script);
-    if (!sha) {
-      sha = toStr(await redis.send('SCRIPT', ['LOAD', script]));
-      this.shas.set(script, sha);
-    }
-    try {
-      return await redis.send('EVALSHA', [sha, keys.length, ...keys, ...args]);
-    } catch (error) {
-      if (!/NOSCRIPT/i.test(errorMessage(error))) throw error;
-      return redis.send('EVAL', [script, keys.length, ...keys, ...args]); // script cache was flushed
-    }
   }
 }

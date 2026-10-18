@@ -24,6 +24,12 @@
   without the `lease` strategy. They now fail to compile there, and throw when set from a
   decorator or JavaScript. `overlap: 'skip'` was never enforced on those backends.
 - **RabbitMQ and NATS refuse `historyTtlMs`.** They keep history by count only and ignored it.
+- **Unknown options are refused.** `new Scheduler()`, `Scheduler.configure()`, `every()`,
+  `cron()`, `at()`, decorators, `register()` and its `defaults`, `runNow()`, `stop()`, every
+  backend and Redis connection options throw a `TypeError` for a key they don't have, naming the
+  option it was probably meant to be (`timeoutMS` → `timeoutMs`). Misspelled options from
+  configuration or JavaScript used to be ignored. Redis connection options take `host`, `port`,
+  `username`, `password` and `db` only: for TLS, use a `rediss://` URL or your own client.
 - **`at()` takes no `overlap`.** `overlap` from `register()` defaults is left out of one-off jobs.
 - **The Redis connection types are named for both servers.** `RedisInput`,
   `RedisConnectionOptions` and `RedisCommandClient` are `KeyValueConnection`,
@@ -37,6 +43,20 @@
 - **`Scheduler<B>` knows its backend's type.** `new Scheduler({ backend })` infers it, so the
   options of the scheduler and of `every()`, `cron()` and `at()` match the backend. New types:
   `LeaseJobOptions`, `LeaseSchedulerOptions`, `JobOptionsFor`, `AtJobOptions`, `ScriptOptions`.
+- **A warning when anarchon is loaded twice.** Two installed copies each keep their own
+  schedulers, so decorated jobs of one never reach the other; the second copy now emits a Node
+  warning, `ANARCHON_DUPLICATE_COPY`.
+- **Error codes.** Every error anarchon throws has a stable `code` (`ANARCHON_UNKNOWN_OPTION`,
+  `ANARCHON_UNSUPPORTED`, ...), checked with `isAnarchonError(error, code)`. The error classes
+  are unchanged.
+- **`buildHistory()` for custom backends.** Joins a job's claims (`ClaimRecord`) and results
+  (`StoredResult`) into the records `history()` returns, as the built-in backends do.
+- **The store records its format.** Redis and Valkey write `<prefix>format`, the SQL backends a
+  `<table>_meta` table. A backend refuses to start on data a newer, incompatible anarchon wrote
+  (`ANARCHON_STORE_FORMAT`), instead of misreading it. A Redis takeover keeps the fields of a run
+  it doesn't know, so an older instance never drops what a newer one stored.
+- **`SqlDialect` is exported,** so a backend for another SQL database can extend `SqlBackend`
+  with types.
 - **`RunKey` and `RunEvent`.** The fields every run event and history record share (`job`,
   `slot`, `scheduledAt`, `instanceId`), as types of their own: one function can read any of them.
 - **The 'lost' event has `scheduledAt`,** like the other run events.
@@ -45,6 +65,13 @@
 
 - **NATS keeps the history its jobs ask for.** The stream keeps the largest of the backend's
   `historySize` and every job's, for each job; a job's own `historySize` was ignored before.
+
+### Fixed
+
+- **A read after `stop()` no longer keeps the process alive.** `history()` and `lastRun()` after
+  `stop()` reopened the connection and left it open; each read now closes it when it is done.
+- **`stop()` during `start()` leaves no connection open.** What `start()` reconnected after
+  `stop()` had closed the backend is closed too.
 
 ## 0.3.3
 

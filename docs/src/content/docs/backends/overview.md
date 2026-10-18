@@ -22,18 +22,95 @@ Use what you already run. If you have both Redis and PostgreSQL, Redis has the l
 
 ## What each backend gives you
 
-| | Redis / Valkey | PostgreSQL | SQLite | RabbitMQ | NATS |
-| --- | --- | --- | --- | --- | --- |
-| One winner per run | yes | yes | yes | yes | yes |
-| Backups take over a dead runner | yes ¹ | yes | yes | no | no |
-| No overlapping runs | yes ¹ | yes | yes | no | no |
-| Catch-up after downtime | yes ¹ | yes | yes | no | no |
-| Hand-over on `stop()` | yes ¹ | yes | yes | no | no |
-| History | yes | yes | yes | yes | yes |
-| Several machines | yes | yes | only with a libSQL server | yes | yes |
-| Needs | Redis 5+ or Valkey | PostgreSQL 9.5+ | SQLite 3.35+ | RabbitMQ 3.9+ | JetStream |
+"Other strategies" means Redis or Valkey with `stream-id` or `script`, and Redis with `idmp`.
 
-¹ With the `lease` strategy, which is the default. The `stream-id`, `idmp` and `script` strategies are claim-only.
+| | Redis / Valkey `lease` | Redis / Valkey other strategies | PostgreSQL | SQLite / libSQL | RabbitMQ | NATS |
+| --- | --- | --- | --- | --- | --- | --- |
+| One winner per run | yes | yes | yes | yes | yes | yes |
+| A backup takes over a dead runner | yes | no | yes | yes | no | no |
+| No overlapping runs (`overlap: 'skip'`) | yes | no | yes | yes | no | no |
+| Retries after a dead runner (`maxAttempts`) | yes | no | yes | yes | no | no |
+| Catch-up after downtime (`catchUpMs`) | yes | no | yes | yes | no | no |
+| Hand-over on `stop()` | yes | no | yes | yes | no | no |
+| History (`history()`, `lastRun()`) | yes | yes | yes | yes | yes | yes |
+| History by age (`historyTtlMs`) | yes | yes ¹ | yes | yes | no | no |
+| `historySize` per job | yes | yes | yes | yes | yes | shared ² |
+| How long a claimed run is remembered | always | `stream-id` always, `idmp` `durationSec`, `script` `windowMs` | always | always | `slotTtlMs` | `duplicateWindowMs` |
+| Job names | any | any | any | any | letters, digits, `_`, `-` | letters, digits, `_`, `-` |
+| Instances on several machines | yes | yes | yes | with a libSQL server | yes | yes |
+| Needs | Redis 5+ or Valkey | Redis 5+ or Valkey; `idmp` Redis 8.6+ | PostgreSQL 9.5+ | SQLite 3.35+ | RabbitMQ 3.9+ | JetStream |
+
+¹ With `script`, `historyTtlMs` must be longer than the strategy's `windowMs`.
+² NATS keeps one history size for all its jobs: the largest of the backend's `historySize` and every job's.
+
+## Which options each backend takes
+
+Most options work everywhere. The ones that need a lease are refused elsewhere, so a setting can never be silently ignored: typed code doesn't compile, and a job or scheduler set up from a decorator or plain JavaScript throws a `TypeError` that names the option and the backend.
+
+| Option | Set on | Lease backends | Claim-only backends | Notes |
+| --- | --- | --- | --- | --- |
+| `jitterMs`, `timeoutMs`, `data`, `offsetMs`, `timezone` | job, scheduler | yes | yes | |
+| `maxLateMs` | job, scheduler | yes | yes | On claim-only backends `jitterMs + maxLateMs` must be shorter than how long the backend remembers a run; checked when the job is added |
+| `historySize` | job, scheduler | yes | yes | NATS: the largest wins, see ² |
+| `historyTtlMs` | job, scheduler | yes | Redis/Valkey only | RabbitMQ and NATS refuse it |
+| `overlap`, `maxAttempts`, `catchUpMs` | job | yes | refused | `at()` never takes `overlap` |
+| `leaseMs`, `heartbeatMs` | scheduler | yes | refused | |
+
+```ts
+const onPostgres = new Scheduler({ backend: new PostgresBackend({ connection: pool }), leaseMs: 10_000 });
+onPostgres.every('export', '1h', exportAll, { overlap: 'skip', maxAttempts: 2, catchUpMs: 30 * 60_000 }); // all fine
+
+const onNats = new Scheduler({ backend: new NatsBackend() });
+onNats.every('notify', '1m', notify, { timeoutMs: 30_000, maxLateMs: 60_000 }); // fine
+onNats.every('notify', '1m', notify, { maxAttempts: 2 }); // type error: NATS has no leases
+```
+
+## Each backend's own options
+
+The options of the backend objects themselves. Every backend also accepts a client your app already has, and never closes it.
+
+| Backend | Option | Default | What it is for |
+| --- | --- | --- | --- |
+| `RedisBackend` | `redis` | `localhost:6379` | A URL, `{ host, port, ... }`, or your client |
+| | `strategy` | `'lease'` | A name, or `{ name: 'idmp', durationSec, maxSize }` / `{ name: 'script', windowMs }` |
+| | `prefix` | `'cron:'` | Keeps services that share a Redis apart |
+| `ValkeyBackend` | `valkey` | `localhost:6379` | Like `redis` |
+| | `strategy` | `'lease'` | As above, without `idmp` |
+| | `prefix` | `'cron:'` | As above |
+| `PostgresBackend` | `connection` | pg's defaults | A connection string, a pg Pool or Client, postgres.js, or `{ all, transaction }` |
+| | `table` | `'anarchon_runs'` | The tables' name, schema allowed; keeps services apart |
+| `SqliteBackend` | `database` | `'./anarchon.db'` | A file path, a node:sqlite or better-sqlite3 database, or a libSQL client |
+| | `table` | `'anarchon_runs'` | As above |
+| | `busyTimeoutMs` | `5000` | How long a claim waits for another process's write |
+| `RabbitMQBackend` | `url` / `connection` | `amqp://localhost` | Where RabbitMQ is, or your amqplib connection |
+| | `prefix` | `'cron.'` | Queue names |
+| | `slotTtlMs` | `300000` | How long a claimed run is remembered |
+| `NatsBackend` | `servers` / `connection` | `nats://localhost:4222` | Where NATS is, or your connection |
+| | `stream`, `prefix` | `'CRON'`, `'cron.'` | The JetStream stream and its subjects |
+| | `duplicateWindowMs` | `300000` | How long a claimed run is remembered |
+| | `historySize` | `1000` | Runs kept per job, at least |
+| | `replicas` | `1` | Stream replicas; `3` in a NATS cluster |
+
+```ts
+new RedisBackend({ redis: process.env.REDIS_URL, strategy: { name: 'script', windowMs: 10 * 60_000 }, prefix: 'billing:cron:' });
+new ValkeyBackend({ valkey: process.env.VALKEY_URL });
+new PostgresBackend({ connection: pool, table: 'scheduler.runs' });
+new SqliteBackend({ database: '/var/lib/app/jobs.db', busyTimeoutMs: 10_000 });
+new RabbitMQBackend({ url: process.env.AMQP_URL, prefix: 'billing.cron.', slotTtlMs: 10 * 60_000 });
+new NatsBackend({ servers: ['nats://n1:4222', 'nats://n2:4222'], replicas: 3, duplicateWindowMs: 10 * 60_000 });
+```
+
+## Choosing by what a job needs
+
+| The job | Needs | Backends that fit |
+| --- | --- | --- |
+| Must not run twice, even if its runner dies (payments) | `maxAttempts: 1`, writes keyed by `ctx.slot` | Any lease backend |
+| Must still run after a full outage (daily reports) | `catchUpMs` | Any lease backend |
+| Takes longer than its interval (exports) | `overlap: 'skip'`, hand-over on deploy | Any lease backend |
+| Cheap and frequent, a missed run doesn't matter (cache refresh) | jitter, a short `maxLateMs` | Any backend |
+| Sends whatever is outstanding (notifications from an outbox) | nothing special | Any backend, brokers included |
+
+The [examples folder](https://github.com/aristoteliss/anarchon/tree/main/examples) has a runnable file for each of these: `billing.ts`, `nightly-export.ts`, `cache-refresh.ts`, `broker-notifications.ts`, and `tenants.ts` for per-tenant jobs.
 
 ## Lease backends and claim-only backends
 

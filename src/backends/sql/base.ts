@@ -1,6 +1,8 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import { type ClaimRecord, mergeRuns } from '../../history';
+import { coded } from '../../errors';
+import { buildHistory, type ClaimRecord } from '../../history';
+import { checkStoreFormat, STORE_FORMAT } from '../../store-format';
 import type { Backend, ClaimInput, ClaimOutcome, RunClaim, RunRecord, RunStatus, RunStore, StoredResult } from '../../types';
 
 /** A statement parameter: the SQL backends only bind strings, numbers and null. */
@@ -46,7 +48,30 @@ export interface SqlClient extends SqlQuery {
   close?(): Promise<void>;
 }
 
-/** What differs between Postgres and SQLite. */
+/**
+ * What differs between SQL databases. A subclass of {@link SqlBackend} for another database
+ * gives one, together with `connect()` and `checkServer()`; the tables, the claim transaction and
+ * the history are shared.
+ *
+ * @example A dialect for an embedded SQLite-compatible database
+ * ```ts
+ * class EmbeddedSqlBackend extends SqlBackend {
+ *   readonly name = 'embedded-sql';
+ *   protected readonly dialect: SqlDialect = {
+ *     bigint: 'INTEGER',
+ *     nowMs: `CAST(ROUND((julianday('now') - 2440587.5) * 86400000.0) AS INTEGER)`,
+ *     forUpdate: '',                 // one writer at a time already
+ *     placeholders: (sql) => sql,    // the driver takes '?'
+ *     extraTables: () => [],
+ *     serialize: async () => {},
+ *     isAlreadyCreated: () => false,
+ *   };
+ *   constructor() { super('embedded_runs'); }
+ *   protected async connect() { return { client: fromSqliteDatabase(openDatabase()), owned: true }; }
+ *   protected async checkServer() {}
+ * }
+ * ```
+ */
 export interface SqlDialect {
   /** Integer type for ms timestamps. */
   readonly bigint: string;
@@ -138,7 +163,7 @@ export abstract class SqlBackend implements Backend, RunStore {
   private ready: Promise<SqlClient> | undefined;
 
   protected constructor(table: string) {
-    if (!isIdentifier(table)) throw new TypeError(`Invalid table name "${table}"`);
+    if (!isIdentifier(table)) throw coded(new TypeError(`Invalid table name "${table}"`), 'ANARCHON_INVALID_ARGUMENT');
     this.table = table;
     this.attempts = `${table}_attempts`;
   }
@@ -156,8 +181,6 @@ export abstract class SqlBackend implements Backend, RunStore {
 
   /** Nothing per job: all jobs share the tables. */
   async prepareJob(): Promise<void> {}
-
-  // ---------------------------------------------------------------- RunStore (leases)
 
   /** With a RunClaim: the lease state machine. With a plain ClaimInput (no scheduler): one winner, a long lease, no backups. */
   async claim(input: ClaimInput): Promise<boolean>;
@@ -218,9 +241,6 @@ export abstract class SqlBackend implements Backend, RunStore {
     return rows.map((row) => ({ slot: Number(row.slot), attempt: Number(row.attempt), alive: Number(row.alive) === 1 }));
   }
 
-  // ---------------------------------------------------------------- Backend
-
-  /** Claims a run of its own for runNow(), at the first free millisecond from input.slot. Returns the slot it used. */
   /** Claims a run of its own for runNow(), at the first free millisecond from input.slot. Returns the slot it used. */
   async recordManualRun(input: ClaimInput): Promise<number> {
     for (let slot = input.slot; slot < input.slot + 10; slot++) {
@@ -235,7 +255,7 @@ export abstract class SqlBackend implements Backend, RunStore {
       });
       if (outcome.kind === 'won') return slot;
     }
-    throw new Error(`Could not record a manual run of "${input.job}"`);
+    throw coded(new Error(`Could not record a manual run of "${input.job}"`), 'ANARCHON_STORE');
   }
 
   /** Writes how the attempt ended on its row in <table>_attempts. */
@@ -308,7 +328,13 @@ export abstract class SqlBackend implements Backend, RunStore {
       else if (current && (row.current_status === 'success' || row.current_status === 'failed')) status = row.current_status;
       pending.set(`${slot}|${attempt}`, status);
     }
-    return mergeRuns(job, claims, results, limit, (claim) => pending.get(`${claim.slot}|${claim.attempt}`) ?? 'interrupted');
+    return buildHistory({
+      job,
+      claims,
+      results,
+      limit,
+      pendingStatus: (claim) => pending.get(`${claim.slot}|${claim.attempt}`) ?? 'interrupted',
+    });
   }
 
   /** Closes the connection if this backend opened it. A client that was passed in stays open. */
@@ -325,8 +351,6 @@ export abstract class SqlBackend implements Backend, RunStore {
     }
   }
 
-  // ---------------------------------------------------------------- internals
-
   /**
    * The lease state machine, the same as the Redis CLAIM script: one transaction per claim, and the
    * rows it reads are locked until it commits (SQLite: one writer at a time anyway).
@@ -336,18 +360,8 @@ export abstract class SqlBackend implements Backend, RunStore {
     const t = this.table;
     const lock = this.dialect.forUpdate;
     if (input.mode === 'takeover') {
-      // Backups ask every 1 to 2 heartbeats, and nearly always the run is still alive: a plain read
-      // answers that. Only a claim that can win opens the transaction, which holds the write lock
-      // (on a libSQL server for seconds, if this process dies inside it).
-      const [row] = await this.run(
-        `SELECT attempt, token, status, lease_until, ${this.dialect.nowMs} AS now FROM ${t} WHERE job = ? AND slot = ?`,
-        [input.job, input.slot],
-      );
-      if (!row) return { kind: 'none' };
-      if (row.token !== input.token) {
-        if (row.status !== 'running') return { kind: 'done' };
-        if (Number(row.lease_until) >= Number(row.now)) return { kind: 'running', attempt: Number(row.attempt) };
-      }
+      const answer = await this.takeoverWithoutWriting(input);
+      if (answer) return answer;
     }
     return client.transaction(async (raw) => {
       const tx: SqlQuery = { all: (sql, params) => raw.all(this.dialect.placeholders(sql), params) };
@@ -384,45 +398,78 @@ export abstract class SqlBackend implements Backend, RunStore {
       } else if (input.mode === 'takeover') {
         return { kind: 'none' };
       } else {
-        // Too late (delayed or queued claim): don't start a stale run.
-        const late = now - input.slot;
-        if (input.maxLateMs && late > input.maxLateMs) return { kind: 'late', lateMs: late };
-        const others = await tx.all(`SELECT slot, lease_until FROM ${t} WHERE job = ? AND status = 'running'${lock}`, [input.job]);
-        for (const other of others) {
-          const otherSlot = Number(other.slot);
-          if (Number(other.lease_until) >= now) {
-            if (input.overlap === 'skip') return { kind: 'overlap', slot: otherSlot };
-          } else if (otherSlot < input.slot) {
-            // An older run died and a newer one is starting: stop trying to finish the old one.
-            await tx.all(`UPDATE ${t} SET status = 'interrupted' WHERE job = ? AND slot = ?`, [input.job, otherSlot]);
-          }
-        }
-        await tx.all(
-          `INSERT INTO ${t} (job, slot, attempt, max_attempts, released, token, status, instance_id, lease_until)
-           VALUES (?, ?, 1, ?, 0, ?, 'running', ?, ?)`,
-          [input.job, input.slot, limit, input.token, input.instanceId, now + input.leaseMs],
-        );
+        const refused = await this.startRun(tx, input, limit, now);
+        if (refused) return refused;
       }
-      await tx.all(
-        `INSERT INTO ${this.attempts} (job, slot, attempt, instance_id, token, reason, manual, claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [input.job, input.slot, attempt, input.instanceId, input.token, input.reason, input.reason === 'manual' ? 1 : 0, now],
-      );
-      // Keep the newest runs only, but never a run still in progress, or one young enough that a
-      // late claim could still ask for it.
-      await tx.all(
-        `DELETE FROM ${t} WHERE job = ? AND status <> 'running' AND slot < ?
-         AND slot <= (SELECT slot FROM ${t} WHERE job = ? ORDER BY slot DESC LIMIT 1 OFFSET ?)`,
-        [input.job, now - (input.keepMs ?? 0), input.job, input.historySize],
-      );
-      await tx.all(
-        `DELETE FROM ${this.attempts} WHERE job = ?
-         AND slot < (SELECT slot FROM ${this.attempts} WHERE job = ? ORDER BY slot DESC, attempt DESC LIMIT 1 OFFSET ?)`,
-        [input.job, input.job, input.historySize],
-      );
-      if (input.historyTtlMs)
-        await tx.all(`DELETE FROM ${this.attempts} WHERE job = ? AND claimed_at < ?`, [input.job, now - input.historyTtlMs]);
+      await this.recordAttempt(tx, input, attempt, now);
       return { kind: 'won', attempt };
     });
+  }
+
+  /**
+   * A takeover answered by a plain read when it can't win. Backups ask every 1 to 2 heartbeats, and
+   * nearly always the run is still alive; only a claim that can win opens the transaction, which
+   * holds the write lock (on a libSQL server for seconds, if this process dies inside it).
+   */
+  private async takeoverWithoutWriting(input: RunClaim): Promise<ClaimOutcome | undefined> {
+    const [row] = await this.run(
+      `SELECT attempt, token, status, lease_until, ${this.dialect.nowMs} AS now FROM ${this.table} WHERE job = ? AND slot = ?`,
+      [input.job, input.slot],
+    );
+    if (!row) return { kind: 'none' };
+    if (row.token === input.token) return undefined;
+    if (row.status !== 'running') return { kind: 'done' };
+    if (Number(row.lease_until) >= Number(row.now)) return { kind: 'running', attempt: Number(row.attempt) };
+    return undefined;
+  }
+
+  /** Inserts a new run inside the claim's transaction, or says why it must not start. */
+  private async startRun(tx: SqlQuery, input: RunClaim, limit: number, now: number): Promise<ClaimOutcome | undefined> {
+    const t = this.table;
+    // Too late (delayed or queued claim): don't start a stale run.
+    const late = now - input.slot;
+    if (input.maxLateMs && late > input.maxLateMs) return { kind: 'late', lateMs: late };
+    const others = await tx.all(`SELECT slot, lease_until FROM ${t} WHERE job = ? AND status = 'running'${this.dialect.forUpdate}`, [
+      input.job,
+    ]);
+    for (const other of others) {
+      const otherSlot = Number(other.slot);
+      if (Number(other.lease_until) >= now) {
+        if (input.overlap === 'skip') return { kind: 'overlap', slot: otherSlot };
+      } else if (otherSlot < input.slot) {
+        // An older run died and a newer one is starting: stop trying to finish the old one.
+        await tx.all(`UPDATE ${t} SET status = 'interrupted' WHERE job = ? AND slot = ?`, [input.job, otherSlot]);
+      }
+    }
+    await tx.all(
+      `INSERT INTO ${t} (job, slot, attempt, max_attempts, released, token, status, instance_id, lease_until)
+       VALUES (?, ?, 1, ?, 0, ?, 'running', ?, ?)`,
+      [input.job, input.slot, limit, input.token, input.instanceId, now + input.leaseMs],
+    );
+    return undefined;
+  }
+
+  /** Records the won attempt in history, inside the claim's transaction, and trims the job's rows. */
+  private async recordAttempt(tx: SqlQuery, input: RunClaim, attempt: number, now: number): Promise<void> {
+    const t = this.table;
+    await tx.all(
+      `INSERT INTO ${this.attempts} (job, slot, attempt, instance_id, token, reason, manual, claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [input.job, input.slot, attempt, input.instanceId, input.token, input.reason, input.reason === 'manual' ? 1 : 0, now],
+    );
+    // Keep the newest runs only, but never a run still in progress, or one young enough that a
+    // late claim could still ask for it.
+    await tx.all(
+      `DELETE FROM ${t} WHERE job = ? AND status <> 'running' AND slot < ?
+       AND slot <= (SELECT slot FROM ${t} WHERE job = ? ORDER BY slot DESC LIMIT 1 OFFSET ?)`,
+      [input.job, now - (input.keepMs ?? 0), input.job, input.historySize],
+    );
+    await tx.all(
+      `DELETE FROM ${this.attempts} WHERE job = ?
+       AND slot < (SELECT slot FROM ${this.attempts} WHERE job = ? ORDER BY slot DESC, attempt DESC LIMIT 1 OFFSET ?)`,
+      [input.job, input.job, input.historySize],
+    );
+    if (input.historyTtlMs)
+      await tx.all(`DELETE FROM ${this.attempts} WHERE job = ? AND claimed_at < ?`, [input.job, now - input.historyTtlMs]);
   }
 
   private async run(sql: string, params: ReadonlyArray<SqlValue>): Promise<SqlRow[]> {
@@ -442,6 +489,8 @@ export abstract class SqlBackend implements Backend, RunStore {
           if (!this.dialect.isAlreadyCreated(error)) throw error; // another instance created it at the same moment
         }
       }
+      const [format] = await client.all(this.dialect.placeholders(`SELECT value FROM ${this.table}_meta WHERE name = ?`), ['format']);
+      checkStoreFormat(format?.value, `The table "${this.table}"`);
       return client;
     })().catch(async (error: unknown) => {
       const connection = this.connection;
@@ -488,6 +537,8 @@ export abstract class SqlBackend implements Backend, RunStore {
         PRIMARY KEY (job, slot, attempt)
       )`,
       ...this.dialect.extraTables(this.table),
+      `CREATE TABLE IF NOT EXISTS ${this.table}_meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+      `INSERT INTO ${this.table}_meta (name, value) VALUES ('format', '${STORE_FORMAT}') ON CONFLICT (name) DO NOTHING`,
     ];
   }
 }

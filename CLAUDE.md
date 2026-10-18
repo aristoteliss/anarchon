@@ -10,7 +10,7 @@ PostgreSQL, SQLite, RabbitMQ and NATS.
 - `src/scheduler/scheduler.ts`: the `Scheduler` class, public API and lifecycle only. Its parts
   are beside it: `job.ts` (validation), `timers.ts` (when a run is due), `lease-runner.ts` and
   `claim-only-runner.ts` (claiming a run), `executor.ts` (running the handler and recording the
-  result), `data.ts` (builds `ctx.data` for a run).
+  result), `data.ts` (builds `ctx.data` for a run), `options.ts` (checks the options of `new Scheduler()`).
 - `src/decorators.ts`: `@Cron`, `@Every`, `@At` and `@Scheduled`.
 - `src/registry.ts`: which schedulers exist (default, named, created from `Scheduler.configure()`
   settings) and where each decorated object's jobs live.
@@ -70,7 +70,8 @@ Use these scripts. Use pnpm only, never npm or yarn.
 | Build | `pnpm build` |
 | Clean build (also before publishing) | `pnpm rebuild` |
 | Remove build output (`clean:all` also node_modules) | `pnpm clean`, `pnpm clean:all` |
-| Pack, install and load the published tarball | `pnpm test:release` |
+| Pack, install and load the published tarball; check the API snapshot | `pnpm test:release` |
+| Record an intended change of the public API (`api/anarchon.api.txt`) | `pnpm api:update` |
 | Everything before a release | `pnpm verify:all` |
 | Failure scenarios, side by side | `pnpm scenarios` |
 | Documentation site (Astro Starlight, in `docs/`) | `pnpm docs:dev`, `pnpm docs:build` |

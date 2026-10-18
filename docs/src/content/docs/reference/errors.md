@@ -11,6 +11,38 @@ anarchon checks settings early and says what is wrong. Errors come at three mome
 | `start()` | The store can't be reached, is too old, or a driver is missing. The promise rejects |
 | While running | Problems with the store. Reported as [`error` events](../events/#error), never thrown |
 
+## Error codes
+
+Every error anarchon throws has a `code`. Check the code, not the message: messages may be reworded in any release, codes stay. The error keeps its class (`TypeError`, `RangeError` or `Error`).
+
+```ts
+import { isAnarchonError } from 'anarchon';
+
+try {
+  scheduler.every(name, interval, handler, options);
+} catch (error) {
+  if (isAnarchonError(error, 'ANARCHON_UNKNOWN_OPTION')) return badRequest(error.message);
+  throw error;
+}
+```
+
+| Code | Meaning |
+| --- | --- |
+| `ANARCHON_INVALID_ARGUMENT` | A value or argument that can't be used: a number out of range, an invalid cron expression or date, a missing backend |
+| `ANARCHON_UNKNOWN_OPTION` | An option the object doesn't have, often a misspelling |
+| `ANARCHON_UNSUPPORTED` | A valid option the backend or strategy can't honour, such as `overlap` on RabbitMQ |
+| `ANARCHON_UNSAFE_JOB` | Job settings that could let a late instance run a job twice |
+| `ANARCHON_SERVER` | The server is too old, or lacks a feature the backend needs |
+| `ANARCHON_MISSING_DRIVER` | The driver package of a backend isn't installed |
+| `ANARCHON_STATE` | A call the scheduler's state doesn't allow, such as `runNow()` before `start()` |
+| `ANARCHON_JOB_EXISTS`, `ANARCHON_UNKNOWN_JOB` | A job name that is taken, or not registered |
+| `ANARCHON_SCHEDULER_EXISTS`, `ANARCHON_NO_SCHEDULER` | A scheduler name that is taken, or that names no scheduler and no settings |
+| `ANARCHON_STORE` | The store refused a write |
+| `ANARCHON_STORE_FORMAT` | The store holds data a newer version of anarchon wrote: run one version on every instance |
+| `ANARCHON_INTERNAL` | A bug in anarchon: please report it |
+
+New codes may be added in a minor release, so keep a default branch when you switch over them.
+
 ## Creating a scheduler
 
 | Message | Cause | Fix |
@@ -44,6 +76,7 @@ anarchon checks settings early and says what is wrong. Errors come at three mome
 | `leaseMs needs a backend with leases (...); B has none` (also `heartbeatMs`) | The same, on `new Scheduler()` | Remove the option, or use a backend with leases |
 | `Job "X": a one-off job takes no overlap` | `at()` with `overlap` | Remove it: a one-off job has no previous run |
 | `Job "X": historyTtlMs is not supported by B, which keeps history by count (historySize) only` | `historyTtlMs` on RabbitMQ or NATS, on the job or the scheduler | Use `historySize` |
+| `X: unknown option "K" (did you mean "M"?)` | A misspelled or misplaced option: `X` is `new Scheduler()`, `Job "name"`, `register()`, a backend, and so on. Options from configuration or JavaScript are checked too | Use the name it suggests, or remove the option |
 | `The "S" strategy has no setting "K"` | A setting of another strategy, e.g. `{ name: 'lease', windowMs }` | Move it to the strategy it belongs to |
 | `Job "X": with RabbitMQ, job names may only contain letters, digits, "_" and "-"` | The name becomes a queue name or a subject | Rename the job |
 | `offsetMs must be a whole number of ms` | A fractional offset | Use whole milliseconds |

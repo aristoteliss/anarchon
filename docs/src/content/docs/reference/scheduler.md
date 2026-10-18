@@ -208,6 +208,7 @@ Everything the package exports.
 | `Cron`, `Every`, `At` | decorators | [Declare jobs on the methods of a class](../../guides/decorators/) |
 | `Scheduled` | decorator | For classes compiled with [legacy decorators](../../guides/decorators/#legacy-decorators-need-scheduled) |
 | `parseDuration`, `formatDuration` | functions | `'1h30m'` to ms, and back |
+| `buildHistory` | function | Joins a job's claims and results into history records, for a [custom backend](../../backends/custom/) |
 | `fromIORedis`, `fromNodeRedis`, `fromValkeyGlide` | functions | Adapt a Redis client to `{ send }` |
 | `fromPgPool`, `fromPgClient`, `fromPostgresJs` | functions | Adapt a Postgres client to `{ all, transaction }` |
 | `fromSqliteDatabase`, `fromLibsql` | functions | Adapt a SQLite database or libSQL client |
