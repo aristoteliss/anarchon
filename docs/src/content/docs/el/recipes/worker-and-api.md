@@ -37,11 +37,10 @@ flowchart LR
 
 ```ts
 // cron/config.ts
-import type { SchedulerOptions } from 'anarchon';
+import { RedisBackend, type SchedulerOptions } from 'anarchon';
 
 export const cronOptions: SchedulerOptions = {
-  redis: process.env.REDIS_URL,
-  prefix: 'billing:cron:',
+  backend: new RedisBackend({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' }),
   timezone: 'Europe/Athens',
 };
 ```

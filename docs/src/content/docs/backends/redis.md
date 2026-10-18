@@ -6,11 +6,11 @@ description: The default backend, its four strategies, its keys and its options.
 Redis is the default backend. It works with Redis 5 or newer and with Valkey.
 
 ```ts
-import { Scheduler } from 'anarchon';
+import { RedisBackend, Scheduler } from 'anarchon';
 
-new Scheduler({ redis: 'redis://localhost:6379' });
-new Scheduler({ redis: 'redis://cache.internal:6379' });
-new Scheduler({ redis: { host: 'localhost', port: 6390 } }); // Valkey
+new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
+new Scheduler({ backend: new RedisBackend({ redis: 'redis://cache.internal:6379' }) });
+new Scheduler({ backend: new RedisBackend({ redis: { host: 'localhost', port: 6390 } }) }); // Valkey
 ```
 
 ## Connecting
@@ -18,8 +18,8 @@ new Scheduler({ redis: { host: 'localhost', port: 6390 } }); // Valkey
 `redis` accepts a URL, an options object, or a client.
 
 ```ts
-new Scheduler({ redis: 'rediss://user:secret@host:6380/2' }); // TLS, credentials, database 2
-new Scheduler({ redis: { host: 'cache', port: 6379, password: process.env.REDIS_PASSWORD, db: 1 } });
+new Scheduler({ backend: new RedisBackend({ redis: 'rediss://user:secret@host:6380/2' }) }); // TLS, credentials, database 2
+new Scheduler({ backend: new RedisBackend({ redis: { host: 'cache', port: 6379, password: process.env.REDIS_PASSWORD, db: 1 } }) });
 ```
 
 When you pass a URL or options, anarchon opens the connection with `redis` (node-redis) and closes it on `stop()`.
@@ -30,22 +30,22 @@ When you pass a URL or options, anarchon opens the connection with `redis` (node
 import { Redis } from 'ioredis';
 
 const redis = new Redis(process.env.REDIS_URL);
-const scheduler = new Scheduler({ redis }); // stop() leaves it open
+const scheduler = new Scheduler({ backend: new RedisBackend({ redis }) }); // stop() leaves it open
 ```
 
 These clients are recognized: **ioredis**, **iovalkey**, **node-redis** (`redis`) and **Valkey GLIDE**. Anything else works if it has a `send(command, args)` method that returns the reply.
 
 ## Options
 
-Pass them on the scheduler, or create the backend yourself for the ones without a shortcut.
+Options of `new RedisBackend()`:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `redis` | none | Connection or client. Required, unless you create the backend yourself |
+| `redis` | `localhost:6379` | Connection or client |
 | `strategy` | `'lease'` | How one winner is picked (below) |
 | `prefix` | `'cron:'` | Prefix of every key |
 | `idmp` | `{ durationSec: 300, maxSize: 1000 }` | `'idmp'` strategy only |
-| `scriptWindowMs` | `300000` | `'script'` strategy only: how long a claimed run is remembered. No shortcut; needs `new RedisBackend()` |
+| `scriptWindowMs` | `300000` | `'script'` strategy only: how long a claimed run is remembered |
 
 ```ts
 import { RedisBackend, Scheduler } from 'anarchon';

@@ -13,9 +13,9 @@ import { Scheduler } from 'anarchon';
 new Scheduler(options: SchedulerOptions)
 ```
 
-Creates a scheduler. Nothing connects until `start()`. One of `backend` and `redis` is required: no store is assumed. See [Options](../options/#scheduler-options).
+Creates a scheduler. Nothing connects until `start()`. `backend` is required: no store is assumed. See [Options](../options/#scheduler-options).
 
-**Throws** `TypeError` when neither `backend` nor `redis` is given, when both `backend` and a Redis shortcut are given, or `instanceId` is empty; `RangeError` when a number is out of range, or `heartbeatMs` is not under half of `leaseMs`.
+**Throws** `TypeError` when `backend` is not given, or `instanceId` is empty; `RangeError` when a number is out of range, or `heartbeatMs` is not under half of `leaseMs`.
 
 ## Properties
 

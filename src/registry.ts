@@ -22,11 +22,8 @@ export interface ConfigureOptions extends Omit<SchedulerOptions, 'backend' | 'na
    * Where runs are claimed and recorded. A function is called with the scheduler's name
    * (`'default'` for the default one) and returns a backend for it: that lets one set of settings
    * serve several schedulers, each with its own table or key prefix.
-   *
-   * One of `backend` and `redis` must be given: a scheduler is never created on a backend you
-   * didn't choose.
    */
-  backend?: Backend | ((name: string) => Backend);
+  backend: Backend | ((name: string) => Backend);
   /**
    * Start the scheduler as soon as it is created. A failure to start is reported as an `'error'`
    * event. Default false: you start it, with `Scheduler.get(name).start()` or `Scheduler.startAll()`.
@@ -52,7 +49,6 @@ interface Placement {
 }
 
 const DEFAULT_NAME = 'default';
-const REDIS_PREFIX = 'cron:';
 
 const hosts = new WeakMap<object, SchedulerHost>();
 const named = new Map<string, SchedulerHost>();
@@ -74,20 +70,16 @@ function settingsFor(name: string | undefined): ConfigureOptions | undefined {
   if (own || name === undefined) return own;
   const shared = settings.get(undefined);
   if (!shared || typeof shared.backend === 'function') return shared;
-  if (shared.backend) {
-    throw new Error(
-      `Scheduler "${name}" has no settings of its own, and the default settings hold a backend object, which two schedulers can't share. ` +
-        `Call Scheduler.configure("${name}", { ... }), or give the default settings a function: backend: (name) => ...`,
-    );
-  }
-  // The Redis shortcuts: the same server, and keys of its own so that it shares no job state.
-  return { ...shared, prefix: `${shared.prefix ?? REDIS_PREFIX}${name}:` };
+  throw new Error(
+    `Scheduler "${name}" has no settings of its own, and the default settings hold a backend object, which two schedulers can't share. ` +
+      `Call Scheduler.configure("${name}", { ... }), or give the default settings a function: backend: (name) => ...`,
+  );
 }
 
 function create(name: string | undefined, { autoStart, backend, ...options }: ConfigureOptions): SchedulerHost {
   if (!factory) throw new Error('No scheduler can be created yet');
   const built = typeof backend === 'function' ? backend(name ?? DEFAULT_NAME) : backend;
-  const host = hosts.get(factory({ ...options, ...(built ? { backend: built } : {}), ...(name === undefined ? {} : { name }) }));
+  const host = hosts.get(factory({ ...options, backend: built, ...(name === undefined ? {} : { name }) }));
   if (!host) throw new Error('The scheduler that was created is not known to the registry');
   if (autoStart) host.startInBackground();
   return host;
@@ -233,8 +225,8 @@ export function setDefaultScheduler(host: SchedulerHost | undefined): void {
 export function configure(name: string | undefined, options: ConfigureOptions): void {
   if (name !== undefined && (typeof name !== 'string' || name === ''))
     throw new TypeError('Scheduler.configure(): name must be a non-empty string');
-  if (typeof options !== 'object' || options === null || (options.backend === undefined && options.redis === undefined)) {
-    throw new TypeError('Scheduler.configure() needs a backend: pass `backend`, or `redis` for Redis and Valkey');
+  if (typeof options !== 'object' || options === null || !options.backend) {
+    throw new TypeError('Scheduler.configure() needs a backend, e.g. backend: new RedisBackend({ redis: url })');
   }
   if (name === undefined ? defaultScheduler : named.get(name)) {
     throw new Error(

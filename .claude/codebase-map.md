@@ -177,7 +177,7 @@ environment value is read or reproduced here.
 
 Names only — values are never read by the generator.
 
-`AMQP_URL`, `APP_ENV`, `BACKEND`, `BILLING_REDIS_URL`, `DATABASE_URL`, `EXIT_AFTER_MS`, `INSTANCE_ID`, `LIBSQL_AUTH_TOKEN`, `LIBSQL_URL`, `NATS_URL`, `POD_NAME`, `PORT`, `POSTGRES_URL`, `RABBITMQ_URL`, `REDIS_OLD_URL`, `REDIS_PASSWORD`, `REDIS_URL`, `REQUIRE_SERVERS`, `RUN_MS`, `SCENARIO`, `SPEC`, `SQLITE_DIR`, `SQLITE_FILE`, `STRATEGY`, `VALKEY_URL`
+`AMQP_URL`, `BACKEND`, `BILLING_REDIS_URL`, `DATABASE_URL`, `EXIT_AFTER_MS`, `INSTANCE_ID`, `LIBSQL_AUTH_TOKEN`, `LIBSQL_URL`, `NATS_URL`, `POD_NAME`, `PORT`, `POSTGRES_URL`, `RABBITMQ_URL`, `REDIS_OLD_URL`, `REDIS_PASSWORD`, `REDIS_URL`, `REQUIRE_SERVERS`, `RUN_MS`, `SCENARIO`, `SPEC`, `SQLITE_DIR`, `SQLITE_FILE`, `STRATEGY`, `VALKEY_URL`
 <!-- context:generated-end dependencies -->
 
 ## Conventions
@@ -315,9 +315,9 @@ secret value.*
 ## Snapshot Metadata
 
 <!-- context:generated-start metadata -->
-- Generated at: 2026-10-16T11:14:02Z
-- Git commit: aaf4767effe3d778b198b100f1ebeebb4f271ca6
-- Git branch: main
+- Generated at: 2026-10-18T05:25:29Z
+- Git commit: 8e5bf89f9dcd2ed97846b3eb67ab7306b697ce64
+- Git branch: backend-only-options
 - Uncommitted changes when generated: yes
 - Generator: `scripts/update-claude-snapshot.py` version 1.0.0
 - Snapshot status: generated — structural inspection only, no code executed

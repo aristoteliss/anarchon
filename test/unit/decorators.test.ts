@@ -11,6 +11,7 @@ import { beforeEach, test } from 'vitest';
 import {
   At,
   type Backend,
+  type ConfigureOptions,
   Cron,
   Every,
   type JobContext,
@@ -644,15 +645,15 @@ test('on a running scheduler with leases, the name an object had before its pref
 
 test('Scheduler.configure() refuses settings without a backend', () => {
   assert.throws(
-    () => Scheduler.configure({}),
+    () => Scheduler.configure({} as ConfigureOptions),
     (error: Error) => error instanceof TypeError && /backend/.test(error.message),
   );
-  assert.throws(() => Scheduler.configure({ timezone: 'UTC', autoStart: true }), TypeError);
-  assert.throws(() => Scheduler.configure('billing', { leaseMs: 10_000 }), TypeError);
+  assert.throws(() => Scheduler.configure({ timezone: 'UTC', autoStart: true } as ConfigureOptions), TypeError);
+  assert.throws(() => Scheduler.configure('billing', { leaseMs: 10_000 } as ConfigureOptions), TypeError);
   assert.throws(() => Scheduler.get(), /no default scheduler/);
   assert.throws(() => Scheduler.get('billing'), /no scheduler named "billing"/);
 
-  Scheduler.configure({ redis: 'redis://localhost:6381' });
+  Scheduler.configure({ backend: memoryBackend() });
   Scheduler.configure('billing', { backend: memoryBackend() });
 });
 
@@ -750,13 +751,7 @@ test('a job chooses its scheduler by name; jobs with one name share a scheduler,
   );
 });
 
-test('a named scheduler without settings of its own: its own Redis key prefix, or an error for a backend object', () => {
-  Scheduler.configure({ redis: 'redis://localhost:6381', prefix: 'app:' });
-  const prefixOf = (scheduler: Scheduler) => (scheduler.backend as unknown as { prefix: string }).prefix;
-  assert.equal(prefixOf(Scheduler.get()), 'app:');
-  assert.equal(prefixOf(Scheduler.get('reports')), 'app:reports:');
-
-  Scheduler.reset();
+test('a named scheduler without settings of its own cannot share the default backend object', () => {
   Scheduler.configure({ backend: memoryBackend() });
   assert.throws(
     () => Scheduler.get('reports'),

@@ -1,7 +1,5 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import type { RedisInput } from './backends/redis/client';
-
 /**
  * How the Redis/Valkey backend picks the single winner of each run:
  * - `lease` (default, Redis 5+, Valkey): one atomic script claims the run and gives the winner a lease it
@@ -308,7 +306,7 @@ export interface EveryJobOptions extends JobOptions {
  *
  * @example A job with jitterMs 5 s and maxLateMs 10 min needs Redis to remember runs for longer than that
  * ```ts
- * new Scheduler({ redis, strategy: 'idmp', idmp: { durationSec: 900 } });
+ * new RedisBackend({ strategy: 'idmp', idmp: { durationSec: 900 } });
  * ```
  */
 export interface IdmpOptions {
@@ -318,7 +316,7 @@ export interface IdmpOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, strategy: 'idmp', maxLateMs: 600_000, idmp: { durationSec: 900 } });
+   * new Scheduler({ backend: new RedisBackend({ strategy: 'idmp', idmp: { durationSec: 900 } }), maxLateMs: 600_000 });
    * ```
    */
   durationSec?: number;
@@ -328,7 +326,7 @@ export interface IdmpOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, strategy: 'idmp', idmp: { maxSize: 5_000 } });
+   * new RedisBackend({ strategy: 'idmp', idmp: { maxSize: 5_000 } });
    * ```
    */
   maxSize?: number;
@@ -519,16 +517,13 @@ export interface Backend {
 // ------------------------------------------------------------------ scheduler
 
 /**
- * Options of `new Scheduler()`. One of `backend` and `redis` is required: no store is assumed.
- *
- * Pass either `backend`, or the Redis shortcuts (`redis`, `strategy`, `prefix`, `idmp`), not both.
+ * Options of `new Scheduler()`. `backend` is required: no store is assumed.
  * Give every instance of a service the same options, apart from `instanceId`.
  *
  * @example Production-style setup on Redis
  * ```ts
  * new Scheduler({
- *   redis: process.env.REDIS_URL,
- *   prefix: 'billing:cron:',        // this service's own keys
+ *   backend: new RedisBackend({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' }), // this service's own keys
  *   instanceId: process.env.POD_NAME, // readable names in history
  *   timezone: 'Europe/Athens',       // for cron expressions
  *   logger: pino(),
@@ -538,8 +533,8 @@ export interface Backend {
  *
  * @example Quick failover for short jobs, slow and steady for long ones
  * ```ts
- * new Scheduler({ redis, leaseMs: 6_000, heartbeatMs: 1_000 });   // a dead runner is replaced within ~8 s
- * new Scheduler({ redis, leaseMs: 120_000 });                    // tolerates 2 min of lost network
+ * new Scheduler({ backend, leaseMs: 6_000, heartbeatMs: 1_000 });   // a dead runner is replaced within ~8 s
+ * new Scheduler({ backend, leaseMs: 120_000 });                    // tolerates 2 min of lost network
  * ```
  *
  * @example In tests and scripts: don't let the scheduler keep the process alive
@@ -566,75 +561,32 @@ export interface SchedulerOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, data: { tenant: 'acme', db } });
-   * new Scheduler({ redis, data: async (run) => ({ permissions: await permissionsFor(run.name) }) });
+   * new Scheduler({ backend, data: { tenant: 'acme', db } });
+   * new Scheduler({ backend, data: async (run) => ({ permissions: await permissionsFor(run.name) }) });
    * ```
    */
   data?: JobData;
   /**
-   * Where runs are claimed and recorded. Use it for every store but Redis, or for Redis settings the
-   * shortcuts below don't cover. Without it, a RedisBackend is built from `redis`, `strategy`, `prefix`
-   * and `idmp`. Passing `backend` together with any of those four throws.
+   * Where runs are claimed and recorded. stop() closes it, which closes only the connections the
+   * backend opened itself, never a client you passed to it.
    *
    * @example
    * ```ts
+   * new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL }) });
+   * new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' }) });
    * new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
    * new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }) });
-   * new Scheduler({ backend: new RedisBackend({ strategy: 'script', scriptWindowMs: 600_000 }) });
    * ```
    */
-  backend?: Backend;
-  /**
-   * Shortcut for the default Redis/Valkey backend: where the server is. A URL, `{ host, port, ... }`,
-   * or a client your app already has (never closed by stop()). Required when `backend` isn't given.
-   *
-   * @example
-   * ```ts
-   * new Scheduler({ redis: 'redis://cache.internal:6379' });
-   * new Scheduler({ redis: 'rediss://user:secret@host:6380/2' }); // TLS, credentials, database 2
-   * new Scheduler({ redis: { host: 'localhost', port: 6390 } });   // Valkey
-   * new Scheduler({ redis: new Redis(process.env.REDIS_URL) });    // your ioredis client
-   * ```
-   */
-  redis?: RedisInput;
-  /**
-   * Shortcut for the default Redis/Valkey backend: how the single runner of each run is picked.
-   * Default 'lease', the only one with backups, no overlapping runs, retries and catch-up.
-   *
-   * @example
-   * ```ts
-   * new Scheduler({ redis, strategy: 'stream-id' }); // one winner per run, nothing more
-   * ```
-   */
-  strategy?: RedisStrategyName;
-  /**
-   * Shortcut for the default Redis/Valkey backend: prefix of every key. Default 'cron:'. Instances
-   * that share jobs must use the same prefix; services that share a Redis must use different ones.
-   *
-   * @example
-   * ```ts
-   * new Scheduler({ redis, prefix: 'billing:cron:' });
-   * new Scheduler({ redis, prefix: `${process.env.APP_ENV}:billing:cron:` }); // staging and production apart
-   * ```
-   */
-  prefix?: string;
-  /**
-   * Shortcut for the default Redis backend: settings for the 'idmp' strategy (Redis 8.6+).
-   *
-   * @example
-   * ```ts
-   * new Scheduler({ redis, strategy: 'idmp', idmp: { durationSec: 900, maxSize: 5_000 } });
-   * ```
-   */
-  idmp?: IdmpOptions;
+  backend: Backend;
   /**
    * Name of this instance in history and events. Must differ between instances, or history can't
    * tell them apart. Default `${hostname}:${pid}`; a pod name or host name reads better.
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, instanceId: process.env.POD_NAME }); // 'billing-7d9f8c-x2x4q'
-   * new Scheduler({ redis, instanceId: `api-${process.env.PORT}` });
+   * new Scheduler({ backend, instanceId: process.env.POD_NAME }); // 'billing-7d9f8c-x2x4q'
+   * new Scheduler({ backend, instanceId: `api-${process.env.PORT}` });
    * ```
    */
   instanceId?: string;
@@ -645,8 +597,8 @@ export interface SchedulerOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, jitterMs: 500 }); // runs start within half a second of their time
-   * new Scheduler({ redis, jitterMs: 0 });   // on the dot; the fastest instance always wins
+   * new Scheduler({ backend, jitterMs: 500 }); // runs start within half a second of their time
+   * new Scheduler({ backend, jitterMs: 0 });   // on the dot; the fastest instance always wins
    * ```
    */
   jitterMs?: number;
@@ -656,7 +608,7 @@ export interface SchedulerOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, maxLateMs: 10_000 }); // a run that can't start within 10 s is dropped
+   * new Scheduler({ backend, maxLateMs: 10_000 }); // a run that can't start within 10 s is dropped
    * ```
    */
   maxLateMs?: number;
@@ -665,7 +617,7 @@ export interface SchedulerOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, historySize: 200 });
+   * new Scheduler({ backend, historySize: 200 });
    * ```
    */
   historySize?: number;
@@ -675,7 +627,7 @@ export interface SchedulerOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, historyTtlMs: 7 * 24 * 60 * 60_000 }); // one week
+   * new Scheduler({ backend, historyTtlMs: 7 * 24 * 60 * 60_000 }); // one week
    * ```
    */
   historyTtlMs?: number;
@@ -685,7 +637,7 @@ export interface SchedulerOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, log: true });
+   * new Scheduler({ backend, log: true });
    * // [anarchon] sync @ 2026-10-10T12:00:10.000Z: started on api-2 (attempt 1, scheduled)
    * // [anarchon] sync @ 2026-10-10T12:00:10.000Z: finished in 203 ms
    * ```
@@ -697,7 +649,7 @@ export interface SchedulerOptions {
    *
    * @example
    * ```ts
-   * const scheduler = new Scheduler({ redis, timezone: 'Europe/Athens' });
+   * const scheduler = new Scheduler({ backend, timezone: 'Europe/Athens' });
    * scheduler.cron('digest', '0 8 * * *', sendDigest); // 08:00 in Athens, summer and winter
    * ```
    */
@@ -708,8 +660,8 @@ export interface SchedulerOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, logger: pino() });
-   * new Scheduler({ redis, logger: { warn: (m) => log('warn', m), error: (m) => log('error', m) } });
+   * new Scheduler({ backend, logger: pino() });
+   * new Scheduler({ backend, logger: { warn: (m) => log('warn', m), error: (m) => log('error', m) } });
    * ```
    */
   logger?: Logger;
@@ -732,8 +684,8 @@ export interface SchedulerOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, leaseMs: 10_000 });  // a dead runner is replaced within about 13 s
-   * new Scheduler({ redis, leaseMs: 120_000 }); // survives two minutes without the store
+   * new Scheduler({ backend, leaseMs: 10_000 });  // a dead runner is replaced within about 13 s
+   * new Scheduler({ backend, leaseMs: 120_000 }); // survives two minutes without the store
    * ```
    */
   leaseMs?: number;
@@ -743,7 +695,7 @@ export interface SchedulerOptions {
    *
    * @example
    * ```ts
-   * new Scheduler({ redis, leaseMs: 6_000, heartbeatMs: 1_000 });
+   * new Scheduler({ backend, leaseMs: 6_000, heartbeatMs: 1_000 });
    * ```
    */
   heartbeatMs?: number;

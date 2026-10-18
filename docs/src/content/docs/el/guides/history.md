@@ -102,7 +102,7 @@ console.table(scheduler.jobs());
 Ένα dashboard ή ένα admin API δεν χρειάζεται να εκτελεί εργασίες. Δημιουργήστε έναν scheduler που δείχνει στο ίδιο store, μην καταχωρίσετε καμία εργασία και απλώς διαβάστε:
 
 ```ts
-const reader = new Scheduler({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' });
+const reader = new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' }) });
 
 app.get('/jobs/:name/runs', async (req, res) => {
   res.json(await reader.history(req.params.name, 50));

@@ -71,7 +71,7 @@ Yes, with `@Every`, `@Cron` and `@At` on the methods of any class, with or witho
 
 ### Do I have to create a scheduler to use the decorators?
 
-No. Give the settings once with `Scheduler.configure({ redis: url, autoStart: true })`, and the scheduler is created and started when the first decorated object is. A backend must be in the settings; none is assumed. See [Decorators](../../guides/decorators/#two-ways-to-have-a-scheduler).
+No. Give the settings once with `Scheduler.configure({ backend: new RedisBackend({ redis: url }), autoStart: true })`, and the scheduler is created and started when the first decorated object is. A backend must be in the settings; none is assumed. See [Decorators](../../guides/decorators/#two-ways-to-have-a-scheduler).
 
 ### Can different jobs use different schedulers?
 

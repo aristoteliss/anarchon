@@ -37,10 +37,10 @@ The rule: instances that should **share** jobs use the same value, and everythin
 
 ```ts
 // billing
-new Scheduler({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' });
+new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' }) });
 
 // shipping
-new Scheduler({ redis: process.env.REDIS_URL, prefix: 'shipping:cron:' });
+new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL, prefix: 'shipping:cron:' }) });
 ```
 
 ```ts
@@ -55,8 +55,10 @@ Staging and production should not share a store at all. When they must (a shared
 
 ```ts
 new Scheduler({
-  redis: process.env.REDIS_URL,
-  prefix: `${process.env.APP_ENV}:billing:cron:`, // staging:billing:cron:
+  backend: new RedisBackend({
+    redis: process.env.REDIS_URL,
+    prefix: `${process.env.APP_ENV}:billing:cron:`, // staging:billing:cron:
+  }),
 });
 ```
 
@@ -116,8 +118,8 @@ Each job has its own keys or rows, so thousands of tenant jobs mean thousands of
 One process can hold more than one scheduler, for example one per store, or one per group of jobs with different lease timings:
 
 ```ts
-const fast = new Scheduler({ redis, prefix: 'app:fast:', leaseMs: 6_000, heartbeatMs: 1_000 });
-const slow = new Scheduler({ redis, prefix: 'app:slow:', leaseMs: 120_000 });
+const fast = new Scheduler({ backend: new RedisBackend({ redis, prefix: 'app:fast:' }), leaseMs: 6_000, heartbeatMs: 1_000 });
+const slow = new Scheduler({ backend: new RedisBackend({ redis, prefix: 'app:slow:' }), leaseMs: 120_000 });
 
 fast.every('refresh-cache', '5s', refresh);
 slow.cron('rebuild-index', '0 2 * * *', rebuild, { timeoutMs: 2 * 60 * 60_000 });
@@ -133,8 +135,8 @@ A dashboard can read every service's history by creating one reader per namespac
 
 ```ts
 const readers = {
-  billing: new Scheduler({ redis, prefix: 'billing:cron:' }),
-  shipping: new Scheduler({ redis, prefix: 'shipping:cron:' }),
+  billing: new Scheduler({ backend: new RedisBackend({ redis, prefix: 'billing:cron:' }) }),
+  shipping: new Scheduler({ backend: new RedisBackend({ redis, prefix: 'shipping:cron:' }) }),
 };
 
 app.get('/:service/jobs/:name/runs', async (req, res) => {

@@ -168,7 +168,7 @@ npx tsx examples/walkthrough.ts
 Ενεργοποιήστε το ενσωματωμένο log όσο ερευνάτε:
 
 ```ts
-new Scheduler({ redis, log: true });
+new Scheduler({ backend, log: true });
 ```
 
 Ή καταγράψτε κάθε συμβάν με τα δεδομένα του (payload):

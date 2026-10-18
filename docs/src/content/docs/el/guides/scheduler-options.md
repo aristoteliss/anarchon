@@ -3,43 +3,26 @@ title: Επιλογές scheduler
 description: Κάθε επιλογή του new Scheduler(), με παραδείγματα.
 ---
 
-Το `new Scheduler(options)` δέχεται ένα αντικείμενο. Ένα πράγμα σε αυτό είναι υποχρεωτικό: πού αποθηκεύονται οι εκτελέσεις, ως `redis` ή ως `backend`. Δεν υποτίθεται κανένα store, οπότε το `new Scheduler()` ρίχνει σφάλμα. Όλα τα υπόλοιπα είναι προαιρετικά.
+Το `new Scheduler(options)` δέχεται ένα αντικείμενο. Ένα πράγμα σε αυτό είναι υποχρεωτικό: πού αποθηκεύονται οι εκτελέσεις, ως `backend`. Δεν υποτίθεται κανένα store, οπότε το `new Scheduler()` ρίχνει σφάλμα. Όλα τα υπόλοιπα είναι προαιρετικά.
 
 Δώστε σε κάθε instance μιας υπηρεσίας τις ίδιες επιλογές, εκτός από το `instanceId`.
 
 ## Πού αποθηκεύονται οι εκτελέσεις
 
-Επιλέγετε ένα store με έναν από δύο τρόπους, ποτέ και με τους δύο.
-
-### Οι συντομεύσεις Redis
-
-Για το Redis και το Valkey μπορείτε να περάσετε τη σύνδεση απευθείας:
+Το `backend` είναι το store: ένα `RedisBackend` για Redis και Valkey, ή οποιοδήποτε άλλο backend.
 
 ```ts
-new Scheduler({ redis: 'redis://localhost:6379' });
-new Scheduler({ redis: 'redis://cache.internal:6379' });
-new Scheduler({ redis: 'rediss://user:secret@host:6380/2' }); // TLS, χρήστης, κωδικός πρόσβασης, βάση δεδομένων 2
-new Scheduler({ redis: { host: 'localhost', port: 6390 } });  // το Valkey λειτουργεί με τον ίδιο τρόπο
-new Scheduler({ redis: existingIoredisClient });              // δικός σας client· το stop() τον αφήνει ανοιχτό
-```
+import { PostgresBackend, RedisBackend, Scheduler, SqliteBackend } from 'anarchon';
 
-| Επιλογή | Προεπιλογή | Σημασία |
-| --- | --- | --- |
-| `redis` | κανένα | Υποχρεωτικό, εκτός αν δοθεί `backend`. Ένα URL, `{ host, port, password, db }`, ή ένας client που έχετε ήδη (ioredis, iovalkey, node-redis, Valkey GLIDE, ή οποιοδήποτε αντικείμενο με μέθοδο `send(command, args)`) |
-| `strategy` | `'lease'` | Πώς επιλέγεται ο νικητής. Δείτε το [Redis και Valkey](../../backends/redis/) |
-| `prefix` | `'cron:'` | Πρόθεμα κάθε κλειδιού |
-| `idmp` | | Ρυθμίσεις για τη στρατηγική `'idmp'` |
-
-### Οποιοδήποτε άλλο backend
-
-```ts
-import { PostgresBackend, Scheduler, SqliteBackend } from 'anarchon';
-
+new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
+new Scheduler({ backend: new RedisBackend({ redis: 'rediss://user:secret@host:6380/2' }) }); // TLS, χρήστης, κωδικός πρόσβασης, βάση δεδομένων 2
+new Scheduler({ backend: new RedisBackend({ redis: { host: 'localhost', port: 6390 } }) });  // το Valkey λειτουργεί με τον ίδιο τρόπο
+new Scheduler({ backend: new RedisBackend({ redis: existingIoredisClient }) });              // δικός σας client· το stop() τον αφήνει ανοιχτό
 new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
 new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }) });
 ```
 
-Αν περάσετε ταυτόχρονα και `backend` και μια συντόμευση Redis, προκαλείται `TypeError`.
+Η σύνδεση Redis, η στρατηγική και το πρόθεμα κλειδιών είναι επιλογές του `RedisBackend`: δείτε το [Redis και Valkey](../../backends/redis/).
 
 ## Ταυτότητα
 
@@ -50,7 +33,7 @@ new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }) });
 Πρέπει να διαφέρει μεταξύ των instances, διαφορετικά το ιστορικό δεν μπορεί να τα ξεχωρίσει. Ένα όνομα pod είναι πιο ευανάγνωστο από ένα αναγνωριστικό διεργασίας (process id):
 
 ```ts
-new Scheduler({ redis, instanceId: process.env.POD_NAME });
+new Scheduler({ backend, instanceId: process.env.POD_NAME });
 ```
 
 ## Προεπιλογές για κάθε εργασία
@@ -67,7 +50,7 @@ new Scheduler({ redis, instanceId: process.env.POD_NAME });
 
 ```ts
 new Scheduler({
-  redis,
+  backend,
   timezone: 'Europe/Athens',
   historySize: 200,
   historyTtlMs: 7 * 24 * 60 * 60_000, // μία εβδομάδα
@@ -111,7 +94,7 @@ flowchart LR
 | Ανοχή σε παρατεταμένες παύσεις | `leaseMs: 120_000` | Ένας πραγματικά νεκρός runner αντικαθίσταται μόνο μετά από 2 λεπτά |
 
 ```ts
-new Scheduler({ redis, leaseMs: 10_000, heartbeatMs: 2_000 }); // ένας νεκρός runner αντικαθίσταται εντός περίπου 14 δευτ.
+new Scheduler({ backend, leaseMs: 10_000, heartbeatMs: 2_000 }); // ένας νεκρός runner αντικαθίσταται εντός περίπου 14 δευτ.
 ```
 
 Το άρθρο [Μισθώσεις](../../internals/leases/) εξηγεί τον μηχανισμό.
@@ -126,7 +109,7 @@ new Scheduler({ redis, leaseMs: 10_000, heartbeatMs: 2_000 }); // ένας νε�
 ```ts
 import pino from 'pino';
 
-new Scheduler({ redis, log: true, logger: pino() });
+new Scheduler({ backend, log: true, logger: pino() });
 ```
 
 Ένας logger χρειάζεται τις μεθόδους `warn` και `error`. Η μέθοδος `info` είναι προαιρετική· χωρίς αυτήν, τα μηνύματα εκτέλεσης πηγαίνουν στο `console.log`. Δείτε τα [Events και καταγραφή](../events-and-logging/).
@@ -145,11 +128,10 @@ new Scheduler({ backend, unrefTimers: true });
 
 ```ts
 import pino from 'pino';
-import { Scheduler } from 'anarchon';
+import { RedisBackend, Scheduler } from 'anarchon';
 
 export const scheduler = new Scheduler({
-  redis: process.env.REDIS_URL,
-  prefix: 'billing:cron:',          // τα κλειδιά αυτής της ίδιας της υπηρεσίας
+  backend: new RedisBackend({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' }), // τα κλειδιά αυτής της ίδιας της υπηρεσίας
   instanceId: process.env.POD_NAME, // ευανάγνωστα ονόματα στο ιστορικό
   timezone: 'Europe/Athens',
   logger: pino(),
@@ -163,7 +145,7 @@ export const scheduler = new Scheduler({
 
 | Πρόβλημα | Σφάλμα |
 | --- | --- |
-| Και ταυτόχρονα `backend` και μια συντόμευση Redis | `TypeError` |
+| Χωρίς `backend` | `TypeError` |
 | Το `instanceId` είναι κενό string | `TypeError` |
 | Ένας αριθμός είναι αρνητικός, μηδέν όπου δεν επιτρέπεται, ή όχι ακέραιος | `RangeError` |
 | Το `heartbeatMs` δεν είναι μικρότερο από το μισό του `leaseMs` | `RangeError` |

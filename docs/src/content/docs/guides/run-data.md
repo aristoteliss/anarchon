@@ -6,7 +6,7 @@ description: Give a job's runs the data they need, such as a permission, a tenan
 A handler is an ordinary function, so it can use whatever is in scope around it. The `data` option is for what isn't: values you decide where the job is defined or where the scheduler is created, and want in the handler when a run starts.
 
 ```ts
-const scheduler = new Scheduler({ redis, data: { tenant: 'acme' } });
+const scheduler = new Scheduler({ backend, data: { tenant: 'acme' } });
 
 scheduler.every('export', '1h', async (ctx: JobContext<{ tenant: string; permission: string }>) => {
   await exportFor(ctx.data.tenant, ctx.data.permission);
@@ -28,7 +28,7 @@ Each run receives it as `ctx.data`. It is `undefined` when you gave none.
 They are layers, from the most general to the most specific, in the order of the table. Two plain objects are merged, and the more specific one's keys win. Any other value (a string, a number, an array, a class instance) replaces what is under it.
 
 ```ts
-const scheduler = new Scheduler({ redis, data: { tenant: 'acme', region: 'eu' } });
+const scheduler = new Scheduler({ backend, data: { tenant: 'acme', region: 'eu' } });
 scheduler.every('export', '1h', run, { data: { region: 'us', permission: 'export' } });
 
 await scheduler.runNow('export');

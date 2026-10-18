@@ -6,9 +6,9 @@ description: Δηλώστε εργασίες πάνω στις μεθόδους 
 Οι εργασίες μπορούν να δηλωθούν πάνω στις μεθόδους μιας κλάσης, αντί να περνιούνται στα `every()`, `cron()` και `at()`. Όταν δημιουργείται ένα αντικείμενο της κλάσης, προσθέτει μόνο του τις εργασίες του στον scheduler.
 
 ```ts
-import { At, Cron, Every, type JobContext, Scheduler } from 'anarchon';
+import { At, Cron, Every, type JobContext, RedisBackend, Scheduler } from 'anarchon';
 
-Scheduler.configure({ redis: process.env.REDIS_URL, autoStart: true });
+Scheduler.configure({ backend: new RedisBackend({ redis: process.env.REDIS_URL }), autoStart: true });
 
 class Reports {
   constructor(private readonly mailer: Mailer) {}
@@ -61,7 +61,7 @@ Scheduler.configure({
 
 Το `configure()` δέχεται τις [επιλογές του scheduler](../scheduler-options/) και το `autoStart`. Δεν δημιουργεί τίποτα: ο scheduler δημιουργείται όταν δημιουργηθεί ένα αντικείμενο με εργασίες με decorators, ή όταν καλέσετε το `Scheduler.get()`.
 
-- **Το backend είναι υποχρεωτικό.** Δώστε `backend`, ή `redis` για Redis και Valkey. Χωρίς αυτό, το `configure()` ρίχνει σφάλμα: ένας scheduler δεν δημιουργείται ποτέ σε store που δεν επιλέξατε εσείς.
+- **Το backend είναι υποχρεωτικό.** Χωρίς `backend`, το `configure()` ρίχνει σφάλμα: ένας scheduler δεν δημιουργείται ποτέ σε store που δεν επιλέξατε εσείς.
 - **Η εκκίνηση είναι δική σας απόφαση.** Με `autoStart: true` ο scheduler ξεκινά όταν δημιουργείται, και μια αποτυχία εκκίνησης αναφέρεται ως [event `'error'`](../events-and-logging/). Χωρίς αυτό, τίποτα δεν συνδέεται μέχρι να τον ξεκινήσετε:
 
   ```ts
@@ -74,7 +74,7 @@ Scheduler.configure({
 ### Με το χέρι
 
 ```ts
-const scheduler = new Scheduler({ redis: process.env.REDIS_URL });
+const scheduler = new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL }) });
 new Reports(mailer);
 await scheduler.start();
 ```
@@ -157,9 +157,10 @@ class Jobs {
 
 | Ρυθμίσεις | Παράδειγμα |
 | --- | --- |
-| Οι δικές του | `Scheduler.configure('billing', { redis: BILLING_REDIS_URL, leaseMs: 10_000 })` |
+| Οι δικές του | `Scheduler.configure('billing', { backend: new RedisBackend({ redis: BILLING_REDIS_URL }), leaseMs: 10_000 })` |
 | Οι προεπιλεγμένες, όταν το `backend` είναι συνάρτηση του ονόματος | `Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: 'cron_' + name }) })` |
-| Οι προεπιλεγμένες, όταν χρησιμοποιούν `redis`: ο ίδιος server με το πρόθεμα κλειδιών `<prefix><name>:` | Το `Scheduler.configure({ redis: REDIS_URL })` δίνει στον `billing` το πρόθεμα `cron:billing:` |
+
+Στο Redis, η συνάρτηση δίνει σε κάθε όνομα το δικό του πρόθεμα κλειδιών: `backend: (name) => new RedisBackend({ redis: REDIS_URL, prefix: 'cron:' + name + ':' })`.
 
 Έτσι δύο schedulers δεν μοιράζονται ποτέ κατά λάθος την κατάσταση των εργασιών. Αν οι προεπιλεγμένες ρυθμίσεις περιέχουν ένα αντικείμενο backend, ένας ονομασμένος scheduler χωρίς δικές του ρυθμίσεις δεν μπορεί να δημιουργηθεί, επειδή δύο schedulers δεν μπορούν να μοιραστούν ένα αντικείμενο backend: το σφάλμα σας λέει να ρυθμίσετε αυτό το όνομα ή να κάνετε το `backend` συνάρτηση.
 

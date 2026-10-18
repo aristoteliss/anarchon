@@ -6,9 +6,9 @@ description: Declare jobs on the methods of a class with @Cron, @Every and @At. 
 Jobs can be declared on the methods of a class instead of being passed to `every()`, `cron()` and `at()`. When an object of the class is created, it adds its jobs to the scheduler by itself.
 
 ```ts
-import { At, Cron, Every, type JobContext, Scheduler } from 'anarchon';
+import { At, Cron, Every, type JobContext, RedisBackend, Scheduler } from 'anarchon';
 
-Scheduler.configure({ redis: process.env.REDIS_URL, autoStart: true });
+Scheduler.configure({ backend: new RedisBackend({ redis: process.env.REDIS_URL }), autoStart: true });
 
 class Reports {
   constructor(private readonly mailer: Mailer) {}
@@ -61,7 +61,7 @@ Scheduler.configure({
 
 `configure()` takes the [scheduler options](../scheduler-options/) and `autoStart`. It creates nothing: the scheduler is created when an object with decorated jobs is, or when you call `Scheduler.get()`.
 
-- **A backend is required.** Pass `backend`, or `redis` for Redis and Valkey. Without one, `configure()` throws: a scheduler is never created on a store you didn't choose.
+- **A backend is required.** Without `backend`, `configure()` throws: a scheduler is never created on a store you didn't choose.
 - **Starting is your decision.** With `autoStart: true` the scheduler starts when it is created, and a failure to start is reported as an [`'error'` event](../events-and-logging/). Without it, nothing connects until you start it:
 
   ```ts
@@ -74,7 +74,7 @@ Scheduler.configure({
 ### By hand
 
 ```ts
-const scheduler = new Scheduler({ redis: process.env.REDIS_URL });
+const scheduler = new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL }) });
 new Reports(mailer);
 await scheduler.start();
 ```
@@ -157,9 +157,10 @@ A named scheduler that doesn't exist yet is created the first time a job needs i
 
 | Settings | Example |
 | --- | --- |
-| Its own | `Scheduler.configure('billing', { redis: BILLING_REDIS_URL, leaseMs: 10_000 })` |
+| Its own | `Scheduler.configure('billing', { backend: new RedisBackend({ redis: BILLING_REDIS_URL }), leaseMs: 10_000 })` |
 | The default settings, when `backend` is a function of the name | `Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: 'cron_' + name }) })` |
-| The default settings, when they use `redis`: the same server with the key prefix `<prefix><name>:` | `Scheduler.configure({ redis: REDIS_URL })` gives `billing` the prefix `cron:billing:` |
+
+On Redis, the function gives each name its own key prefix: `backend: (name) => new RedisBackend({ redis: REDIS_URL, prefix: 'cron:' + name + ':' })`.
 
 So two schedulers never share job state by accident. If the default settings hold a backend object, a named scheduler without settings of its own can't be created, because two schedulers can't share one backend object: the error tells you to configure that name or to make `backend` a function.
 

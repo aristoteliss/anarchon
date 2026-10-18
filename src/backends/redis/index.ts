@@ -103,12 +103,12 @@ export interface RedisBackendOptions {
  * claimed run), a stream `<prefix><job>:manual` (one entry per runNow() run) and a sorted set
  * `<prefix><job>:results`. With 'lease', see {@link LeaseStore}.
  *
- * @example Usually you don't create it yourself: the Scheduler does, from its Redis shortcuts
+ * @example The 'lease' strategy, keys under 'cron:'
  * ```ts
- * new Scheduler({ redis: 'redis://localhost:6379' }); // = new RedisBackend({ redis, strategy: 'lease' })
+ * new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
  * ```
  *
- * @example Created yourself, to set what the shortcuts don't cover
+ * @example Every setting
  * ```ts
  * const backend = new RedisBackend({
  *   redis: { host: 'cache.internal', port: 6379, password: process.env.REDIS_PASSWORD },

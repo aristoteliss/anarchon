@@ -114,7 +114,7 @@ A listener that throws is caught and logged. It doesn't affect the run or the ot
 `log: true` writes one line for each of the events above, without any code:
 
 ```ts
-new Scheduler({ redis, log: true });
+new Scheduler({ backend, log: true });
 ```
 
 ```
@@ -134,12 +134,12 @@ Any object with `warn` and `error` methods works. `info` is optional.
 
 ```ts
 import pino from 'pino';
-new Scheduler({ redis, log: true, logger: pino() });
+new Scheduler({ backend, log: true, logger: pino() });
 ```
 
 ```ts
 new Scheduler({
-  redis,
+  backend,
   logger: {
     info: (message) => myLog('info', message),
     warn: (message) => myLog('warn', message),

@@ -167,10 +167,10 @@ Then change one line. Everything else stays the same.
 
 ```ts
 // Redis or Valkey
-const scheduler = new Scheduler({ redis: 'redis://localhost:6379' });
+const scheduler = new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
 
 // PostgreSQL
-import { PostgresBackend } from 'anarchon';
+import { PostgresBackend, RedisBackend } from 'anarchon';
 const scheduler = new Scheduler({
   backend: new PostgresBackend({ connection: process.env.DATABASE_URL }),
 });

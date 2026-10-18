@@ -13,9 +13,9 @@ import { Scheduler } from 'anarchon';
 new Scheduler(options: SchedulerOptions)
 ```
 
-Δημιουργεί έναν scheduler. Τίποτα δεν συνδέεται μέχρι το `start()`. Ένα από τα `backend` και `redis` είναι υποχρεωτικό: δεν υποτίθεται κανένα store. Δείτε [Επιλογές](../options/#επιλογές-scheduler).
+Δημιουργεί έναν scheduler. Τίποτα δεν συνδέεται μέχρι το `start()`. Το `backend` είναι υποχρεωτικό: δεν υποτίθεται κανένα store. Δείτε [Επιλογές](../options/#επιλογές-scheduler).
 
-**Ρίχνει** `TypeError` όταν δεν δίνεται ούτε `backend` ούτε `redis`, όταν παρέχονται ταυτόχρονα το `backend` και μια συντόμευση Redis, ή το `instanceId` είναι κενό· `RangeError` όταν ένας αριθμός είναι εκτός ορίων, ή το `heartbeatMs` δεν είναι μικρότερο από το μισό του `leaseMs`.
+**Ρίχνει** `TypeError` όταν δεν δίνεται `backend`, ή το `instanceId` είναι κενό· `RangeError` όταν ένας αριθμός είναι εκτός ορίων, ή το `heartbeatMs` δεν είναι μικρότερο από το μισό του `leaseMs`.
 
 ## Ιδιότητες
 

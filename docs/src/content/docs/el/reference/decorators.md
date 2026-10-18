@@ -145,14 +145,14 @@ static configure(name: string, options: ConfigureOptions): void
 
 | Επιλογή | Τύπος | Σημασία |
 | --- | --- | --- |
-| `backend` | `Backend`, ή `(name: string) => Backend` | Υποχρεωτικό, εκτός αν δοθεί `redis`. Μια συνάρτηση καλείται με το όνομα του scheduler (`'default'` για τον προεπιλεγμένο), ώστε ένα σύνολο ρυθμίσεων να εξυπηρετεί πολλούς schedulers |
+| `backend` | `Backend`, ή `(name: string) => Backend` | Υποχρεωτικό. Μια συνάρτηση καλείται με το όνομα του scheduler (`'default'` για τον προεπιλεγμένο), ώστε ένα σύνολο ρυθμίσεων να εξυπηρετεί πολλούς schedulers |
 | `autoStart` | `boolean`, προεπιλογή `false` | Εκκίνηση του scheduler όταν δημιουργείται. Μια αποτυχία εκκίνησης είναι event `'error'` |
 
 ```ts
-Scheduler.configure({ redis: process.env.REDIS_URL, autoStart: true });
+Scheduler.configure({ backend: new RedisBackend({ redis: process.env.REDIS_URL }), autoStart: true });
 
 Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: `cron_${name}` }) });
-Scheduler.configure('billing', { redis: process.env.BILLING_REDIS_URL, leaseMs: 10_000 });
+Scheduler.configure('billing', { backend: new RedisBackend({ redis: process.env.BILLING_REDIS_URL }), leaseMs: 10_000 });
 ```
 
 Ένας ονομασμένος scheduler χωρίς δικές του ρυθμίσεις δημιουργείται από τις προεπιλεγμένες:
@@ -160,10 +160,9 @@ Scheduler.configure('billing', { redis: process.env.BILLING_REDIS_URL, leaseMs: 
 | Προεπιλεγμένες ρυθμίσεις | Ένας scheduler με όνομα `reports` παίρνει |
 | --- | --- |
 | Το `backend` είναι συνάρτηση | `backend('reports')` |
-| `redis` | Τις ίδιες ρυθμίσεις σύνδεσης, με το πρόθεμα κλειδιών `<prefix>reports:` (`cron:reports:` από προεπιλογή) |
 | Το `backend` είναι αντικείμενο | Τίποτα: η δημιουργία του ρίχνει σφάλμα, επειδή δύο schedulers δεν μπορούν να μοιραστούν ένα αντικείμενο backend |
 
-**Ρίχνει** `TypeError` όταν δεν δίνεται ούτε `backend` ούτε `redis`· `Error` όταν αυτός ο scheduler υπάρχει ήδη, ή όταν ένα αντικείμενο που τον περίμενε δεν μπορεί να προσθέσει τις εργασίες του.
+**Ρίχνει** `TypeError` όταν δεν δίνεται `backend`· `Error` όταν αυτός ο scheduler υπάρχει ήδη, ή όταν ένα αντικείμενο που τον περίμενε δεν μπορεί να προσθέσει τις εργασίες του.
 
 ### `Scheduler.get(name?)`
 

@@ -17,7 +17,7 @@ description: "Ένας scheduler ως NestJS provider, που ξεκινά κα�
 // cron/cron.module.ts
 import { Global, Injectable, Module, type OnApplicationBootstrap, type OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Scheduler } from 'anarchon';
+import { RedisBackend, Scheduler } from 'anarchon';
 
 /** Ξεκινά τον scheduler όταν η εφαρμογή είναι έτοιμη, και τον σταματά όταν η εφαρμογή τερματίζει. */
 @Injectable()
@@ -41,8 +41,7 @@ class CronLifecycle implements OnApplicationBootstrap, OnApplicationShutdown {
       inject: [ConfigService],
       useFactory: (config: ConfigService) =>
         new Scheduler({
-          redis: config.getOrThrow<string>('REDIS_URL'),
-          prefix: 'billing:cron:',
+          backend: new RedisBackend({ redis: config.getOrThrow<string>('REDIS_URL'), prefix: 'billing:cron:' }),
           instanceId: config.get<string>('POD_NAME'),
           timezone: 'Europe/Athens',
         }),
@@ -211,7 +210,7 @@ import { Logger } from '@nestjs/common';
 const logger = new Logger('Cron');
 
 new Scheduler({
-  redis: config.getOrThrow<string>('REDIS_URL'),
+  backend,
   log: true,
   logger: {
     info: (message) => logger.log(message),

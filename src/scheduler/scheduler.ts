@@ -3,7 +3,6 @@
 import { EventEmitter } from 'node:events';
 import { hostname } from 'node:os';
 
-import { RedisBackend } from '../backends/redis';
 import type { RegisterOptions } from '../decorators';
 import {
   type ConfigureOptions,
@@ -62,7 +61,7 @@ import { JobTimers } from './timers';
  * ```ts
  * import { Scheduler } from 'anarchon';
  *
- * const scheduler = new Scheduler({ redis: 'redis://localhost:6379' });
+ * const scheduler = new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
  * scheduler.every('sync', '10s', async () => {
  *   await syncCustomers();
  * });
@@ -130,15 +129,14 @@ export class Scheduler {
   /**
    * Creates a scheduler. Nothing connects and nothing runs until {@link Scheduler.start | start()}.
    *
-   * @throws TypeError when no backend is given: one of `backend` and `redis` is required, and no store is assumed.
-   * @throws TypeError when both `backend` and a Redis shortcut (`redis`, `strategy`, `prefix`, `idmp`) are given.
+   * @throws TypeError when no backend is given: no store is assumed.
    * @throws RangeError when a number is out of range, or `heartbeatMs` is not under half of `leaseMs`.
    *
-   * @example Redis or Valkey, with the shortcuts
+   * @example Redis or Valkey
    * ```ts
-   * new Scheduler({ redis: process.env.REDIS_URL }); // the 'lease' strategy
-   * new Scheduler({ redis: 'redis://cache.internal:6379', prefix: 'billing:cron:' });
-   * new Scheduler({ redis: myIoredisClient }); // your client; never closed by stop()
+   * new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL }) }); // the 'lease' strategy
+   * new Scheduler({ backend: new RedisBackend({ redis: 'redis://cache.internal:6379', prefix: 'billing:cron:' }) });
+   * new Scheduler({ backend: new RedisBackend({ redis: myIoredisClient }) }); // your client; never closed by stop()
    * ```
    *
    * @example Another backend
@@ -149,13 +147,13 @@ export class Scheduler {
    *
    * @example Faster failover: a dead runner is replaced after about 10 s instead of 30 s
    * ```ts
-   * new Scheduler({ redis, leaseMs: 10_000, heartbeatMs: 2_000 });
+   * new Scheduler({ backend, leaseMs: 10_000, heartbeatMs: 2_000 });
    * ```
    */
   constructor(options: SchedulerOptions) {
     // Also for callers without types, who can leave the options out altogether.
-    if (!options?.backend && options?.redis === undefined) {
-      throw new TypeError('A scheduler needs a backend: pass `backend`, or `redis` for Redis and Valkey. No store is assumed');
+    if (!options?.backend) {
+      throw new TypeError('A scheduler needs a backend, e.g. backend: new RedisBackend({ redis: url }). No store is assumed');
     }
     if (options.name !== undefined && (typeof options.name !== 'string' || options.name === '')) {
       throw new TypeError('name must be a non-empty string');
@@ -164,13 +162,7 @@ export class Scheduler {
     this.dataSource = options.data;
     this.instanceId = options.instanceId ?? `${hostname()}:${process.pid}`;
     if (typeof this.instanceId !== 'string' || this.instanceId === '') throw new TypeError('instanceId must be a non-empty string');
-    const redisShortcuts =
-      options.redis !== undefined || options.strategy !== undefined || options.prefix !== undefined || options.idmp !== undefined;
-    if (options.backend && redisShortcuts) {
-      throw new TypeError('Pass either backend, or the Redis shortcuts (redis, strategy, prefix, idmp), not both');
-    }
-    this.backend =
-      options.backend ?? new RedisBackend({ redis: options.redis, strategy: options.strategy, prefix: options.prefix, idmp: options.idmp });
+    this.backend = options.backend;
     this.defaults = {
       jitterMs: nonNegativeInt('jitterMs', options.jitterMs ?? 2_000),
       maxLateMs: positiveInt('maxLateMs', options.maxLateMs ?? 60_000),
@@ -236,18 +228,17 @@ export class Scheduler {
    *
    * Without a name, these are the settings of the default scheduler. With a name, of the scheduler
    * that jobs choose with `{ scheduler: name }`. A named scheduler that has no settings of its own
-   * is created from the default ones: on Redis with its own key prefix (`<prefix><name>:`), and
-   * with any backend when `backend` is a function of the name.
+   * is created from the default ones when their `backend` is a function of the name.
    *
-   * @param options The options of `new Scheduler()`, plus `autoStart`. One of `backend` and `redis`
-   *   must be given: no backend is assumed.
+   * @param options The options of `new Scheduler()`, plus `autoStart`. `backend` must be given: no
+   *   backend is assumed.
    * @throws TypeError when no backend is given.
    * @throws Error when that scheduler already exists, or when an object that was waiting for it
    *   can't add its jobs.
    *
    * @example The least there is to write
    * ```ts
-   * Scheduler.configure({ redis: process.env.REDIS_URL, autoStart: true });
+   * Scheduler.configure({ backend: new RedisBackend({ redis: process.env.REDIS_URL }), autoStart: true });
    *
    * class Reports {
    *   @Cron('weekday-digest', '0 8 * * 1-5')
@@ -259,7 +250,7 @@ export class Scheduler {
    * @example Several schedulers, started by you
    * ```ts
    * Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: `cron_${name}` }) });
-   * Scheduler.configure('billing', { redis: process.env.BILLING_REDIS_URL, leaseMs: 10_000 });
+   * Scheduler.configure('billing', { backend: new RedisBackend({ redis: process.env.BILLING_REDIS_URL }), leaseMs: 10_000 });
    *
    * class Jobs {
    *   @Cron('job-1', '*\/10 * * * * *') // the default scheduler
@@ -340,7 +331,7 @@ export class Scheduler {
    *
    * @example Two schedulers, with the decorated jobs on the second
    * ```ts
-   * const cache = new Scheduler({ redis: cacheUrl });
+   * const cache = new Scheduler({ backend: new RedisBackend({ redis: cacheUrl }) });
    * const billing = new Scheduler({ backend: new PostgresBackend({ connection: pool }) });
    * Scheduler.setDefault(billing);
    * ```
@@ -633,7 +624,7 @@ export class Scheduler {
    *
    * @example A read-only process, such as a dashboard: no jobs, only history
    * ```ts
-   * const reader = new Scheduler({ redis });
+   * const reader = new Scheduler({ backend });
    * const failed = (await reader.history('digest', 100)).filter((run) => run.status === 'failed');
    * ```
    */

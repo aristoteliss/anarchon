@@ -3,43 +3,26 @@ title: Scheduler options
 description: Every option of new Scheduler(), with examples.
 ---
 
-`new Scheduler(options)` takes one object. One thing in it is required: where runs are stored, given as `redis` or as `backend`. No store is assumed, so `new Scheduler()` throws. Everything else is optional.
+`new Scheduler(options)` takes one object. One thing in it is required: where runs are stored, given as `backend`. No store is assumed, so `new Scheduler()` throws. Everything else is optional.
 
 Give every instance of a service the same options, apart from `instanceId`.
 
 ## Where runs are stored
 
-You choose a store in one of two ways, never both.
-
-### The Redis shortcuts
-
-For Redis and Valkey you can pass the connection directly:
+`backend` is the store: a `RedisBackend` for Redis and Valkey, or any other backend.
 
 ```ts
-new Scheduler({ redis: 'redis://localhost:6379' });
-new Scheduler({ redis: 'redis://cache.internal:6379' });
-new Scheduler({ redis: 'rediss://user:secret@host:6380/2' }); // TLS, user, password, database 2
-new Scheduler({ redis: { host: 'localhost', port: 6390 } });  // Valkey works the same
-new Scheduler({ redis: existingIoredisClient });              // your client; stop() leaves it open
-```
+import { PostgresBackend, RedisBackend, Scheduler, SqliteBackend } from 'anarchon';
 
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `redis` | none | Required unless `backend` is given. A URL, `{ host, port, password, db }`, or a client you already have (ioredis, iovalkey, node-redis, Valkey GLIDE, or any object with `send(command, args)`) |
-| `strategy` | `'lease'` | How one winner is picked. See [Redis and Valkey](../../backends/redis/) |
-| `prefix` | `'cron:'` | Prefix of every key |
-| `idmp` | | Settings for the `'idmp'` strategy |
-
-### Any other backend
-
-```ts
-import { PostgresBackend, Scheduler, SqliteBackend } from 'anarchon';
-
+new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
+new Scheduler({ backend: new RedisBackend({ redis: 'rediss://user:secret@host:6380/2' }) }); // TLS, user, password, database 2
+new Scheduler({ backend: new RedisBackend({ redis: { host: 'localhost', port: 6390 } }) });  // Valkey works the same
+new Scheduler({ backend: new RedisBackend({ redis: existingIoredisClient }) });              // your client; stop() leaves it open
 new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
 new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }) });
 ```
 
-Passing both `backend` and a Redis shortcut throws a `TypeError`.
+The Redis connection, strategy and key prefix are options of `RedisBackend`: see [Redis and Valkey](../../backends/redis/).
 
 ## Identity
 
@@ -50,7 +33,7 @@ The name of this instance in history and events. The default is `hostname:pid`.
 It must differ between instances, or history can't tell them apart. A pod name reads better than a process id:
 
 ```ts
-new Scheduler({ redis, instanceId: process.env.POD_NAME });
+new Scheduler({ backend, instanceId: process.env.POD_NAME });
 ```
 
 ## Defaults for every job
@@ -67,7 +50,7 @@ These set the default of the [job option](../job-options/) with the same name. A
 
 ```ts
 new Scheduler({
-  redis,
+  backend,
   timezone: 'Europe/Athens',
   historySize: 200,
   historyTtlMs: 7 * 24 * 60 * 60_000, // one week
@@ -111,7 +94,7 @@ So a crashed run is taken over at most `leaseMs + 2 × heartbeatMs` after the ru
 | Tolerate long pauses | `leaseMs: 120_000` | A really dead runner is replaced only after 2 minutes |
 
 ```ts
-new Scheduler({ redis, leaseMs: 10_000, heartbeatMs: 2_000 }); // a dead runner is replaced within about 14 s
+new Scheduler({ backend, leaseMs: 10_000, heartbeatMs: 2_000 }); // a dead runner is replaced within about 14 s
 ```
 
 [Leases](../../internals/leases/) explains the mechanism.
@@ -126,7 +109,7 @@ new Scheduler({ redis, leaseMs: 10_000, heartbeatMs: 2_000 }); // a dead runner 
 ```ts
 import pino from 'pino';
 
-new Scheduler({ redis, log: true, logger: pino() });
+new Scheduler({ backend, log: true, logger: pino() });
 ```
 
 A logger needs `warn` and `error`. `info` is optional; without it, run messages go to `console.log`. See [Events and logging](../events-and-logging/).
@@ -145,11 +128,10 @@ new Scheduler({ backend, unrefTimers: true });
 
 ```ts
 import pino from 'pino';
-import { Scheduler } from 'anarchon';
+import { RedisBackend, Scheduler } from 'anarchon';
 
 export const scheduler = new Scheduler({
-  redis: process.env.REDIS_URL,
-  prefix: 'billing:cron:',          // this service's own keys
+  backend: new RedisBackend({ redis: process.env.REDIS_URL, prefix: 'billing:cron:' }), // this service's own keys
   instanceId: process.env.POD_NAME, // readable names in history
   timezone: 'Europe/Athens',
   logger: pino(),
@@ -163,7 +145,7 @@ The constructor validates its options and throws at once, so a bad setting can't
 
 | Problem | Error |
 | --- | --- |
-| Both `backend` and a Redis shortcut | `TypeError` |
+| No `backend` | `TypeError` |
 | `instanceId` is an empty string | `TypeError` |
 | A number is negative, zero where not allowed, or not a whole number | `RangeError` |
 | `heartbeatMs` is not under half of `leaseMs` | `RangeError` |

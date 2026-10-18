@@ -11,12 +11,12 @@ description: "Ένας scheduler μέσα σε μια υπηρεσία Express, 
 
 ```ts
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { Scheduler } from 'anarchon';
+import { RedisBackend, Scheduler } from 'anarchon';
 
 const PORT = Number(process.env.PORT ?? 3000);
 
 const scheduler = new Scheduler({
-  redis: process.env.REDIS_URL,
+  backend: new RedisBackend({ redis: process.env.REDIS_URL }),
   instanceId: process.env.POD_NAME ?? `api-${PORT}`,
   timezone: 'Europe/Athens',
 });

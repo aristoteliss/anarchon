@@ -101,7 +101,7 @@ scheduler.every('export', '15m', async (ctx) => {
 Το προεπιλεγμένο `instanceId` είναι `hostname:pid`. Μέσα σε ένα container το hostname είναι ήδη το όνομα του pod, οπότε η προεπιλογή μοιάζει με `billing-7d9f8c-x2x4q:1`. Η ρητή δήλωση του ονόματος του pod είναι πιο καθαρή:
 
 ```ts
-new Scheduler({ redis: process.env.REDIS_URL, instanceId: process.env.POD_NAME });
+new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL }), instanceId: process.env.POD_NAME });
 ```
 
 Το ιστορικό δείχνει στη συνέχεια ποιο pod εκτέλεσε κάθε προσπάθεια:

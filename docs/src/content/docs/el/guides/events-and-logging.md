@@ -114,7 +114,7 @@ scheduler.on('lost', (e) => metrics.increment('cron.lost', { job: e.job }));
 Η επιλογή `log: true` καταγράφει μία γραμμή για καθένα από τα παραπάνω events, χωρίς να χρειάζεται πρόσθετος κώδικας:
 
 ```ts
-new Scheduler({ redis, log: true });
+new Scheduler({ backend, log: true });
 ```
 
 ```
@@ -134,12 +134,12 @@ new Scheduler({ redis, log: true });
 
 ```ts
 import pino from 'pino';
-new Scheduler({ redis, log: true, logger: pino() });
+new Scheduler({ backend, log: true, logger: pino() });
 ```
 
 ```ts
 new Scheduler({
-  redis,
+  backend,
   logger: {
     info: (message) => myLog('info', message),
     warn: (message) => myLog('warn', message),

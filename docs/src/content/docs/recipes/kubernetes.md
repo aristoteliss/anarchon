@@ -101,7 +101,7 @@ scheduler.every('export', '15m', async (ctx) => {
 The default `instanceId` is `hostname:pid`. In a container the hostname is already the pod name, so the default reads like `billing-7d9f8c-x2x4q:1`. Passing the pod name explicitly is tidier:
 
 ```ts
-new Scheduler({ redis: process.env.REDIS_URL, instanceId: process.env.POD_NAME });
+new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL }), instanceId: process.env.POD_NAME });
 ```
 
 History then shows which pod ran each run:

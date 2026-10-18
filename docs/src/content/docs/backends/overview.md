@@ -74,12 +74,12 @@ Each store has a different primitive that lets exactly one writer succeed. The d
 
 ## Using a backend
 
-Redis and Valkey have shortcuts on the scheduler. Every other backend is created and passed in:
+Every backend is created and passed in as `backend`:
 
 ```ts
-import { NatsBackend, PostgresBackend, RabbitMQBackend, Scheduler, SqliteBackend } from 'anarchon';
+import { NatsBackend, PostgresBackend, RabbitMQBackend, RedisBackend, Scheduler, SqliteBackend } from 'anarchon';
 
-new Scheduler({ redis: 'redis://localhost:6379' });
+new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
 new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
 new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }) });
 new Scheduler({ backend: new RabbitMQBackend({ url: 'amqp://localhost' }) });

@@ -146,9 +146,9 @@ scheduler.remove('sync'); // true αν η εργασία υπήρχε
 ## Ο πλήρης κύκλος ζωής μιας υπηρεσίας
 
 ```ts
-import { Scheduler } from 'anarchon';
+import { RedisBackend, Scheduler } from 'anarchon';
 
-const scheduler = new Scheduler({ redis: process.env.REDIS_URL, log: true });
+const scheduler = new Scheduler({ backend: new RedisBackend({ redis: process.env.REDIS_URL }), log: true });
 
 scheduler
   .every('sync', '10s', (ctx) => syncCustomers({ signal: ctx.signal }))

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- **`backend` is the only way to choose a store.** The Redis options `redis`, `strategy`,
+  `prefix` and `idmp` are no longer accepted by `new Scheduler()` or `Scheduler.configure()`;
+  they are options of `new RedisBackend()`:
+  `new Scheduler({ backend: new RedisBackend({ redis: url, prefix: 'billing:cron:' }) })`.
+  `backend` is required in `SchedulerOptions` and `ConfigureOptions`.
+- **A named scheduler created from default settings needs a `backend` function.** Settings with
+  `redis` gave each named scheduler the key prefix `cron:<name>:`. Write it as
+  `` backend: (name) => new RedisBackend({ redis: url, prefix: `cron:${name}:` }) ``.
+
 ## 0.3.3
 
 Fixes a heartbeat regression of 0.3.2 and an error message. The API is that of 0.3.2.

@@ -14,7 +14,7 @@
 import { Redis } from 'ioredis';
 import { Pool } from 'pg';
 
-import { PostgresBackend, Scheduler } from '../src';
+import { PostgresBackend, RedisBackend, Scheduler } from '../src';
 import { say, sleep } from './shared';
 
 async function main() {
@@ -24,7 +24,7 @@ async function main() {
 
   const scheduler = pool
     ? new Scheduler({ backend: new PostgresBackend({ connection: pool, table: 'example_own_clients' }) })
-    : new Scheduler({ redis, prefix: 'example:own-clients:' });
+    : new Scheduler({ backend: new RedisBackend({ redis, prefix: 'example:own-clients:' }) });
 
   scheduler.every('sync', '2s', () => sleep(100), { jitterMs: 100, catchUpMs: 0 });
   scheduler.on('success', (r) => say(`sync ran on ${r.instanceId} in ${r.durationMs} ms`));

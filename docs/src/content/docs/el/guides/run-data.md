@@ -6,7 +6,7 @@ description: Δώστε στις εκτελέσεις μιας εργασίας 
 Ένας handler είναι μια συνηθισμένη συνάρτηση, οπότε μπορεί να χρησιμοποιήσει ό,τι βρίσκεται στο scope γύρω του. Η επιλογή `data` είναι για ό,τι δεν βρίσκεται εκεί: τιμές που αποφασίζετε εκεί όπου ορίζεται η εργασία ή δημιουργείται ο scheduler, και τις θέλετε στον handler όταν ξεκινά μια εκτέλεση.
 
 ```ts
-const scheduler = new Scheduler({ redis, data: { tenant: 'acme' } });
+const scheduler = new Scheduler({ backend, data: { tenant: 'acme' } });
 
 scheduler.every('export', '1h', async (ctx: JobContext<{ tenant: string; permission: string }>) => {
   await exportFor(ctx.data.tenant, ctx.data.permission);
@@ -28,7 +28,7 @@ scheduler.every('export', '1h', async (ctx: JobContext<{ tenant: string; permiss
 Είναι στρώματα, από το πιο γενικό στο πιο ειδικό, με τη σειρά του πίνακα. Δύο απλά αντικείμενα συγχωνεύονται, και τα κλειδιά του πιο ειδικού υπερισχύουν. Οποιαδήποτε άλλη τιμή (string, αριθμός, πίνακας, instance κλάσης) αντικαθιστά ό,τι βρίσκεται από κάτω της.
 
 ```ts
-const scheduler = new Scheduler({ redis, data: { tenant: 'acme', region: 'eu' } });
+const scheduler = new Scheduler({ backend, data: { tenant: 'acme', region: 'eu' } });
 scheduler.every('export', '1h', run, { data: { region: 'us', permission: 'export' } });
 
 await scheduler.runNow('export');

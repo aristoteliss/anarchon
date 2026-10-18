@@ -6,11 +6,11 @@ description: Το προεπιλεγμένο backend, οι τέσσερις στ
 Το Redis είναι το προεπιλεγμένο backend. Λειτουργεί με Redis 5 ή νεότερο και με Valkey.
 
 ```ts
-import { Scheduler } from 'anarchon';
+import { RedisBackend, Scheduler } from 'anarchon';
 
-new Scheduler({ redis: 'redis://localhost:6379' });
-new Scheduler({ redis: 'redis://cache.internal:6379' });
-new Scheduler({ redis: { host: 'localhost', port: 6390 } }); // Valkey
+new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
+new Scheduler({ backend: new RedisBackend({ redis: 'redis://cache.internal:6379' }) });
+new Scheduler({ backend: new RedisBackend({ redis: { host: 'localhost', port: 6390 } }) }); // Valkey
 ```
 
 ## Σύνδεση
@@ -18,8 +18,8 @@ new Scheduler({ redis: { host: 'localhost', port: 6390 } }); // Valkey
 Η παράμετρος `redis` δέχεται ένα URL, ένα αντικείμενο επιλογών (options object) ή έναν client.
 
 ```ts
-new Scheduler({ redis: 'rediss://user:secret@host:6380/2' }); // TLS, διαπιστευτήρια, βάση δεδομένων 2
-new Scheduler({ redis: { host: 'cache', port: 6379, password: process.env.REDIS_PASSWORD, db: 1 } });
+new Scheduler({ backend: new RedisBackend({ redis: 'rediss://user:secret@host:6380/2' }) }); // TLS, διαπιστευτήρια, βάση δεδομένων 2
+new Scheduler({ backend: new RedisBackend({ redis: { host: 'cache', port: 6379, password: process.env.REDIS_PASSWORD, db: 1 } }) });
 ```
 
 Όταν περνάτε ένα URL ή επιλογές, το anarchon ανοίγει τη σύνδεση με το `redis` (node-redis) και την κλείνει κατά την κλήση του `stop()`.
@@ -30,22 +30,22 @@ new Scheduler({ redis: { host: 'cache', port: 6379, password: process.env.REDIS_
 import { Redis } from 'ioredis';
 
 const redis = new Redis(process.env.REDIS_URL);
-const scheduler = new Scheduler({ redis }); // το stop() τον αφήνει ανοιχτό
+const scheduler = new Scheduler({ backend: new RedisBackend({ redis }) }); // το stop() τον αφήνει ανοιχτό
 ```
 
 Αναγνωρίζονται οι εξής clients: **ioredis**, **iovalkey**, **node-redis** (`redis`) και **Valkey GLIDE**. Οποιοσδήποτε άλλος λειτουργεί εφόσον διαθέτει μέθοδο `send(command, args)` που επιστρέφει την απόκριση.
 
 ## Επιλογές
 
-Περάστε τις στον scheduler, ή δημιουργήστε το backend μόνοι σας για όσες δεν διαθέτουν συντόμευση.
+Επιλογές του `new RedisBackend()`:
 
 | Επιλογή | Προεπιλογή | Σημασία |
 | --- | --- | --- |
-| `redis` | none | Σύνδεση ή client. Υποχρεωτικό, εκτός αν δημιουργείτε εσείς το backend |
+| `redis` | `localhost:6379` | Σύνδεση ή client |
 | `strategy` | `'lease'` | Πώς επιλέγεται ένας νικητής (παρακάτω) |
 | `prefix` | `'cron:'` | Πρόθεμα κάθε κλειδιού |
 | `idmp` | `{ durationSec: 300, maxSize: 1000 }` | Μόνο για τη στρατηγική `'idmp'` |
-| `scriptWindowMs` | `300000` | Μόνο για τη στρατηγική `'script'`: για πόσο διάστημα απομνημονεύεται μια δεσμευμένη εκτέλεση. Χωρίς συντόμευση· απαιτεί `new RedisBackend()` |
+| `scriptWindowMs` | `300000` | Μόνο για τη στρατηγική `'script'`: για πόσο διάστημα απομνημονεύεται μια δεσμευμένη εκτέλεση |
 
 ```ts
 import { RedisBackend, Scheduler } from 'anarchon';

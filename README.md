@@ -19,9 +19,9 @@ anarchon also handles what goes wrong in real clusters:
 - rolling deploys, and every instance restarting at once
 
 ```ts
-import { Scheduler } from 'anarchon';
+import { RedisBackend, Scheduler } from 'anarchon';
 
-const scheduler = new Scheduler({ redis: 'redis://localhost:6379' }); // a backend is required: none is assumed
+const scheduler = new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) }); // a backend is required: none is assumed
 
 scheduler
   .every('sync', '10s', async (ctx) => { /* ... */ })
@@ -119,14 +119,11 @@ A lease isn't a lock you hold and release. Every decision is still a single atom
 
 ### `new Scheduler(options)`
 
-One of `redis` and `backend` is required. No store is assumed: `new Scheduler()` throws.
+`backend` is required. No store is assumed: `new Scheduler()` throws.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `redis` | none: required unless `backend` | `{ host, port, password, db }`, a URL, or your own client: ioredis, iovalkey, node-redis, Valkey GLIDE, or any `{ send(command, args) }`. Clients you pass aren't closed on stop |
-| `backend` | none: required unless `redis` | Another store: `new PostgresBackend(...)`, `new SqliteBackend(...)` and the rest. See [Backends](#backends) |
-| `strategy` | `'lease'` | `'lease'`, or one of the simple claims: `'stream-id'`, `'idmp'` (Redis 8.6+), `'script'` |
-| `prefix` | `'cron:'` | Key prefix |
+| `backend` | none: required | Where runs are stored: `new RedisBackend(...)`, `new PostgresBackend(...)`, `new SqliteBackend(...)` and the rest. See [Backends](#backends) |
 | `instanceId` | `hostname:pid` | Name shown in history |
 | `jitterMs` | `2000` | Maximum random delay before claiming a run. Lowered automatically for short intervals |
 | `maxLateMs` | `60000` | Skip a run if this instance reaches it later than this |
@@ -154,9 +151,9 @@ scheduler.at(name, when, handler, options?)          // once, at a Date / ms / I
 The same jobs can be declared on the methods of a class. There is no framework, no `reflect-metadata` and no register call: an object adds its jobs when it is created, and the scheduler can be created for you from settings you give once.
 
 ```ts
-import { At, Cron, Every, type JobContext, Scheduler } from 'anarchon';
+import { At, Cron, Every, type JobContext, RedisBackend, Scheduler } from 'anarchon';
 
-Scheduler.configure({ redis: process.env.REDIS_URL, autoStart: true }); // a backend must be given: none is assumed
+Scheduler.configure({ backend: new RedisBackend({ redis: process.env.REDIS_URL }), autoStart: true }); // a backend must be given: none is assumed
 
 class Reports {
   @Cron('weekday-digest', '0 8 * * 1-5', { timezone: 'Europe/Athens' })
@@ -178,9 +175,9 @@ Each decorator takes the arguments of its method without the handler: `@Every(na
 
 | | Code |
 |---|---|
-| Settings, started for you | `Scheduler.configure({ redis, autoStart: true })` |
-| Settings, started by you | `Scheduler.configure({ redis })`, then `await Scheduler.startAll()` |
-| By hand | `const scheduler = new Scheduler({ redis })`, then `await scheduler.start()` |
+| Settings, started for you | `Scheduler.configure({ backend, autoStart: true })` |
+| Settings, started by you | `Scheduler.configure({ backend })`, then `await Scheduler.startAll()` |
+| By hand | `const scheduler = new Scheduler({ backend })`, then `await scheduler.start()` |
 
 Stop them on shutdown with `await Scheduler.stopAll()`.
 
@@ -188,7 +185,7 @@ Stop them on shutdown with `await Scheduler.stopAll()`.
 
 ```ts
 Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: `cron_${name}` }) });
-Scheduler.configure('billing', { redis: process.env.BILLING_REDIS_URL, leaseMs: 10_000 }); // optional: settings of its own
+Scheduler.configure('billing', { backend: new RedisBackend({ redis: process.env.BILLING_REDIS_URL }), leaseMs: 10_000 }); // optional: settings of its own
 
 class Jobs {
   @Cron('job-1', '*/10 * * * * *')                            // the default scheduler
@@ -229,7 +226,7 @@ class Reports {
 
 Things to know:
 
-- **A backend is required in settings.** `Scheduler.configure()` throws without `backend` or `redis`: a scheduler is never created on a store you didn't choose.
+- **A backend is required in settings.** `Scheduler.configure()` throws without `backend`: a scheduler is never created on a store you didn't choose.
 - **The name comes first.** `@Every('1h', 'sync')` and `@Cron('0 8 * * *', 'Europe/Athens')` throw when the class is defined, with the right form in the message. A time zone goes in the options.
 - **Name your jobs.** Without a name a job is called `Class-method`. That changes when the class or the method is renamed, and on every build if a minifier renames classes. A changed name is a new job with a new history.
 - **Legacy style: `@Scheduled()` or `register()`.** With neither, the jobs of a class are not added. A starting scheduler warns about every such job, and about jobs of a class that never got an object.
@@ -248,7 +245,7 @@ More in the [decorators guide](https://aristoteliss.github.io/anarchon/guides/de
 A job often needs something it can't take from its surroundings: the tenant it runs for, the permission it runs with, a token that must be fresh. Give it as `data`, and each run reads it as `ctx.data`.
 
 ```ts
-const scheduler = new Scheduler({ redis, data: { tenant: 'acme' } });               // for every job
+const scheduler = new Scheduler({ backend, data: { tenant: 'acme' } });               // for every job
 
 scheduler.every('export', '1h', async (ctx: JobContext<{ tenant: string; permission: string }>) => {
   await exportFor(ctx.data.tenant, ctx.data.permission);
@@ -357,8 +354,9 @@ With `lease`, each job has these keys, all with one hash tag so Redis Cluster ke
 Redis, Valkey, PostgreSQL and SQLite get everything described above: leases, backups, no overlap, catch-up and hand-over on `stop()`. RabbitMQ and NATS only make sure one instance wins each run (like the simple `stream-id` claim): they can't hold a lease that a backup could check.
 
 ```ts
-import { NatsBackend, PostgresBackend, RabbitMQBackend, Scheduler, SqliteBackend } from 'anarchon';
+import { NatsBackend, PostgresBackend, RabbitMQBackend, RedisBackend, Scheduler, SqliteBackend } from 'anarchon';
 
+new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
 new Scheduler({ backend: new PostgresBackend({ connection: 'postgres://user:pass@db/app' }) });
 new Scheduler({ backend: new SqliteBackend({ database: './anarchon.db' }) });
 new Scheduler({ backend: new RabbitMQBackend({ url: 'amqp://localhost' }) });
@@ -372,6 +370,14 @@ new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222' }) }
 | SQLite | One `BEGIN IMMEDIATE` transaction per claim; SQLite has one writer at a time | Yes | SQLite 3.35+; node:sqlite, better-sqlite3 or `@libsql/client` |
 | RabbitMQ | A gate queue per run that holds one message (`x-max-length: 1`, `reject-publish`); publisher confirms say who was first | No | RabbitMQ 3.9+, `amqplib` |
 | NATS | JetStream publish with `Nats-Msg-Id: <job>:<slot>`; repeats come back as duplicates | No | JetStream enabled, `@nats-io/transport-node` + `@nats-io/jetstream` |
+
+`new RedisBackend(options)`:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `redis` | `localhost:6379` | `{ host, port, password, db }`, a URL, or your own client: ioredis, iovalkey, node-redis, Valkey GLIDE, or any `{ send(command, args) }`. Clients you pass aren't closed on stop |
+| `strategy` | `'lease'` | `'lease'`, or one of the simple claims: `'stream-id'`, `'idmp'` (Redis 8.6+), `'script'` |
+| `prefix` | `'cron:'` | Key prefix |
 
 Notes:
 - **Postgres and SQLite** create two tables on start: `anarchon_runs` (one row per run: attempt, token, status, lease end) and `anarchon_runs_attempts` (one row per attempt: the history). Postgres adds `anarchon_runs_jobs`. Pick another name with `table` (Postgres may include a schema). Leases use the database's clock.

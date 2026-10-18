@@ -7,15 +7,11 @@ description: Κάθε επιλογή του scheduler, των εργασιών �
 
 ## Επιλογές Scheduler
 
-`new Scheduler(options)`. Ένα από τα `backend` και `redis` είναι υποχρεωτικό: δεν υποτίθεται κανένα store. Οδηγός: [Επιλογές Scheduler](../../guides/scheduler-options/).
+`new Scheduler(options)`. Το `backend` είναι υποχρεωτικό: δεν υποτίθεται κανένα store. Οδηγός: [Επιλογές Scheduler](../../guides/scheduler-options/).
 
 | Επιλογή | Τύπος | Προεπιλογή | Σημασία |
 | --- | --- | --- | --- |
-| `backend` | `Backend` | κανένα | Πού διεκδικούνται και καταγράφονται οι εκτελέσεις. Υποχρεωτικό, εκτός αν δοθεί `redis`. Όχι μαζί με τις συντομεύσεις Redis |
-| `redis` | URL, επιλογές ή client | κανένα | Συντόμευση Redis: η σύνδεση. Υποχρεωτικό, εκτός αν δοθεί `backend` |
-| `strategy` | `'lease' \| 'stream-id' \| 'idmp' \| 'script'` | `'lease'` | Συντόμευση Redis: πώς επιλέγεται ένας νικητής |
-| `prefix` | `string` | `'cron:'` | Συντόμευση Redis: πρόθεμα κλειδιού |
-| `idmp` | `{ durationSec?, maxSize? }` | `{ 300, 1000 }` | Συντόμευση Redis: ρυθμίσεις `'idmp'` |
+| `backend` | `Backend` | υποχρεωτικό | Πού διεκδικούνται και καταγράφονται οι εκτελέσεις |
 | `instanceId` | `string` | `hostname:pid` | Όνομα αυτού του instance στο ιστορικό |
 | `name` | `string` | κανένα | Όνομα με το οποίο οι εργασίες με decorators επιλέγουν αυτόν τον scheduler |
 | `data` | τιμή ή συνάρτηση | κανένα | Δεδομένα για τις εκτελέσεις κάθε εργασίας, που διαβάζονται ως `ctx.data` |
@@ -82,7 +78,7 @@ description: Κάθε επιλογή του scheduler, των εργασιών �
 
 | Επιλογή | Τύπος | Προεπιλογή | Σημασία |
 | --- | --- | --- | --- |
-| `backend` | `Backend` ή `(name) => Backend` | υποχρεωτικό, εκτός αν δοθεί `redis` | Το backend, ή μια συνάρτηση που επιστρέφει ένα για το όνομα ενός scheduler |
+| `backend` | `Backend` ή `(name) => Backend` | υποχρεωτικό | Το backend, ή μια συνάρτηση που επιστρέφει ένα για το όνομα ενός scheduler |
 | `autoStart` | `boolean` | `false` | Εκκίνηση του scheduler όταν δημιουργείται |
 
 ## Επιλογές `stop()`
@@ -93,7 +89,7 @@ description: Κάθε επιλογή του scheduler, των εργασιών �
 
 ## Επιλογές Redis / Valkey backend
 
-`new RedisBackend(options)`, ή οι παραπάνω συντομεύσεις. Οδηγός: [Redis και Valkey](../../backends/redis/).
+`new RedisBackend(options)`. Οδηγός: [Redis και Valkey](../../backends/redis/).
 
 | Επιλογή | Τύπος | Προεπιλογή | Σημασία |
 | --- | --- | --- | --- |

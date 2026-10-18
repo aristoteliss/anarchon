@@ -145,14 +145,14 @@ Stores the settings a scheduler is created from when a decorated job needs it. W
 
 | Option | Type | Meaning |
 | --- | --- | --- |
-| `backend` | `Backend`, or `(name: string) => Backend` | Required unless `redis` is given. A function is called with the scheduler's name (`'default'` for the default one), so one set of settings serves several schedulers |
+| `backend` | `Backend`, or `(name: string) => Backend` | Required. A function is called with the scheduler's name (`'default'` for the default one), so one set of settings serves several schedulers |
 | `autoStart` | `boolean`, default `false` | Start the scheduler when it is created. A failure to start is an `'error'` event |
 
 ```ts
-Scheduler.configure({ redis: process.env.REDIS_URL, autoStart: true });
+Scheduler.configure({ backend: new RedisBackend({ redis: process.env.REDIS_URL }), autoStart: true });
 
 Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: `cron_${name}` }) });
-Scheduler.configure('billing', { redis: process.env.BILLING_REDIS_URL, leaseMs: 10_000 });
+Scheduler.configure('billing', { backend: new RedisBackend({ redis: process.env.BILLING_REDIS_URL }), leaseMs: 10_000 });
 ```
 
 A named scheduler without settings of its own is created from the default ones:
@@ -160,10 +160,9 @@ A named scheduler without settings of its own is created from the default ones:
 | Default settings | A scheduler named `reports` gets |
 | --- | --- |
 | `backend` is a function | `backend('reports')` |
-| `redis` | The same connection settings, with the key prefix `<prefix>reports:` (`cron:reports:` by default) |
 | `backend` is an object | Nothing: creating it throws, because two schedulers can't share one backend object |
 
-**Throws** `TypeError` when neither `backend` nor `redis` is given; `Error` when that scheduler already exists, or when an object that was waiting for it can't add its jobs.
+**Throws** `TypeError` when `backend` is not given; `Error` when that scheduler already exists, or when an object that was waiting for it can't add its jobs.
 
 ### `Scheduler.get(name?)`
 

@@ -21,9 +21,9 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 [![license](https://img.shields.io/badge/license-AGPL--3.0%20or%20commercial-blue.svg)](https://github.com/aristoteliss/anarchon#license-and-commercial-use)
 
 ```ts
-import { Scheduler } from 'anarchon';
+import { RedisBackend, Scheduler } from 'anarchon';
 
-const scheduler = new Scheduler({ redis: 'redis://localhost:6379' });
+const scheduler = new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
 
 scheduler
   .every('sync', '10s', async (ctx) => { /* ... */ })

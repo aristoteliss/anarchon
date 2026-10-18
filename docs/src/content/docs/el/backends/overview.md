@@ -74,12 +74,12 @@ flowchart LR
 
 ## Χρήση ενός backend
 
-Το Redis και το Valkey διαθέτουν συντομεύσεις στον scheduler. Κάθε άλλο backend δημιουργείται και περνιέται ως όρισμα:
+Κάθε backend δημιουργείται και περνιέται ως `backend`:
 
 ```ts
-import { NatsBackend, PostgresBackend, RabbitMQBackend, Scheduler, SqliteBackend } from 'anarchon';
+import { NatsBackend, PostgresBackend, RabbitMQBackend, RedisBackend, Scheduler, SqliteBackend } from 'anarchon';
 
-new Scheduler({ redis: 'redis://localhost:6379' });
+new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
 new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
 new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }) });
 new Scheduler({ backend: new RabbitMQBackend({ url: 'amqp://localhost' }) });

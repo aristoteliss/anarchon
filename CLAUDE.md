@@ -111,7 +111,7 @@ How they run:
   listed in the README's Tests section.
 - `test/docker-compose.test.yml` runs every server on the default URLs; Redis 8.6 and Postgres use
   6381 and 5433 so a Redis or Postgres on the usual ports is never touched. No test uses 6379 or
-  5432: a scheduler has no default backend, so `backend` or `redis` is always given.
+  5432: a scheduler has no default backend, so `backend` is always given.
 - `LIBSQL_URL` and `LIBSQL_AUTH_TOKEN` point the libSQL server tests at another server, such as
   Turso. The token is read from the environment only.
 - Each test uses its own Redis key prefix (`test:<id>:`) or table (`t_<id>`); tests never

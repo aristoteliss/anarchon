@@ -168,7 +168,7 @@ Other examples in the repository:
 Turn on the built-in log while you investigate:
 
 ```ts
-new Scheduler({ redis, log: true });
+new Scheduler({ backend, log: true });
 ```
 
 Or log every event with its payload:

@@ -71,7 +71,7 @@ Node.js 20 και νεότερο. Ο ενσωματωμένος οδηγός SQL
 
 ### Πρέπει να δημιουργήσω scheduler για να χρησιμοποιήσω τους decorators;
 
-Όχι. Δώστε τις ρυθμίσεις μία φορά με το `Scheduler.configure({ redis: url, autoStart: true })`, και ο scheduler δημιουργείται και ξεκινά όταν δημιουργηθεί το πρώτο αντικείμενο με decorators. Το backend πρέπει να υπάρχει στις ρυθμίσεις· δεν υποτίθεται κανένα. Δείτε [Decorators](../../guides/decorators/#δύο-τρόποι-για-να-υπάρχει-scheduler).
+Όχι. Δώστε τις ρυθμίσεις μία φορά με το `Scheduler.configure({ backend: new RedisBackend({ redis: url }), autoStart: true })`, και ο scheduler δημιουργείται και ξεκινά όταν δημιουργηθεί το πρώτο αντικείμενο με decorators. Το backend πρέπει να υπάρχει στις ρυθμίσεις· δεν υποτίθεται κανένα. Δείτε [Decorators](../../guides/decorators/#δύο-τρόποι-για-να-υπάρχει-scheduler).
 
 ### Μπορούν διαφορετικές εργασίες να χρησιμοποιούν διαφορετικούς schedulers;
 
