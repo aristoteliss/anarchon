@@ -57,7 +57,7 @@ In order, `stop()`:
 
 1. **Stops scheduling.** No new run starts on this instance.
 2. **Aborts `ctx.signal`** of every job running here.
-3. **Waits** for those jobs to end, up to `timeoutMs` (default 30 seconds).
+3. **Waits** for those jobs to end, and for claims still in flight, up to `timeoutMs` (default 30 seconds). A run whose claim is won after `stop()` was called doesn't start; it is recorded as `'interrupted'`.
 4. **Closes the connection**, if anarchon opened it. A client you passed in stays open.
 
 After `stop()` resolves, anarchon sends nothing more to the store. You can call `start()` again later. `history()` and `lastRun()` still work: after `stop()`, each read opens the connection for itself and closes it when it is done, so the process can exit.
@@ -112,7 +112,7 @@ const run = await scheduler.runNow('sync');
 console.log(run.status, run.durationMs);
 ```
 
-Runs a job immediately on this instance, whatever its schedule, and resolves with its [run record](../history/#the-run-record) when the handler has finished.
+Runs a job immediately on this instance, whatever its schedule, and resolves with its [run record](../history/#the-run-record) when the handler has finished. If `stop()` is called before the handler starts, it resolves with status `'interrupted'` and the job doesn't run.
 
 A manual run is different from a scheduled one:
 

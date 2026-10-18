@@ -243,14 +243,15 @@ test('log: true writes one line per start and finish', async () => {
 
 test('historyTtlMs drops history older than the limit', async () => {
   const scheduler = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix: uniquePrefix('ttl') }), historyTtlMs: 1_000 });
-  scheduler.every('job', '1h', () => {});
+  scheduler.every('job', '1h', () => {}, { catchUpMs: 0 });
   await scheduler.start();
   try {
     await scheduler.runNow('job');
     await sleep(1_200);
     await scheduler.runNow('job');
     const history = await scheduler.history('job', 10);
-    assert.equal(history.filter((r) => r.status === 'success').length, 1, JSON.stringify(history));
+    assert.equal(history.length, 1, JSON.stringify(history));
+    assert.equal(history[0]?.status, 'success', JSON.stringify(history));
   } finally {
     await scheduler.stop();
   }

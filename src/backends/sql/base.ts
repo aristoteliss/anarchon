@@ -276,7 +276,10 @@ export abstract class SqlBackend implements Backend, RunStore {
       ],
     );
     if (historyTtlMs)
-      await this.run(`DELETE FROM ${this.attempts} WHERE job = ? AND claimed_at < ?`, [job, result.finishedAt - historyTtlMs]);
+      await this.run(`DELETE FROM ${this.attempts} WHERE job = ? AND COALESCE(finished_at, claimed_at) < ?`, [
+        job,
+        result.finishedAt - historyTtlMs,
+      ]);
   }
 
   /**
@@ -469,7 +472,10 @@ export abstract class SqlBackend implements Backend, RunStore {
       [input.job, input.job, input.historySize],
     );
     if (input.historyTtlMs)
-      await tx.all(`DELETE FROM ${this.attempts} WHERE job = ? AND claimed_at < ?`, [input.job, now - input.historyTtlMs]);
+      await tx.all(`DELETE FROM ${this.attempts} WHERE job = ? AND COALESCE(finished_at, claimed_at) < ?`, [
+        input.job,
+        now - input.historyTtlMs,
+      ]);
   }
 
   private async run(sql: string, params: ReadonlyArray<SqlValue>): Promise<SqlRow[]> {

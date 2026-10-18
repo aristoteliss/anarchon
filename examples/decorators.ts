@@ -22,7 +22,7 @@ class Mailer {
 }
 
 class Reports {
-  private sent = 0;
+  sent = 0;
 
   constructor(private readonly mailer: Mailer) {}
 
@@ -53,7 +53,7 @@ async function main() {
   // The first scheduler created is the default one: decorated objects add their jobs to it.
   const scheduler = new Scheduler({ backend: backendFromEnv('decorators'), log: true });
   // One object per class: a second `new Reports()` would throw 'Job "sync" is already registered'.
-  new Reports(new Mailer());
+  const reports = new Reports(new Mailer());
 
   await scheduler.start();
   say(`started as ${scheduler.instanceId} on ${scheduler.backend.name}`);
@@ -61,6 +61,7 @@ async function main() {
 
   const shutdown = async () => {
     await scheduler.stop();
+    say(`stopped (${reports.sent} syncs sent)`);
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

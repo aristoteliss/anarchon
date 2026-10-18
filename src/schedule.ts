@@ -42,13 +42,18 @@ export function parseDuration(value: number | string): number {
   }
   const text = value.trim().toLowerCase();
   if (/^\d+$/.test(text)) return parseDuration(Number(text));
-  if (!/^(\d+(\.\d+)?\s*(ms|s|m|h|d)\s*)+$/.test(text)) {
+  const tokens = text.split(/(ms|s|m|h|d)/);
+  if (tokens.length < 3 || tokens.length % 2 === 0 || tokens[tokens.length - 1] !== '') {
     throw coded(new RangeError(`Invalid duration: "${value}" (examples: "10s", "35m", "1h30m")`), 'ANARCHON_INVALID_ARGUMENT');
   }
   let total = 0;
-  for (const [, amount, unit] of text.matchAll(/(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)/g)) {
-    const ms = UNIT_MS[unit as string];
-    if (ms === undefined) throw coded(new RangeError(`Invalid duration unit: "${unit}"`), 'ANARCHON_INVALID_ARGUMENT');
+  for (let i = 0; i < tokens.length - 1; i += 2) {
+    const amount = (tokens[i] ?? '').trim();
+    const unit = tokens[i + 1] ?? '';
+    const ms = UNIT_MS[unit];
+    if (!/^\d+(?:\.\d+)?$/.test(amount) || ms === undefined) {
+      throw coded(new RangeError(`Invalid duration: "${value}" (examples: "10s", "35m", "1h30m")`), 'ANARCHON_INVALID_ARGUMENT');
+    }
     total += Number(amount) * ms;
   }
   return parseDuration(Math.round(total));

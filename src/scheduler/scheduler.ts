@@ -607,7 +607,8 @@ export class Scheduler<B extends Backend = Backend> {
 
   /**
    * Stops scheduling, aborts `ctx.signal`, waits up to `timeoutMs` (default 30 s) for running jobs
-   * to finish, then closes the connections the backend opened. Clients you passed in stay open.
+   * and claims in flight to finish (a run won after this call doesn't start), then closes the
+   * connections the backend opened. Clients you passed in stay open.
    *
    * Lease strategy: a job that throws once its signal is aborted (e.g. `ctx.signal.throwIfAborted()`)
    * is handed to another instance right away. A job still running when the timeout passes stops
@@ -633,7 +634,8 @@ export class Scheduler<B extends Backend = Backend> {
   /**
    * Runs a job now, on this instance, whatever its schedule. The run is not deduplicated (calling
    * it on two instances runs it twice), may overlap a scheduled run, and is recorded in history
-   * with `manual: true`. Resolves with the run's record when the job has finished.
+   * with `manual: true`. Resolves with the run's record when the job has finished. If `stop()` is called
+   * before the handler starts, it resolves with status 'interrupted' and the job doesn't run.
    *
    * @throws Error when the job is not registered here, or the scheduler is not started.
    *
@@ -649,8 +651,13 @@ export class Scheduler<B extends Backend = Backend> {
     refuseUnknown('runNow()', options, RUN_NOW_OPTIONS);
     const job = this.getJob(name);
     if (this.state !== 'running') throw coded(new Error('Call start() before runNow()'), 'ANARCHON_STATE');
-    await this.prepare(job);
-    return this.leases ? this.leases.runManual(job, options.data) : this.claimOnly.runManual(job, options.data);
+    const signal = this.abort.signal;
+    return this.track(
+      (async () => {
+        await this.prepare(job);
+        return this.leases ? this.leases.runManual(job, options.data, signal) : this.claimOnly.runManual(job, options.data, signal);
+      })(),
+    );
   }
 
   /**
@@ -843,6 +850,7 @@ export class Scheduler<B extends Backend = Backend> {
 
   /** A scheduled run is due. Never rejects: problems are reported as events. */
   private async fire(job: Job, slot: number): Promise<void> {
+    const signal = this.abort.signal;
     this.timers.arm(job); // schedule the next run first, so a long job doesn't delay it
 
     const lateMs = Date.now() - slot;
@@ -850,7 +858,7 @@ export class Scheduler<B extends Backend = Backend> {
       this.emit('skip', { job: job.name, slot, scheduledAt: new Date(slot), instanceId: this.instanceId, reason: 'late', lateMs });
       return;
     }
-    return this.leases ? this.leases.run(job, slot, 'scheduled') : this.claimOnly.run(job, slot);
+    return this.leases ? this.leases.run(job, slot, 'scheduled', signal) : this.claimOnly.run(job, slot, signal);
   }
 
   private async doStop(timeoutMs: number): Promise<void> {
@@ -878,19 +886,23 @@ export class Scheduler<B extends Backend = Backend> {
   }
 
   private ensureReady(): Promise<void> {
-    this.ready ??= this.backend.init().catch((error: unknown) => {
-      this.ready = undefined;
+    if (this.ready) return this.ready;
+    const pending = this.backend.init().catch((error: unknown) => {
+      if (this.ready === pending) this.ready = undefined;
       throw error;
     });
-    return this.ready;
+    this.ready = pending;
+    return pending;
   }
 
   private prepare(job: Job): Promise<void> {
-    job.prepared ??= this.backend.prepareJob(job.name, job.historySize).catch((error: unknown) => {
-      job.prepared = undefined;
+    if (job.prepared) return job.prepared;
+    const pending = this.backend.prepareJob(job.name, job.historySize).catch((error: unknown) => {
+      if (job.prepared === pending) job.prepared = undefined;
       throw error;
     });
-    return job.prepared;
+    job.prepared = pending;
+    return pending;
   }
 
   private async closeBackend(): Promise<void> {
@@ -918,10 +930,16 @@ export class Scheduler<B extends Backend = Backend> {
       this.logger.error(`[anarchon]${job ? ` job "${job}":` : ''} ${errorMessage(error)}`);
       return;
     }
-    try {
-      this.emitter.emit(event, payload);
-    } catch (error) {
+    const logFailure = (error: unknown) => {
       this.logger.error(`[anarchon] a "${event}" listener threw: ${errorMessage(error)}`);
+    };
+    for (const listener of this.emitter.rawListeners(event) as Array<(arg: SchedulerEvents[E]) => unknown>) {
+      try {
+        const result = listener.call(this.emitter, payload);
+        if (typeof (result as PromiseLike<unknown> | null)?.then === 'function') Promise.resolve(result).catch(logFailure);
+      } catch (error) {
+        logFailure(error);
+      }
     }
   }
 

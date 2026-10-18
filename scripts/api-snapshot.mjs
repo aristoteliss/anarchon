@@ -36,10 +36,9 @@ function reachable(entry) {
 function strip(source) {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '')
     .split('\n')
     .map((line) => line.trimEnd())
-    .filter((line) => line !== '')
+    .filter((line) => line !== '' && !line.trimStart().startsWith('//'))
     .join('\n');
 }
 

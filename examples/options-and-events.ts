@@ -16,6 +16,7 @@
  *   welcome   a one-off job, 3 s after start
  *   manual    never due on its own in this example: started with runNow()
  */
+import { randomInt } from 'node:crypto';
 import { type JobContext, Scheduler } from '../src';
 import { backendFromEnv, say, sleep, work } from './shared';
 
@@ -48,7 +49,7 @@ async function main() {
       'flaky',
       '5s',
       () => {
-        if (Math.random() < 0.5) throw new Error('upstream returned 503');
+        if (randomInt(2) === 0) throw new Error('upstream returned 503');
       },
       { maxLateMs: 3_000, maxAttempts: 2 },
     )

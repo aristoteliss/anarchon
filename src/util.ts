@@ -105,8 +105,12 @@ export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 
 /** Parses a server version like "3.12.1" or "redis_version:8.6.3" into [major, minor]. */
 export function versionAtLeast(version: string, major: number, minor: number): boolean {
-  const match = /(\d+)\.(\d+)/.exec(version);
-  if (!match) return false;
-  const [maj, min] = [Number(match[1]), Number(match[2])];
-  return maj > major || (maj === major && min >= minor);
+  for (const token of version.split(/[^0-9.]+/)) {
+    const [first, second] = token.split('.');
+    if (first && second) {
+      const [maj, min] = [Number(first), Number(second)];
+      return maj > major || (maj === major && min >= minor);
+    }
+  }
+  return false;
 }

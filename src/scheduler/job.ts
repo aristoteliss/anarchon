@@ -1,6 +1,6 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { coded } from '../errors';
 
 import { LEASE_JOB_OPTIONS } from '../option-keys';
@@ -159,7 +159,7 @@ export function createJob(
 
 /** A random 0..jitterMs delay: which instance asks first, and so wins, differs from run to run. */
 export function randomJitter(job: Job): number {
-  return job.jitterMs > 0 ? Math.floor(Math.random() * (job.jitterMs + 1)) : 0;
+  return job.jitterMs > 0 ? randomInt(job.jitterMs + 1) : 0;
 }
 
 /** What identifies one run of one job on this instance (in the maps of watched and local runs). */

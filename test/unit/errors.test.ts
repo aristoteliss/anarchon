@@ -5,7 +5,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, test } from 'vitest';
 
-import { type Backend, type ErrorCode, isAnarchonError, RabbitMQBackend, Scheduler } from '../../src';
+import { type Backend, type ErrorCode, isAnarchonError, RabbitMQBackend, Scheduler, type SqlClient, SqliteBackend } from '../../src';
 
 const memoryBackend = (): Backend => ({
   name: 'memory',
@@ -71,6 +71,37 @@ test('errors carry a stable code, so callers need not match on the message', asy
   );
   await assert.rejects(scheduler.runNow('a'), (error) => isAnarchonError(error, 'ANARCHON_STATE'));
 
+  const oldClient: SqlClient = {
+    all: async () => [{ v: '3.30.0' }],
+    transaction: async (fn) => fn({ all: async () => [] }),
+    close: async () => {},
+  };
+  await assert.rejects(new SqliteBackend({ database: oldClient }).init(), (error) => isAnarchonError(error, 'ANARCHON_SERVER'));
+
+  const futureClient: SqlClient = {
+    all: async (sql) => (sql.includes('sqlite_version') ? [{ v: '3.35.0' }] : sql.includes('SELECT value FROM') ? [{ value: '999' }] : []),
+    transaction: async (fn) => fn({ all: async () => [] }),
+    close: async () => {},
+  };
+  await assert.rejects(new SqliteBackend({ database: futureClient }).init(), (error) => isAnarchonError(error, 'ANARCHON_STORE_FORMAT'));
+
+  const refusedManual = new Scheduler({
+    backend: {
+      ...memoryBackend(),
+      runs: {
+        claim: async () => ({ kind: 'done' }),
+        heartbeat: async () => true,
+        finish: async () => true,
+        release: async () => true,
+        active: async () => [],
+      },
+    },
+  });
+  refusedManual.every('a', '1h', () => {});
+  await refusedManual.start();
+  await assert.rejects(refusedManual.runNow('a'), (error) => isAnarchonError(error, 'ANARCHON_STORE'));
+  await refusedManual.stop();
+
   const error = (() => {
     try {
       scheduler.every('b', '500ms', () => {});
@@ -89,18 +120,33 @@ test('a named scheduler that default settings with one backend object cannot cre
   );
 });
 
-test('every error thrown by the library has a code', () => {
+test('every Error constructed and thrown in src/ is wrapped in coded(), and every ErrorCode is used', () => {
+  const srcDir = join(__dirname, '../../src');
   const files = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
       const path = join(dir, name);
       return statSync(path).isDirectory() ? files(path) : path.endsWith('.ts') ? [path] : [];
     });
-  const uncoded = files(join(__dirname, '../../src')).flatMap((file) =>
-    readFileSync(file, 'utf8')
+  const allFiles = files(srcDir);
+  const stripComments = (source: string): string =>
+    source
+      .replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, ''))
       .split('\n')
-      .map((line, i) => ({ line, at: `${file}:${i + 1}` }))
-      .filter(({ line }) => /^\s*(?:if .*\)\s*)?throw new (?:Type|Range)?Error\(/.test(line))
-      .map(({ at }) => at),
-  );
+      .map((line) => (line.trimStart().startsWith('//') ? '' : line))
+      .join('\n');
+  const uncoded = allFiles.flatMap((file) => {
+    const clean = stripComments(readFileSync(file, 'utf8'));
+    return [...clean.matchAll(/\bthrow\s+new\s+\w*Error\b/g)].map((m) => `${file}:${clean.slice(0, m.index).split('\n').length}`);
+  });
   assert.deepEqual(uncoded, []);
+
+  const errorsSource = readFileSync(join(srcDir, 'errors.ts'), 'utf8');
+  const declaredCodes = [...errorsSource.matchAll(/\|\s*'(ANARCHON_[A-Z_]+)'/g)].map((m) => m[1]);
+  assert.ok(declaredCodes.length > 0);
+  const nonErrorsSource = allFiles
+    .filter((file) => !file.endsWith('/errors.ts'))
+    .map((file) => stripComments(readFileSync(file, 'utf8')))
+    .join('\n');
+  const unusedCodes = declaredCodes.filter((name) => !nonErrorsSource.includes(`'${name}'`));
+  assert.deepEqual(unusedCodes, []);
 });

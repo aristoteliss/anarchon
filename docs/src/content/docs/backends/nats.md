@@ -29,7 +29,7 @@ The de-duplication this backend uses decides who is first, but it holds no lease
 | `prefix` | `'cron.'` | Subject prefix |
 | `duplicateWindowMs` | `300000` (5 min) | How long JetStream remembers a claimed run |
 | `historySize` | `1000` | About how many runs to keep per job, at least |
-| `replicas` | `1` | Stream replicas in a NATS cluster |
+| `replicas` | `1` for a new stream | Stream replicas in a NATS cluster |
 
 ```ts
 import { connect } from '@nats-io/transport-node';
@@ -78,7 +78,7 @@ anarchon creates the stream on `start()` if it doesn't exist, covering the subje
 
 - **`jitterMs + maxLateMs` must be shorter than `duplicateWindowMs`.** Outside the window JetStream no longer recognizes a repeat, and a very late instance could run the job again. anarchon checks this when you add a job. The defaults (2 s + 60 s against 5 min) are fine.
 - **Job names** may only contain letters, digits, `_` and `-`, because they become subjects.
-- **Replicas.** In a NATS cluster set `replicas: 3` so the stream, and its memory of claimed runs, survives the loss of a server.
+- **Replicas.** In a NATS cluster set `replicas: 3` so the stream, and its memory of claimed runs, survives the loss of a server. When `replicas` is set, an existing stream is updated to it; when it isn't, an existing stream keeps the replicas it has.
 
 ## History
 

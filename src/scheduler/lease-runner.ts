@@ -1,6 +1,6 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { coded } from '../errors';
 
 import type { ClaimOutcome, RunReason, RunRecord, RunStore, SkipEvent } from '../types';
@@ -37,34 +37,36 @@ export class LeaseRunner {
    */
   async recover(job: Job): Promise<void> {
     const { core } = this;
+    const signal = core.stopSignal();
     try {
       await core.ensureReady();
       const latest = job.schedule.prev(Date.now());
       for (const run of await this.runs.active(job.name)) {
-        if (!core.isRunning() || job.removed) return;
+        if (signal.aborted || !core.isRunning() || job.removed) return;
         if (run.alive) this.watch(job, run.slot);
         // Retry a dead run only while it is still the latest run of the job; an older one is
         // superseded (it is marked interrupted when the next run starts).
-        else if (latest === null || run.slot >= latest) void core.track(this.run(job, run.slot, 'takeover'));
+        else if (latest === null || run.slot >= latest) void core.track(this.run(job, run.slot, 'takeover', signal));
       }
     } catch (error) {
-      core.emit('error', { error, job: job.name });
+      if (!signal.aborted) core.emit('error', { error, job: job.name });
     }
     if (job.catchUpMs === 0) return;
     const now = Date.now();
     const previous = job.schedule.prev(now);
     if (previous === null || now - previous > job.catchUpMs) return;
     await sleep(randomJitter(job)); // spread which instance catches up
-    if (core.isRunning() && !job.removed) await this.run(job, previous, 'catch-up');
+    if (!signal.aborted && core.isRunning() && !job.removed) await this.run(job, previous, 'catch-up', signal);
   }
 
   /** Claims a run (or the next attempt of a dead one) and runs it if this instance wins. Never rejects. */
-  async run(job: Job, slot: number, reason: RunReason): Promise<void> {
+  async run(job: Job, slot: number, reason: RunReason, signal = this.core.stopSignal()): Promise<void> {
     const { core } = this;
     const input = claimInput(core.instanceId, job, slot);
     let outcome: ClaimOutcome;
     try {
       await core.ensureReady();
+      if (signal.aborted) return;
       outcome = await this.runs.claim({
         ...input,
         mode: reason === 'takeover' ? 'takeover' : 'new',
@@ -77,8 +79,16 @@ export class LeaseRunner {
         keepMs: job.keepMs,
       });
     } catch (error) {
-      core.emit('error', { error, job: job.name, slot });
-      if (reason === 'takeover') this.watch(job, slot); // try again later
+      if (!signal.aborted) {
+        core.emit('error', { error, job: job.name, slot });
+        if (reason === 'takeover') this.watch(job, slot); // try again later
+      }
+      return;
+    }
+    if (signal.aborted) {
+      if (outcome.kind === 'won' && !core.isIdle() && signal === core.stopSignal()) {
+        await this.runs.release(job.name, slot, input.token).catch(() => {});
+      }
       return;
     }
     const skip = (why: SkipEvent['reason'], lateMs?: number) => {
@@ -90,7 +100,7 @@ export class LeaseRunner {
     switch (outcome.kind) {
       case 'won':
         this.unwatch(job, slot);
-        await this.executeLeased(job, slot, input.token, outcome.attempt, outcome.attempt > 1 ? 'takeover' : reason);
+        await this.executeLeased(job, slot, input.token, outcome.attempt, outcome.attempt > 1 ? 'takeover' : reason, undefined, signal);
         return;
       case 'running': // someone alive runs it: be its backup
         skip('taken');
@@ -120,10 +130,11 @@ export class LeaseRunner {
   }
 
   /** runNow(): a run of its own, never retried by a backup and allowed to overlap. */
-  async runManual(job: Job, data?: unknown): Promise<RunRecord> {
+  async runManual(job: Job, data?: unknown, signal = this.core.stopSignal()): Promise<RunRecord> {
     const { core } = this;
     const token = randomUUID();
     for (let slot = Date.now(), tries = 0; tries < 10; slot++, tries++) {
+      if (signal.aborted) return this.executor.execute(job, slot, { ...this.executor.newRun(1, 'manual', signal), data }, false);
       const outcome = await this.runs.claim({
         ...claimInput(core.instanceId, job, slot),
         token,
@@ -134,7 +145,7 @@ export class LeaseRunner {
         maxAttempts: 1,
         keepMs: job.keepMs,
       });
-      if (outcome.kind === 'won') return core.track(this.executeLeased(job, slot, token, 1, 'manual', data));
+      if (outcome.kind === 'won') return this.executeLeased(job, slot, token, 1, 'manual', data, signal);
     }
     throw coded(new Error(`Could not start a manual run of "${job.name}"`), 'ANARCHON_STORE');
   }
@@ -162,7 +173,7 @@ export class LeaseRunner {
     const key = runKey(job, slot);
     if (this.watchers.has(key) || this.localRuns.has(key) || !core.isRunning() || job.removed) return;
     // At a random moment, so backups don't all try at once.
-    const delay = Math.floor(core.heartbeatMs * (1 + Math.random()));
+    const delay = core.heartbeatMs + (core.heartbeatMs > 0 ? randomInt(core.heartbeatMs) : 0);
     const timer = setTimeout(() => {
       this.watchers.delete(key);
       if (core.isRunning() && !job.removed) void core.track(this.run(job, slot, 'takeover'));
@@ -186,9 +197,10 @@ export class LeaseRunner {
     attempt: number,
     reason: RunReason,
     data?: unknown,
+    signal = this.core.stopSignal(),
   ): Promise<RunRecord> {
     const { core, runs } = this;
-    const run = this.executor.newRun(attempt, reason);
+    const run = this.executor.newRun(attempt, reason, signal);
     run.data = data;
     const key = runKey(job, slot);
     let lost = false;
@@ -215,7 +227,7 @@ export class LeaseRunner {
       ending = true;
       // Keep renewing the lease until the end is stored, also while stop() waits: if Redis is
       // briefly unreachable here, a backup must not re-run a job that already completed.
-      for (let delay = 200; !lost && !core.isIdle(); delay = Math.min(delay * 2, core.heartbeatMs)) {
+      for (let delay = 200; !lost && !core.isIdle() && signal === core.stopSignal(); delay = Math.min(delay * 2, core.heartbeatMs)) {
         try {
           if (!(await runs.finish(job.name, slot, token, status))) markLost();
           break;

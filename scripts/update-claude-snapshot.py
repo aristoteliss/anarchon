@@ -353,13 +353,15 @@ def parse_workspace_globs(root: Path) -> list:
             line = raw.rstrip()
             if not line or line.lstrip().startswith("#"):
                 continue
-            if re.match(r"^packages\s*:", line):
+            if line.split(":", 1)[0].strip() == "packages" and not line.startswith((" ", "\t")):
                 in_packages = True
                 continue
             if in_packages:
-                item = re.match(r"^\s+-\s+['\"]?([^'\"#]+?)['\"]?\s*$", line)
-                if item:
-                    globs.append(item.group(1).strip())
+                stripped = line.lstrip()
+                if stripped.startswith("- ") or stripped == "-":
+                    value = stripped[1:].split("#", 1)[0].strip().strip("'\"")
+                    if value:
+                        globs.append(value)
                     continue
                 if not line.startswith((" ", "\t", "-")):
                     in_packages = False
@@ -517,12 +519,26 @@ def frontmatter_description(path: Path) -> str:
     end = text.find("\n---", 3)
     if end == -1:
         return ""
-    block = text[3:end]
-    match = re.search(r"^description:\s*(.+)$", block, re.MULTILINE)
-    return re.sub(r"\s+", " ", match.group(1).strip()) if match else ""
+    for line in text[3:end].splitlines():
+        if line.startswith("description:"):
+            return " ".join(line.partition(":")[2].split())
+    return ""
+
+
+DIRECTORY_ROLES = {
+    ".claude": "Agent orientation map and active multi-step task files",
+    ".github": "GitHub Actions workflows for CI and documentation deployment",
+    "api": "Public TypeScript API snapshot verified by release checks",
+    "assets": "Repository branding and README visual assets",
+    "scripts": "Release verification, API snapshot, test log and context scripts",
+    "src": "Library source: scheduler, backends, decorators, registry and public types",
+    "test": "Unit, scheduler, backend, lease and multi-process e2e test suites",
+}
 
 
 def describe_directory(scan: RepoScan, rel_dir: str) -> str:
+    if rel_dir in DIRECTORY_ROLES:
+        return DIRECTORY_ROLES[rel_dir]
     contained = [pkg for pkg in scan.packages if pkg.rel_dir.startswith(f"{rel_dir}/")]
     if contained:
         return (
@@ -1047,9 +1063,6 @@ def strip_volatile(text: str) -> str:
 
 
 def find_repo_root(start: Path) -> Path:
-    resolved = run_git(start, "rev-parse", "--show-toplevel")
-    if resolved:
-        return Path(resolved)
     for candidate in [start, *start.parents]:
         if (candidate / ".git").exists():
             return candidate
@@ -1059,7 +1072,6 @@ def find_repo_root(start: Path) -> Path:
 def main(argv: list) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="compare without writing; non-zero exit when stale")
-    parser.add_argument("--output", default=None, help="write to this path instead of the canonical snapshot")
     parser.add_argument("--quiet", action="store_true", help="suppress success output")
     args = parser.parse_args(argv)
 
@@ -1086,16 +1098,15 @@ def main(argv: list) -> int:
             print(f"up to date: {SNAPSHOT_RELPATH}")
         return 0
 
-    target = Path(args.output) if args.output else snapshot_path
-    target.parent.mkdir(parents=True, exist_ok=True)
-    previous = read_text(target) if target.exists() else ""
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    previous = read_text(snapshot_path) if snapshot_path.exists() else ""
     if strip_volatile(previous) == strip_volatile(content) and previous:
         if not args.quiet:
-            print(f"unchanged: {target.relative_to(root) if target.is_relative_to(root) else target}")
+            print(f"unchanged: {SNAPSHOT_RELPATH}")
         return 0
-    target.write_text(content, encoding="utf-8")
+    snapshot_path.write_text(content, encoding="utf-8")
     if not args.quiet:
-        print(f"written: {target.relative_to(root) if target.is_relative_to(root) else target}")
+        print(f"written: {SNAPSHOT_RELPATH}")
     return 0
 
 

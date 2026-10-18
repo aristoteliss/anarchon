@@ -273,12 +273,12 @@ export class RabbitMQBackend implements Backend {
         }
       });
       return connection;
-    })();
-    this.connection = pending.catch((error: unknown) => {
+    })().catch((error: unknown) => {
       if (this.connection === pending) this.connection = undefined;
       throw error;
     });
-    return this.connection;
+    this.connection = pending;
+    return pending;
   }
 
   private getConfirmChannel(): Promise<ConfirmChannel> {
@@ -290,12 +290,12 @@ export class RabbitMQBackend implements Backend {
         if (this.confirm === pending) this.confirm = undefined;
       });
       return channel;
-    })();
-    this.confirm = pending.catch((error: unknown) => {
+    })().catch((error: unknown) => {
       if (this.confirm === pending) this.confirm = undefined;
       throw error;
     });
-    return this.confirm;
+    this.confirm = pending;
+    return pending;
   }
 
   /** Declares a queue on a channel of its own: a refused declaration closes the channel it was sent on. */

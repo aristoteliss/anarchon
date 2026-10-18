@@ -8,7 +8,15 @@ import IoValkey from 'iovalkey';
 import { createClient } from 'redis';
 import { describe, test } from 'vitest';
 
-import { type Backend, isAnarchonError, type KeyValueStrategyName, type LeaseStore, RedisBackend, ValkeyBackend } from '../../src';
+import {
+  type Backend,
+  isAnarchonError,
+  type KeyValueStrategyName,
+  type LeaseStore,
+  RedisBackend,
+  Scheduler,
+  ValkeyBackend,
+} from '../../src';
 import { probeRedis, REDIS_OLD_URL, REDIS_URL, supportsIdmp, uniqueId, VALKEY_URL } from '../support';
 
 // GLIDE logs every server error (expected here: losers' XADDs are refused) to stdout.
@@ -220,5 +228,44 @@ describe('Redis / Valkey specifics', () => {
       () => backend.checkJob({ name: 'x', jitterMs: 2_000, maxLateMs: 60_000, minGapMs: 10, historySize: 1_000 }),
       /historySize/,
     );
+  });
+
+  test('historyTtlMs keeps results of catch-up and long-running runs, and preserves terminal state when a result is missing', async (t) => {
+    if (!(await probeRedis(REDIS_URL))) return t.skip(`nothing at ${REDIS_URL}`);
+    const prefix = `test:${uniqueId('ttl-catchup')}:`;
+    const backend = new RedisBackend({ redis: REDIS_URL, prefix });
+    const scheduler = new Scheduler({ backend, historyTtlMs: 30_000, jitterMs: 0 });
+    const done = new Promise<void>((resolve) => {
+      scheduler.on('success', (r) => {
+        if (r.job === 'catchup') resolve();
+      });
+    });
+    scheduler.at('catchup', Date.now() - 60_000, () => {}, { catchUpMs: 120_000 });
+    scheduler.every('long', '1h', () => new Promise((resolve) => setTimeout(resolve, 350)), {
+      catchUpMs: 0,
+      historyTtlMs: 200,
+    });
+    const redis = await createClient({ url: REDIS_URL }).connect();
+    await scheduler.start();
+    try {
+      await done;
+      const caughtUp = await scheduler.lastRun('catchup');
+      assert.equal(caughtUp?.status, 'success');
+      assert.equal(caughtUp?.reason, 'catch-up');
+      assert.ok(caughtUp?.finishedAt instanceof Date);
+
+      const longRecord = await scheduler.runNow('long');
+      assert.equal(longRecord.status, 'success');
+      const longLast = await scheduler.lastRun('long');
+      assert.equal(longLast?.status, 'success');
+      assert.ok((longLast?.durationMs ?? 0) >= 300);
+
+      await redis.del((backend.runs as LeaseStore).key('catchup', 'results'));
+      const withoutResult = await scheduler.lastRun('catchup');
+      assert.equal(withoutResult?.status, 'success');
+    } finally {
+      await scheduler.stop();
+      await redis.quit();
+    }
   });
 });

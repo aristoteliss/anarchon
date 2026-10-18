@@ -15,7 +15,6 @@ import argparse
 import re
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 REQUIRED_FILES = (
@@ -78,7 +77,8 @@ SECRET_PATTERNS = (
 MAX_SNAPSHOT_BYTES = 65_536
 WARN_SNAPSHOT_BYTES = 49_152
 
-PATH_REF_RE = re.compile(r"`([A-Za-z0-9_][A-Za-z0-9_./@ -]*?/[A-Za-z0-9_./@-]*)`")
+CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
+PATH_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./@ -")
 
 
 class Report:
@@ -99,19 +99,6 @@ class Report:
 
 
 def find_repo_root(start: Path) -> Path:
-    try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=str(start),
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-        if completed.returncode == 0 and completed.stdout.strip():
-            return Path(completed.stdout.strip())
-    except (OSError, subprocess.SubprocessError):
-        pass
     for candidate in [start, *start.parents]:
         if (candidate / ".git").exists():
             return candidate
@@ -161,8 +148,10 @@ def check_size(root: Path, report: Report) -> None:
 
 def check_referenced_paths(root: Path, snapshot: str, report: Report) -> None:
     missing: list = []
-    for match in PATH_REF_RE.finditer(snapshot):
+    for match in CODE_SPAN_RE.finditer(snapshot):
         raw = match.group(1).strip()
+        if "/" not in raw or not (raw[0].isalnum() or raw[0] in "_.") or not (set(raw) <= PATH_CHARS):
+            continue
         if raw.endswith("/"):
             raw = raw[:-1]
         if not raw or raw.startswith(("http", "@", "*", "!")) or " " in raw or "*" in raw:
@@ -216,23 +205,6 @@ def check_template(root: Path, report: Report) -> None:
 
 def check_generator(root: Path, report: Report) -> None:
     generator = root / "scripts/update-claude-snapshot.py"
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "codebase-map.md"
-        run = subprocess.run(
-            [sys.executable, str(generator), "--output", str(out), "--quiet"],
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=False,
-        )
-        report.check(
-            run.returncode == 0,
-            "generator runs successfully",
-            (run.stderr.strip() or run.stdout.strip())[:300],
-        )
-        report.check(out.is_file() and out.stat().st_size > 0, "generator produces output")
-
     check_run = subprocess.run(
         [sys.executable, str(generator), "--check", "--quiet"],
         cwd=str(root),

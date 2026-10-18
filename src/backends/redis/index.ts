@@ -290,13 +290,13 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
   async saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void> {
     if (this.lease) return this.lease.saveResult(job, result, historySize, historyTtlMs);
     const { client } = await this.getConnection();
-    await client.send('ZADD', [this.resultsKey(job), result.slot, JSON.stringify(result)]);
+    await client.send('ZADD', [this.resultsKey(job), Math.max(result.slot, result.finishedAt), JSON.stringify(result)]);
     await client.send('ZREMRANGEBYRANK', [this.resultsKey(job), 0, -(historySize + 1)]);
     if (historyTtlMs) {
-      const oldest = result.finishedAt - historyTtlMs;
-      await client.send('ZREMRANGEBYSCORE', [this.resultsKey(job), '-inf', `(${oldest}`]);
+      await client.send('ZREMRANGEBYSCORE', [this.resultsKey(job), '-inf', `(${result.finishedAt - historyTtlMs}`]);
+      const oldestClaim = Math.min(result.slot, result.startedAt) - historyTtlMs;
       // XTRIM MINID needs Redis 6.2+; older servers keep the count limit only.
-      for (const key of [this.streamKey(job), this.manualKey(job)]) await client.send('XTRIM', [key, 'MINID', '~', oldest]).catch(() => {});
+      for (const key of [this.streamKey(job), this.manualKey(job)]) await client.send('XTRIM', [key, 'MINID', oldestClaim]).catch(() => {});
     }
   }
 
@@ -310,12 +310,8 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
     const claims = streams.flatMap((reply) => parseEntries(reply)).flatMap((entry) => toClaim(entry.fields) ?? []);
     if (claims.length === 0) return [];
     let min = Infinity;
-    let max = -Infinity;
-    for (const { slot } of claims) {
-      min = Math.min(min, slot);
-      max = Math.max(max, slot);
-    }
-    const members = await client.send('ZRANGEBYSCORE', [this.resultsKey(job), min, max]);
+    for (const { slot } of claims) min = Math.min(min, slot);
+    const members = await client.send('ZRANGEBYSCORE', [this.resultsKey(job), min, '+inf']);
     const results = (Array.isArray(members) ? members : []).flatMap((m) => toResult(parseJson(toStr(m))) ?? []);
     return buildHistory({ job, claims, results, limit });
   }

@@ -101,7 +101,9 @@ export interface NatsBackendOptions {
   historySize?: number;
   /**
    * Stream replicas in a NATS cluster. Use 3 so the stream, and its memory of claimed runs,
-   * survives the loss of a server. Default 1.
+   * survives the loss of a server. A new stream gets 1 when this is not set. When it is set, an
+   * existing stream is updated to it (the server refuses more replicas than it has servers); when it
+   * is not set, an existing stream keeps its replicas.
    *
    * @example
    * ```ts
@@ -161,7 +163,7 @@ export class NatsBackend implements Backend {
   private readonly prefix: string;
   private historySize: number;
   private streamHistorySize = 0;
-  private readonly replicas: number;
+  private readonly replicas: number | undefined;
   private state: Promise<{ nc: NatsConnection; js: JetStreamClient; jsm: JetStreamManager }> | undefined;
 
   /** Validates the options. Nothing connects until init(). */
@@ -173,7 +175,7 @@ export class NatsBackend implements Backend {
     this.prefix = options.prefix ?? 'cron.';
     this.dedupeWindowMs = positiveInt('duplicateWindowMs', options.duplicateWindowMs ?? 300_000);
     this.historySize = positiveInt('historySize', options.historySize ?? 1_000);
-    this.replicas = positiveInt('replicas', options.replicas ?? 1);
+    this.replicas = options.replicas === undefined ? undefined : positiveInt('replicas', options.replicas);
   }
 
   /** Job names become subjects: letters, digits, '_' and '-' only. History is kept by count. */
@@ -306,7 +308,12 @@ export class NatsBackend implements Backend {
           'ANARCHON_SERVER',
         );
       }
-      await this.ensureStream(jsm);
+      try {
+        await this.ensureStream(jsm);
+      } catch (error) {
+        if (!this.userConnection) await nc.close().catch(() => {});
+        throw error;
+      }
       return { nc, jsm, js: jetstreamModule.jetstream(nc) as JetStreamClient };
     })().catch((error: unknown) => {
       this.state = undefined;
@@ -321,6 +328,8 @@ export class NatsBackend implements Backend {
       subjects: [`${this.prefix}>`],
       duplicate_window: this.dedupeWindowMs * 1_000_000, // nanoseconds
       max_msgs_per_subject: this.historySize,
+      // Only when asked for: an existing stream's replication is the operator's, not every instance's default.
+      ...(this.replicas === undefined ? {} : { num_replicas: this.replicas }),
     };
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -328,6 +337,7 @@ export class NatsBackend implements Backend {
         const same =
           config.duplicate_window === wanted.duplicate_window &&
           config.max_msgs_per_subject === wanted.max_msgs_per_subject &&
+          (wanted.num_replicas === undefined || config.num_replicas === wanted.num_replicas) &&
           wanted.subjects.every((s) => config.subjects?.includes(s));
         if (!same) {
           await jsm.streams.update(this.stream, {
@@ -342,7 +352,7 @@ export class NatsBackend implements Backend {
         if (!/not found/i.test(errorMessage(error))) throw error;
       }
       try {
-        await jsm.streams.add({ name: this.stream, num_replicas: this.replicas, ...wanted } as never);
+        await jsm.streams.add({ name: this.stream, num_replicas: 1, ...wanted } as never);
         this.streamHistorySize = wanted.max_msgs_per_subject;
         return;
       } catch (error) {

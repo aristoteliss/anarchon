@@ -307,7 +307,13 @@ const AT: ScheduleKind = {
   isValue: (arg) => isTextOrNumber(arg) || arg instanceof Date,
   looksValid: (value) =>
     Number.isFinite(
-      value instanceof Date ? value.getTime() : typeof value === 'number' ? value : typeof value === 'string' ? Date.parse(value) : NaN,
+      value instanceof Date
+        ? value.getTime()
+        : typeof value === 'number'
+          ? value
+          : typeof value === 'string'
+            ? Date.parse(value)
+            : Number.NaN,
     ),
   usage: "the job's name, a string, comes first and the time second: @At(name, when)",
 };

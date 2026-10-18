@@ -54,7 +54,7 @@ A run can be skipped, by design:
 | Every instance was down for longer than `catchUpMs` | Catch-up covers only the latest run, and only if recent |
 | The instance was too late | `maxLateMs` |
 | A runner died and a newer run of the job started first | The newer run replaces it |
-| The store was unreachable when the run was due | Nobody could claim it. On a lease backend it is caught up if the store returns within `catchUpMs` |
+| The store was unreachable when the run was due | Nobody could claim it. Running instances wait for the next slot; on a lease backend it is caught up only if an instance starts within `catchUpMs` after the store returns |
 
 anarchon is not a queue of work to be done. If every slot must produce a result, have each run work on **everything outstanding** rather than on "its" slot only:
 

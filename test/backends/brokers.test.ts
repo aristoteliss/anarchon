@@ -7,20 +7,11 @@ import { jetstreamManager } from '@nats-io/jetstream';
 import { connect } from '@nats-io/transport-node';
 import { describe, test } from 'vitest';
 
-import { type Backend, NatsBackend, RabbitMQBackend, Scheduler } from '../../src';
+import { NatsBackend, RabbitMQBackend, type RabbitMQConnectionLike, Scheduler } from '../../src';
 import { makeBackend, NATS_URL, probeNats, probeRabbit, queueSpecs, RABBITMQ_URL, sleep, uniqueId } from '../support';
 
 const futureSlot = (seconds: number) => Math.ceil(Date.now() / 1000) * 1000 + seconds * 1000;
 const input = (slot: number, instanceId: string, token = randomUUID()) => ({ job: 'job', slot, token, instanceId, historySize: 1000 });
-
-async function _race(backends: Backend[], runs = 10): Promise<void> {
-  await Promise.all(backends.map((b) => b.init()));
-  const base = futureSlot(60);
-  for (let i = 0; i < runs; i++) {
-    const wins = await Promise.all(backends.map((b, n) => b.claim(input(base + i * 1000, `i${n}`))));
-    assert.equal(wins.filter(Boolean).length, 1, `run ${i}: exactly one winner, got ${JSON.stringify(wins)}`);
-  }
-}
 
 describe('RabbitMQ and NATS (simple claim)', () => {
   test('a RabbitMQ gate queue holds one claim and deletes itself after slotTtlMs', async (t) => {
@@ -121,6 +112,87 @@ describe('RabbitMQ and NATS (simple claim)', () => {
   test('RabbitMQ and NATS job names must be simple (they become queue names and subjects)', () => {
     const backend = new RabbitMQBackend();
     assert.throws(() => backend.checkJob({ name: 'a.b', jitterMs: 0, maxLateMs: 1, minGapMs: 1000, historySize: 1 }), /letters, digits/);
+  });
+
+  test('RabbitMQ reopens its confirm channel and connection after a failure or close', async (t) => {
+    if (!(await probeRabbit(RABBITMQ_URL))) return t.skip(`nothing at ${RABBITMQ_URL}`);
+    const amqp = await import('amqplib');
+    const raw = await amqp.connect(RABBITMQ_URL);
+    const channels: Array<{ close(): Promise<void> }> = [];
+    let failFirst = true;
+    const connection: RabbitMQConnectionLike = {
+      connection: raw.connection,
+      createChannel: () => raw.createChannel(),
+      createConfirmChannel: async () => {
+        if (failFirst) {
+          failFirst = false;
+          throw new Error('temporary channel failure');
+        }
+        const ch = await raw.createConfirmChannel();
+        channels.push(ch);
+        return ch;
+      },
+      close: () => raw.close(),
+      on: (event, listener) => raw.on(event, listener as (...args: unknown[]) => void),
+    };
+    const prefix = `${uniqueId('recover')}.`;
+    const withCustom = new RabbitMQBackend({ connection, prefix });
+    const withOwned = new RabbitMQBackend({ url: RABBITMQ_URL, prefix: `${uniqueId('reconnect')}.` });
+    try {
+      const slot = futureSlot(10);
+      await assert.rejects(withCustom.claim(input(slot, 'A')), /temporary channel failure/);
+      assert.equal(await withCustom.claim(input(slot, 'A')), true);
+      assert.equal(channels.length, 1);
+      await channels[0]?.close();
+      assert.equal(await withCustom.claim(input(slot + 1000, 'A')), true);
+      assert.equal(channels.length, 2);
+
+      assert.equal(await withOwned.claim(input(slot, 'A')), true);
+      const firstConn = await (withOwned as unknown as { connection: Promise<{ close(): Promise<void> }> }).connection;
+      await firstConn.close();
+      assert.equal(await withOwned.claim(input(slot + 1000, 'A')), true);
+    } finally {
+      await Promise.all([withCustom.close(), withOwned.close(), raw.close().catch(() => {})]);
+    }
+  });
+
+  test('NATS updates the replicas of an existing stream when replicas is given', async (t) => {
+    if (!(await probeNats(NATS_URL))) return t.skip(`nothing at ${NATS_URL}`);
+    const id = uniqueId('replicas');
+    const stream = id.toUpperCase();
+    const first = new NatsBackend({ servers: NATS_URL, prefix: `${id}.`, stream, replicas: 1 });
+    const second = new NatsBackend({ servers: NATS_URL, prefix: `${id}.`, stream, replicas: 3 });
+    const nc = await connect({ servers: NATS_URL });
+    const jsm = await jetstreamManager(nc);
+    try {
+      await first.init();
+      await assert.rejects(second.init(), /replicas > 1 not supported/);
+    } finally {
+      await Promise.all([first.close(), second.close()]);
+      await jsm.streams.delete(stream).catch(() => {});
+      await nc.close();
+    }
+  });
+
+  test('NATS leaves the replicas of an existing stream alone unless replicas is given', async () => {
+    const updates: Array<{ num_replicas?: number }> = [];
+    const jsm = {
+      streams: {
+        info: async () => ({
+          config: { subjects: ['cron.>'], duplicate_window: 300_000 * 1_000_000, max_msgs_per_subject: 1_000, num_replicas: 3 },
+        }),
+        update: async (_name: string, config: { num_replicas?: number }) => {
+          updates.push(config);
+        },
+      },
+    };
+    const ensureStream = (backend: NatsBackend) => (backend as unknown as { ensureStream(j: unknown): Promise<void> }).ensureStream(jsm);
+    await ensureStream(new NatsBackend());
+    assert.equal(updates.length, 0);
+    await ensureStream(new NatsBackend({ replicas: 3 }));
+    assert.equal(updates.length, 0);
+    await ensureStream(new NatsBackend({ replicas: 1 }));
+    assert.equal(updates[0]?.num_replicas, 1);
   });
 
   describe('runNow and history work on RabbitMQ and NATS', async () => {

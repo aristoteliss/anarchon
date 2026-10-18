@@ -34,9 +34,12 @@ Scheduler.configure('billing', {
 });
 
 class Reports {
+  syncs = 0;
+
   // On the default scheduler, with job options.
   @Every('reports-sync', '5s', { timeoutMs: 3_000, maxAttempts: 2 })
   sync(ctx: JobContext<{ service: string }>) {
+    this.syncs++;
     say(`reports-sync for ${ctx.data.service}`);
   }
 
@@ -69,7 +72,7 @@ class Tenant {
 
 async function main() {
   // Creating the object is all it takes: the schedulers its jobs name are created and started.
-  new Reports();
+  const reports = new Reports();
 
   for (const tenant of ['acme', 'globex']) {
     Scheduler.get().register(new Tenant(), {
@@ -86,6 +89,7 @@ async function main() {
 
   const shutdown = async () => {
     await Scheduler.stopAll();
+    say(`stopped (${reports.syncs} syncs)`);
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

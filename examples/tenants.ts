@@ -25,6 +25,7 @@
  * decorators-options.ts. Real life: the digest is '0 8 * * *' and the sync '1h'; here they run
  * every few seconds.
  */
+import { randomBytes } from 'node:crypto';
 import { type JobContext, Scheduler } from '../src';
 import { backendFromEnv, say, sleep } from './shared';
 
@@ -43,7 +44,7 @@ const tenants: Tenant[] = [
 ];
 
 /** Stands in for an auth service: a short-lived token per tenant. */
-const issueToken = async (tenant: string) => `${tenant}-${Math.random().toString(36).slice(2, 8)}`;
+const issueToken = async (tenant: string) => `${tenant}-${randomBytes(3).toString('hex')}`;
 
 function addTenant(scheduler: Scheduler, tenant: Tenant): void {
   scheduler.cron(

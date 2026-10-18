@@ -29,7 +29,7 @@ const scheduler = new Scheduler({
 | `prefix` | `'cron.'` | Πρόθεμα subject |
 | `duplicateWindowMs` | `300000` (5 λεπτά) | Για πόσο χρόνο το JetStream απομνημονεύει μια δεσμευμένη εκτέλεση |
 | `historySize` | `1000` | Περίπου πόσες εκτελέσεις διατηρούνται ανά εργασία, τουλάχιστον |
-| `replicas` | `1` | Αντίγραφα (replicas) του stream σε NATS cluster |
+| `replicas` | `1` για νέο stream | Αντίγραφα (replicas) του stream σε NATS cluster |
 
 ```ts
 import { connect } from '@nats-io/transport-node';
@@ -78,7 +78,7 @@ sequenceDiagram
 
 - **Το `jitterMs + maxLateMs` πρέπει να είναι μικρότερο από το `duplicateWindowMs`.** Εκτός του παραθύρου αυτού, το JetStream δεν αναγνωρίζει πλέον την επανάληψη, και ένα instance με πολύ μεγάλη καθυστέρηση θα μπορούσε να εκτελέσει ξανά την εργασία. Το anarchon το ελέγχει αυτό κατά την προσθήκη μιας εργασίας. Οι προεπιλογές (2 s + 60 s έναντι 5 min) είναι ασφαλείς.
 - **Τα ονόματα των εργασιών (job names)** μπορούν να περιέχουν μόνο γράμματα, ψηφία, `_` και `-`, επειδή γίνονται subjects.
-- **Αντίγραφα (replicas).** Σε ένα NATS cluster ορίστε `replicas: 3` ώστε το stream και η μνήμη του για τις δεσμευμένες εκτελέσεις να επιβιώνουν από την απώλεια ενός server.
+- **Αντίγραφα (replicas).** Σε ένα NATS cluster ορίστε `replicas: 3` ώστε το stream και η μνήμη του για τις δεσμευμένες εκτελέσεις να επιβιώνουν από την απώλεια ενός server. Όταν ορίζεται το `replicas`, ένα υπάρχον stream ενημερώνεται σε αυτό· όταν δεν ορίζεται, ένα υπάρχον stream κρατά τα replicas που έχει.
 
 ## Ιστορικό
 

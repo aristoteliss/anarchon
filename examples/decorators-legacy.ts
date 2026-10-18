@@ -26,7 +26,7 @@ const detectStyle = (...args: unknown[]): void => {
 
 @Scheduled()
 class Reports {
-  private sent = 0;
+  sent = 0;
 
   @Every('sync', '10s')
   async sync(ctx: JobContext) {
@@ -53,7 +53,7 @@ class Cleanup {
 async function main() {
   const scheduler = new Scheduler({ backend: backendFromEnv('decorators_legacy'), log: true });
 
-  new Reports();
+  const reports = new Reports();
   scheduler.register(new Cleanup());
 
   await scheduler.start();
@@ -62,6 +62,7 @@ async function main() {
 
   const shutdown = async () => {
     await scheduler.stop();
+    say(`stopped (${reports.sent} syncs run)`);
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

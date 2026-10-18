@@ -1,5 +1,6 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
+import { randomInt } from 'node:crypto';
 import { coded } from '../../errors';
 import { keysOf } from '../../option-keys';
 import { refuseUnknown, sleep } from '../../util';
@@ -177,7 +178,7 @@ export class SqliteBackend extends SqlBackend {
         break;
       } catch (error) {
         if (!isBusy(error) || Date.now() >= deadline) throw error;
-        await sleep(20 + Math.random() * 30);
+        await sleep(20 + randomInt(30));
       }
     }
     db.exec('PRAGMA synchronous = NORMAL');

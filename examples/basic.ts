@@ -13,6 +13,7 @@
  * over at once) or kill -9 (a backup takes over when its lease runs out), and watch another one
  * finish it as attempt 2.
  */
+import { randomInt } from 'node:crypto';
 import { type Backend, type KeyValueStrategyName, PostgresBackend, RedisBackend, Scheduler, SqliteBackend } from '../src';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -42,7 +43,7 @@ async function main() {
     .cron('digest', '0 */2 * * *', () => sleep(500)) // 00:00, 02:00, 04:00 ... Athens time
     .at('welcome', new Date(Date.now() + 15_000), () => console.log('a one-off job, on one instance'))
     .every('flaky', '10s', () => {
-      if (Math.random() < 0.3) throw new Error('random failure');
+      if (randomInt(10) < 3) throw new Error('random failure');
     });
 
   await scheduler.start();

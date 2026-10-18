@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.4.1
+
+Fixes found by a review of 0.4.0: recovery after a broken RabbitMQ channel, listeners and
+`stop()`, history retention and NATS replication. No API change.
+
+Upgrading from 0.4.0: while a cluster runs both versions, `history()` on a 0.4.0 instance may
+show runs finished by a 0.4.1 instance on Redis as `'interrupted'` (lease) or `'running'` (other
+strategies). Claims are not affected, and the history reads correctly once every instance runs 0.4.1.
+
+### Fixed
+
+- **RabbitMQ reconnects.** After its confirm channel or connection closed, or failed to open, the
+  backend kept the broken one and every later claim failed until the backend was closed.
+- **An async listener can't crash the process.** A rejected promise from a listener (including an
+  `'error'` listener) was an unhandled rejection, which ends a Node process. It is now logged,
+  like a listener that throws. A listener that throws no longer skips the listeners after it.
+- **`stop()` waits for `runNow()` calls still claiming their run.** It used to see no work, close
+  the backend and return while the claim was pending; the handler then started after `stop()`.
+  A run whose claim is won after `stop()` was called now doesn't start: `runNow()` resolves with
+  status `'interrupted'`, and a scheduled run is recorded as `'interrupted'`.
+- **A run from before `stop()` stays stopped after `start()`.** When `stop()` timed out and the
+  scheduler was started again, an earlier run that was still claiming could start its handler, and
+  one still running could write its result.
+- **`historyTtlMs` drops results by when they finished.** On Redis a result was dropped by its
+  scheduled time, so a catch-up of an old slot lost its result at once and `lastRun()` said
+  `'interrupted'` after a success. On Redis and SQL a result is now kept until `historyTtlMs`
+  after it finished, and on Redis a lease run whose result is missing shows its stored status.
+- **NATS checks the replicas of an existing stream.** `replicas` was applied only when the stream
+  was created. When it is set, an existing stream is now updated to it (a server that can't
+  refuses, and `init()` fails); when it isn't, the stream keeps the replicas it has.
+- **NATS closes its connection** when setting up the stream fails.
+- **Docs.** The guarantees page no longer says a run missed while the store was unreachable is
+  caught up when the store returns: catch-up happens when an instance starts. Two examples in the
+  JSDoc were wrong: `runNow('export', { data: { format: 'json' } })`, and `maxAttempts: 1` means
+  no retry after a crash, not "never started twice" (a graceful hand-over still runs it again).
+
+### Changed
+
+- CI pins every GitHub Action to a commit, and Dependabot keeps the pins current.
+- Random delays (jitter, backup checks) use `node:crypto`.
+
 ## 0.4.0
 
 A backend is configured on the backend, options a backend or strategy can't honour are refused

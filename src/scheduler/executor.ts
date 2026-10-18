@@ -12,6 +12,8 @@ export interface Execution {
   attempt: number;
   /** Why this execution started. Passed to the handler as ctx.reason. */
   reason: RunReason;
+  /** The stopSignal of the lifecycle that created this run. */
+  parent: AbortSignal;
   /** Its abort() is ctx.signal's. */
   controller: AbortController;
   /** The data given to runNow() for this one run. */
@@ -40,9 +42,8 @@ export class Executor {
   constructor(private readonly core: SchedulerCore) {}
 
   /** A new execution. Its signal aborts when the scheduler stops; the listener goes when the run ends. */
-  newRun(attempt: number, reason: RunReason): Execution {
-    const parent = this.core.stopSignal();
-    const run: Execution = { attempt, reason, controller: new AbortController(), dispose: () => {} };
+  newRun(attempt: number, reason: RunReason, parent = this.core.stopSignal()): Execution {
+    const run: Execution = { attempt, reason, parent, controller: new AbortController(), dispose: () => {} };
     const onStop = () => this.abortRun(run, 'stop', abortError('The scheduler is stopping'));
     if (parent.aborted) {
       onStop();
@@ -64,21 +65,34 @@ export class Executor {
    * Runs the handler to its end and returns the run's record. Never rejects: a throwing handler becomes
    * a 'failed' or 'interrupted' record.
    */
-  async execute(job: Job, slot: number, run: Execution): Promise<RunRecord> {
+  async execute(job: Job, slot: number, run: Execution, claimed = true): Promise<RunRecord> {
     const { core } = this;
     const scheduledAt = new Date(slot);
     const startedAt = Date.now();
     const manual = run.reason === 'manual';
-    job.runningHere++;
-    core.emit('start', { job: job.name, slot, scheduledAt, instanceId: core.instanceId, manual, attempt: run.attempt, reason: run.reason });
-
-    const failure = await this.callHandler(job, slot, scheduledAt, run);
+    const started = !run.controller.signal.aborted;
+    let failure: { cause: unknown } | undefined;
+    if (started) {
+      job.runningHere++;
+      core.emit('start', {
+        job: job.name,
+        slot,
+        scheduledAt,
+        instanceId: core.instanceId,
+        manual,
+        attempt: run.attempt,
+        reason: run.reason,
+      });
+      failure = await this.callHandler(job, slot, scheduledAt, run);
+    } else {
+      failure = { cause: run.controller.signal.reason };
+    }
 
     // A job that throws after stop() or a takeover aborted it didn't fail: it was interrupted.
     const interrupted = failure !== undefined && (run.abortedBy === 'stop' || run.abortedBy === 'lost');
     const status = interrupted ? 'interrupted' : failure ? 'failed' : 'success';
     // After stop() has returned, nothing is written any more (the lease runs out on its own).
-    const stopped = core.isIdle();
+    const stopped = !claimed || core.isIdle() || run.parent !== core.stopSignal();
     let handedOver = false;
     if (!stopped) {
       // Stopped mid-run: give the run to another instance now. Manual runs are never retried.
@@ -120,9 +134,11 @@ export class Executor {
       durationMs: result.durationMs,
     };
     if (result.error !== undefined) record.error = result.error;
-    if (interrupted && failure) core.emit('interrupted', { ...record, cause: failure.cause, handedOver });
-    else if (failure) core.emit('failure', { ...record, cause: failure.cause });
-    else core.emit('success', record);
+    if (started) {
+      if (interrupted && failure) core.emit('interrupted', { ...record, cause: failure.cause, handedOver });
+      else if (failure) core.emit('failure', { ...record, cause: failure.cause });
+      else core.emit('success', record);
+    }
     return record;
   }
 

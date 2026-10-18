@@ -20,6 +20,7 @@
  * It runs for 30 s and prints which instance refreshed how often, and what was skipped and why.
  * Every 5th refresh is slow (4 s) to show the overlap skip.
  */
+import { randomInt } from 'node:crypto';
 import { type JobContext, Scheduler } from '../src';
 import { backendFromEnv, say, sleep } from './shared';
 
@@ -30,7 +31,7 @@ async function refreshPrices(ctx: JobContext): Promise<void> {
   const slow = ++cache.refreshes % 5 === 0;
   await sleep(slow ? 4_000 : 150); // the upstream call
   ctx.signal.throwIfAborted();
-  cache.prices.set('EURUSD', 1.08 + Math.random() / 100);
+  cache.prices.set('EURUSD', 1.08 + randomInt(100) / 10_000);
   cache.refreshedAt = Date.now();
   say(`${ctx.instanceId}: prices refreshed${slow ? ' (slow upstream: 4 s)' : ''}`);
 }

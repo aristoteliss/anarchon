@@ -119,7 +119,7 @@ if extra > 0 then
 end
 redis.call('XADD', runs, 'MAXLEN', '~', keep, '*', 'slot', slot, 'attempt', attempt, 'by', by, 'token', token, 'at', now, 'reason', reason)
 -- History older than ttl goes too (XTRIM MINID needs Redis 6.2+; older servers keep the count limit only).
-if ttl > 0 then pcall(redis.call, 'XTRIM', runs, 'MINID', '~', now - ttl) end
+if ttl > 0 then pcall(redis.call, 'XTRIM', runs, 'MINID', now - ttl) end
 return {'won', attempt}
 `;
 
@@ -292,8 +292,9 @@ export class LeaseStore implements RunStore {
   async saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void> {
     const redis = await this.redis();
     const key = this.key(job, 'results');
-    // Score: slot plus a fraction per attempt (below 1 even after 100 hand-overs), so attempts of one slot stay together and in order.
-    await redis.send('ZADD', [key, result.slot + Math.min(result.attempt ?? 1, 99) / 100, JSON.stringify(result)]);
+    // Scored by when the attempt ended, so historyTtlMs keeps a catch-up of an old slot; the fraction orders attempts that end in the same ms.
+    const score = Math.max(result.slot, result.finishedAt) + Math.min(result.attempt ?? 1, 99) / 100;
+    await redis.send('ZADD', [key, score, JSON.stringify(result)]);
     await redis.send('ZREMRANGEBYRANK', [key, 0, -(historySize * 2 + 1)]);
     if (historyTtlMs) await redis.send('ZREMRANGEBYSCORE', [key, '-inf', `(${result.finishedAt - historyTtlMs}`]);
   }
@@ -321,12 +322,8 @@ export class LeaseStore implements RunStore {
     });
     if (claims.length === 0) return [];
     let min = Infinity;
-    let max = -Infinity;
-    for (const { slot } of claims) {
-      min = Math.min(min, slot);
-      max = Math.max(max, slot);
-    }
-    const members = await redis.send('ZRANGEBYSCORE', [this.key(job, 'results'), min, max + 1]);
+    for (const { slot } of claims) min = Math.min(min, slot);
+    const members = await redis.send('ZRANGEBYSCORE', [this.key(job, 'results'), min, '+inf']);
     const results = (Array.isArray(members) ? members : []).flatMap((m) => toResult(parseJson(toStr(m))) ?? []);
     const slots = [...new Set(claims.map((c) => c.slot))];
     const reply = (await this.scripts.run(STATES, [this.key(job, 'state')], slots)) as unknown[];
@@ -340,8 +337,9 @@ export class LeaseStore implements RunStore {
       limit,
       pendingStatus: (claim) => {
         const run = states.get(claim.slot);
-        const current = run && run.a === claim.attempt;
-        return current && run.s === 'running' && run.l >= now ? 'running' : 'interrupted';
+        if (!run || run.a !== claim.attempt) return 'interrupted';
+        if (run.s === 'running') return run.l >= now ? 'running' : 'interrupted';
+        return run.s;
       },
     });
   }

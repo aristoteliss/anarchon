@@ -107,7 +107,7 @@ Remember that these count what happened on one instance. Sum them across instanc
 
 ## Listeners can't break a run
 
-A listener that throws is caught and logged. It doesn't affect the run or the other listeners.
+A listener that throws, or an async listener whose promise rejects, is caught and logged. It doesn't affect the run or the other listeners.
 
 ## Built-in logging
 

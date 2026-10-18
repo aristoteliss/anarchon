@@ -53,8 +53,12 @@ class Unmarked {
 /** Its job names a scheduler that is created from settings when an object of the class is. */
 @Scheduled()
 class Elsewhere {
+  runs = 0;
+
   @Every('extra-job', '1h', { scheduler: 'extra' })
-  run() {}
+  run() {
+    this.runs++;
+  }
 }
 
 /** Several objects of one class: each is registered with a prefix of its own. */
@@ -85,7 +89,7 @@ async function main(): Promise<void> {
   await scheduler.runNow('b-tenant-sync');
 
   Scheduler.configure('extra', { backend: { ...backend, name: 'extra-memory' }, autoStart: true });
-  new Elsewhere();
+  const elsewhere = new Elsewhere();
   const extra = Scheduler.get('extra');
   await new Promise((resolve) => setTimeout(resolve, 20));
   const extraRun = await extra.runNow('extra-job');
@@ -100,7 +104,7 @@ async function main(): Promise<void> {
       ran: reports.ran,
       unmarked: unmarked instanceof Unmarked,
       tenantRuns: [a.runs, b.runs],
-      extra: [extra.backend.name, extraJobs, extraRun.status],
+      extra: [extra.backend.name, extraJobs, extraRun.status, elsewhere.runs],
     }),
   );
 }

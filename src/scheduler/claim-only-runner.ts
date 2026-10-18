@@ -16,34 +16,38 @@ export class ClaimOnlyRunner {
   ) {}
 
   /** A scheduled run is due: claim it, and run it if this instance won. Never rejects. */
-  async run(job: Job, slot: number): Promise<void> {
+  async run(job: Job, slot: number, signal = this.core.stopSignal()): Promise<void> {
     const { core } = this;
     const input = claimInput(core.instanceId, job, slot);
     let won: boolean;
     try {
       await core.ensureReady();
       await core.prepare(job);
+      if (signal.aborted) return;
       won = await core.backend.claim(input);
     } catch (error) {
-      core.emit('error', { error, job: job.name, slot });
+      if (!signal.aborted) core.emit('error', { error, job: job.name, slot });
       return;
     }
     if (!won) {
-      core.emit('skip', { job: job.name, slot, scheduledAt: new Date(slot), instanceId: core.instanceId, reason: 'taken' });
+      if (!signal.aborted)
+        core.emit('skip', { job: job.name, slot, scheduledAt: new Date(slot), instanceId: core.instanceId, reason: 'taken' });
       return;
     }
     if (core.backend.recordClaim) {
       // The run is ours either way; a failed history write must not cancel it.
       await core.backend.recordClaim(input).catch((error: unknown) => core.emit('error', { error, job: job.name, slot }));
     }
-    await this.executor.execute(job, slot, this.executor.newRun(1, 'scheduled'));
+    // Won after stop() began: execute() records it as interrupted without starting the handler.
+    await this.executor.execute(job, slot, this.executor.newRun(1, 'scheduled', signal));
   }
 
   /** runNow(): recorded in history, not deduplicated. */
-  async runManual(job: Job, data?: unknown): Promise<RunRecord> {
+  async runManual(job: Job, data?: unknown, signal = this.core.stopSignal()): Promise<RunRecord> {
     const { core } = this;
     const requested = Date.now();
+    if (signal.aborted) return this.executor.execute(job, requested, { ...this.executor.newRun(1, 'manual', signal), data }, false);
     const slot = (await core.backend.recordManualRun(claimInput(core.instanceId, job, requested))) ?? requested;
-    return core.track(this.executor.execute(job, slot, { ...this.executor.newRun(1, 'manual'), data }));
+    return this.executor.execute(job, slot, { ...this.executor.newRun(1, 'manual', signal), data });
   }
 }

@@ -77,7 +77,7 @@ export interface JobContext<Data = unknown> {
    * scheduler.every('export', '1h', async (ctx: JobContext<{ db: Db; format: string }>) => {
    *   await ctx.data.db.export(ctx.data.format);
    * }, { data: { format: 'csv' } });
-   * await scheduler.runNow('export', { format: 'json' }); // this run only
+   * await scheduler.runNow('export', { data: { format: 'json' } }); // this run only
    * ```
    */
   data: Data;
@@ -195,7 +195,7 @@ export type JobData = object | string | number | boolean | null | JobDataProvide
  * @example
  * ```ts
  * const scheduler = new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
- * scheduler.cron('charge-cards', '0 6 * * *', charge, { maxAttempts: 1, catchUpMs: 0 }); // never twice, never late
+ * scheduler.cron('charge-cards', '0 6 * * *', charge, { maxAttempts: 1, catchUpMs: 0 }); // no retry on crash, no catch-up
  * scheduler.every('sample', '5s', sample, { overlap: 'allow' });                       // runs may overlap
  * ```
  */
@@ -219,7 +219,7 @@ export interface LeaseJobOptions {
    *
    * @example
    * ```ts
-   * scheduler.cron('charge-cards', '0 6 * * *', charge, { maxAttempts: 1 }); // never started twice
+   * scheduler.cron('charge-cards', '0 6 * * *', charge, { maxAttempts: 1 }); // never retried after a crash
    * ```
    */
   maxAttempts?: number;

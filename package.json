@@ -1,6 +1,6 @@
 {
   "name": "anarchon",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Leaderless cron and interval scheduling for Node.js services, coordinated through your existing datastore. An atomic claim selects one runner per attempt; on Redis, Valkey, PostgreSQL and SQLite a lease lets another instance retry a run whose runner failed. RabbitMQ and NATS: claim only.",
   "keywords": [
     "cron",
@@ -56,7 +56,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist coverage",
     "clean:all": "rm -rf node_modules dist coverage test/test-run.log",
-    "rebuild": "pnpm clean && pnpm build",
+    "rebuild": "rm -rf dist && pnpm build",
     "lint": "tsc -p tsconfig.test.json",
     "typecheck": "tsc -p tsconfig.test.json",
     "check": "biome check .",

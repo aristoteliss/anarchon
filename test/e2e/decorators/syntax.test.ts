@@ -43,7 +43,7 @@ for (const style of ['standard', 'legacy'] as const) {
       ran: ['early:sync'],
       unmarked: true,
       tenantRuns: [0, 1],
-      extra: ['extra-memory', ['extra-job'], 'success'],
+      extra: ['extra-memory', ['extra-job'], 'success', 1],
     });
     if (style === 'legacy') assert.match(stderr, NOT_SCHEDULED);
     else assert.doesNotMatch(stderr, /"unmarked".* is not scheduled/);
