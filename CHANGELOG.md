@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+A backend is configured on the backend, options a backend or strategy can't honour are refused
+instead of ignored, and anarchon becomes safe to extend: error codes, a recorded store format, a
+checked public API and rules for compatible changes. Upgrading from 0.3: read Breaking first. The
+stored layout is unchanged; 0.4 only adds a format marker (`<prefix>format`, `<table>_meta`) that
+0.3 doesn't read.
 
 ### Breaking
 
