@@ -28,7 +28,9 @@ class Reports {
 
   @Every('sync', '10s')
   async sync(ctx: JobContext) {
-    await this.mailer.send(`sync of ${ctx.scheduledAt.toISOString()} (${++this.sent} sent by this instance)`);
+    await this.mailer.send(
+      `sync of ${ctx.scheduledAt.toISOString()} (${++this.sent} sent by this instance)`,
+    );
   }
 
   @Cron('half-minute-digest', '*/30 * * * * *', { timezone: 'Europe/Athens' })
@@ -51,13 +53,18 @@ class Reports {
 
 async function main() {
   // The first scheduler created is the default one: decorated objects add their jobs to it.
-  const scheduler = new Scheduler({ backend: backendFromEnv('decorators'), log: true });
+  const scheduler = new Scheduler({
+    backend: backendFromEnv('decorators'),
+    log: true,
+  });
   // One object per class: a second `new Reports()` would throw 'Job "sync" is already registered'.
   const reports = new Reports(new Mailer());
 
   await scheduler.start();
   say(`started as ${scheduler.instanceId} on ${scheduler.backend.name}`);
-  for (const job of scheduler.jobs()) say(`  ${job.name.padEnd(22)} ${job.schedule}`);
+  for (const job of scheduler.jobs()) {
+    say(`  ${job.name.padEnd(22)} ${job.schedule}`);
+  }
 
   const shutdown = async () => {
     await scheduler.stop();

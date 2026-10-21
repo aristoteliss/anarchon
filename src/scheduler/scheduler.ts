@@ -3,7 +3,12 @@
 import { EventEmitter } from 'node:events';
 import type { DeclaredJob, RegisterOptions } from '../decorators';
 import { coded } from '../errors';
-import { AT_JOB_OPTIONS, CRON_JOB_OPTIONS, EVERY_JOB_OPTIONS, keysOf } from '../option-keys';
+import {
+  AT_JOB_OPTIONS,
+  CRON_JOB_OPTIONS,
+  EVERY_JOB_OPTIONS,
+  keysOf,
+} from '../option-keys';
 import {
   type ConfigureOptions,
   configure,
@@ -19,7 +24,13 @@ import {
   setDefaultScheduler,
   setSchedulerFactory,
 } from '../registry';
-import { cronSchedule, everySchedule, onceSchedule, parseDuration, type Schedule } from '../schedule';
+import {
+  cronSchedule,
+  everySchedule,
+  onceSchedule,
+  parseDuration,
+  type Schedule,
+} from '../schedule';
 import type {
   AtJobOptions,
   Backend,
@@ -210,19 +221,17 @@ export class Scheduler<B extends Backend = Backend> {
     };
     this.executor = new Executor(core);
     this.claimOnly = new ClaimOnlyRunner(core, this.executor);
-    this.leases = this.backend.runs ? new LeaseRunner(core, this.executor, this.backend.runs) : undefined;
-    this.timers = new JobTimers(core, (job, slot) => void this.track(this.fire(job, slot)));
-    if (settings.log) logRuns((event, listener) => this.on(event, listener), this.logger);
-    this.host = {
-      scheduler: this,
-      name: this.name,
-      add: (job, name, defaults) => this.addDeclared(job, name, defaults),
-      remove: (name) => this.remove(name),
-      has: (name) => this.registry.has(name),
-      // Not at once: a scheduler is created while an object's jobs are being added, and starting
-      // must see them added. The object is created synchronously, so the next microtask is after it.
-      startInBackground: () => queueMicrotask(() => void this.start().catch((error: unknown) => this.emit('error', { error }))),
-    };
+    this.leases = this.backend.runs
+      ? new LeaseRunner(core, this.executor, this.backend.runs)
+      : undefined;
+    this.timers = new JobTimers(
+      core,
+      (job, slot) => void this.track(this.fire(job, slot)),
+    );
+    if (settings.log) {
+      logRuns((event, listener) => this.on(event, listener), this.logger);
+    }
+    this.host = this.createHost();
     schedulerCreated(this.host);
   }
 
@@ -279,9 +288,13 @@ export class Scheduler<B extends Backend = Backend> {
    * ```
    */
   static configure(name: string, options: ConfigureOptions): void;
-  static configure(first: string | ConfigureOptions, second?: ConfigureOptions): void {
-    if (typeof first === 'string' || second !== undefined) configure(first as string, second as ConfigureOptions);
-    else configure(undefined, first);
+  static configure(
+    first: string | ConfigureOptions,
+    second?: ConfigureOptions,
+  ): void {
+    if (typeof first === 'string' || second !== undefined) {
+      configure(first as string, second as ConfigureOptions);
+    } else configure(undefined, first);
   }
 
   /**
@@ -325,7 +338,9 @@ export class Scheduler<B extends Backend = Backend> {
    * ```
    */
   static async startAll(): Promise<void> {
-    const results = await Promise.allSettled(Scheduler.all().map((scheduler) => scheduler.start()));
+    const results = await Promise.allSettled(
+      Scheduler.all().map((scheduler) => scheduler.start()),
+    );
     const failed = results.find((result) => result.status === 'rejected');
     if (failed) throw failed.reason;
   }
@@ -342,7 +357,9 @@ export class Scheduler<B extends Backend = Backend> {
    * ```
    */
   static async stopAll(options: { timeoutMs?: number } = {}): Promise<void> {
-    await Promise.all(Scheduler.all().map((scheduler) => scheduler.stop(options)));
+    await Promise.all(
+      Scheduler.all().map((scheduler) => scheduler.stop(options)),
+    );
   }
 
   /**
@@ -382,7 +399,8 @@ export class Scheduler<B extends Backend = Backend> {
    * ```
    */
   static setDefault(scheduler: Scheduler | undefined): void {
-    setDefaultScheduler(scheduler ? hostOf(scheduler) : undefined);
+    const host = scheduler ? hostOf(scheduler) : undefined;
+    setDefaultScheduler(host);
   }
 
   /**
@@ -402,14 +420,29 @@ export class Scheduler<B extends Backend = Backend> {
    * scheduler.cron('report', '0 0 1 * *', buildReport, { timeoutMs: 30 * 60_000 }); // monthly, at most 30 min
    * ```
    */
-  cron<Data = unknown>(name: string, expression: string, handler: JobHandler<Data>, options: JobOptionsFor<B, CronJobOptions> = {}): this {
+  cron<Data = unknown>(
+    name: string,
+    expression: string,
+    handler: JobHandler<Data>,
+    options: JobOptionsFor<B, CronJobOptions> = {},
+  ): this {
     refuseUnknown(`Job "${name}"`, options, CRON_JOB_OPTIONS);
+
     let schedule: Schedule;
     try {
-      schedule = cronSchedule(expression, options.timezone ?? this.defaults.timezone);
+      schedule = cronSchedule(
+        expression,
+        options.timezone ?? this.defaults.timezone,
+      );
     } catch (error) {
-      throw coded(new Error(`Job "${name}": invalid cron "${expression}": ${errorMessage(error)}`), 'ANARCHON_INVALID_ARGUMENT');
+      throw coded(
+        new Error(
+          `Job "${name}": invalid cron "${expression}": ${errorMessage(error)}`,
+        ),
+        'ANARCHON_INVALID_ARGUMENT',
+      );
     }
+
     return this.add(name, schedule, handler, options);
   }
 
@@ -449,9 +482,17 @@ export class Scheduler<B extends Backend = Backend> {
   ): this {
     refuseUnknown(`Job "${name}"`, options, EVERY_JOB_OPTIONS);
     const ms = parseDuration(interval);
-    if (ms < 1_000)
-      throw coded(new RangeError(`Job "${name}": the interval must be at least 1s (got ${ms} ms)`), 'ANARCHON_INVALID_ARGUMENT');
-    return this.add(name, everySchedule(ms, options.offsetMs ?? 0), handler, options);
+    if (ms < 1_000) {
+      throw coded(
+        new RangeError(
+          `Job "${name}": the interval must be at least 1s (got ${ms} ms)`,
+        ),
+        'ANARCHON_INVALID_ARGUMENT',
+      );
+    }
+
+    const schedule = everySchedule(ms, options.offsetMs ?? 0);
+    return this.add(name, schedule, handler, options);
   }
 
   /**
@@ -473,11 +514,27 @@ export class Scheduler<B extends Backend = Backend> {
     handler: JobHandler<Data>,
     options: JobOptionsFor<B, AtJobOptions> = {},
   ): this {
-    if ((options as JobOptions).overlap !== undefined)
-      throw coded(new TypeError(`Job "${name}": a one-off job takes no overlap`), 'ANARCHON_UNSUPPORTED');
+    if ((options as JobOptions).overlap !== undefined) {
+      throw coded(
+        new TypeError(`Job "${name}": a one-off job takes no overlap`),
+        'ANARCHON_UNSUPPORTED',
+      );
+    }
     refuseUnknown(`Job "${name}"`, options, AT_JOB_OPTIONS);
-    const time = when instanceof Date ? when.getTime() : typeof when === 'number' ? when : Date.parse(when);
-    if (!Number.isFinite(time)) throw coded(new RangeError(`Job "${name}": invalid date ${String(when)}`), 'ANARCHON_INVALID_ARGUMENT');
+
+    const time =
+      when instanceof Date
+        ? when.getTime()
+        : typeof when === 'number'
+          ? when
+          : Date.parse(when);
+    if (!Number.isFinite(time)) {
+      throw coded(
+        new RangeError(`Job "${name}": invalid date ${String(when)}`),
+        'ANARCHON_INVALID_ARGUMENT',
+      );
+    }
+
     return this.add(name, onceSchedule(time), handler, options);
   }
 
@@ -581,18 +638,29 @@ export class Scheduler<B extends Backend = Backend> {
    */
   async start(): Promise<void> {
     if (this.state === 'running') return;
-    for (const warning of schedulerStarting(this.host)) this.logger.warn(`[anarchon] ${warning}`);
-    if (this.state !== 'idle') throw coded(new Error(`Cannot start while ${this.state}`), 'ANARCHON_STATE');
+    for (const warning of schedulerStarting(this.host)) {
+      this.logger.warn(`[anarchon] ${warning}`);
+    }
+    if (this.state !== 'idle') {
+      throw coded(
+        new Error(`Cannot start while ${this.state}`),
+        'ANARCHON_STATE',
+      );
+    }
+
     this.state = 'starting';
     this.stopped = false;
     try {
       await this.ensureReady();
-      await Promise.all([...this.registry.values()].map((job) => this.prepare(job)));
+      await Promise.all(
+        [...this.registry.values()].map((job) => this.prepare(job)),
+      );
     } catch (error) {
       this.state = 'idle';
       await this.closeBackend();
       throw error;
     }
+
     if ((this.state as string) !== 'starting') {
       // stop() was called meanwhile, and closed the backend while it was still being connected or
       // prepared: what reconnected after that must be closed too.
@@ -600,9 +668,12 @@ export class Scheduler<B extends Backend = Backend> {
       if ((this.state as string) === 'idle') await this.closeBackend();
       return;
     }
+
     this.abort = new AbortController();
     this.state = 'running';
-    for (const job of this.registry.values()) this.schedule(job);
+    for (const job of this.registry.values()) {
+      this.schedule(job);
+    }
   }
 
   /**
@@ -647,17 +718,24 @@ export class Scheduler<B extends Backend = Backend> {
    * });
    * ```
    */
-  async runNow(name: string, options: { data?: JobData } = {}): Promise<RunRecord> {
+  async runNow(
+    name: string,
+    options: { data?: JobData } = {},
+  ): Promise<RunRecord> {
     refuseUnknown('runNow()', options, RUN_NOW_OPTIONS);
     const job = this.getJob(name);
-    if (this.state !== 'running') throw coded(new Error('Call start() before runNow()'), 'ANARCHON_STATE');
+    if (this.state !== 'running') {
+      throw coded(new Error('Call start() before runNow()'), 'ANARCHON_STATE');
+    }
+
     const signal = this.abort.signal;
-    return this.track(
-      (async () => {
-        await this.prepare(job);
-        return this.leases ? this.leases.runManual(job, options.data, signal) : this.claimOnly.runManual(job, options.data, signal);
-      })(),
-    );
+    const run = (async () => {
+      await this.prepare(job);
+      return this.leases
+        ? this.leases.runManual(job, options.data, signal)
+        : this.claimOnly.runManual(job, options.data, signal);
+    })();
+    return this.track(run);
   }
 
   /**
@@ -704,6 +782,7 @@ export class Scheduler<B extends Backend = Backend> {
    */
   async history(name: string, limit = 20): Promise<RunRecord[]> {
     intInRange('limit', limit, 1, 10_000);
+
     this.reads++;
     try {
       await this.ensureReady();
@@ -711,7 +790,9 @@ export class Scheduler<B extends Backend = Backend> {
     } finally {
       this.reads--;
       // After stop(), nothing else will close what this read opened, and it would keep the process alive.
-      if (this.reads === 0 && this.stopped && this.state === 'idle') await this.closeBackend();
+      if (this.reads === 0 && this.stopped && this.state === 'idle') {
+        await this.closeBackend();
+      }
     }
   }
 
@@ -782,7 +863,10 @@ export class Scheduler<B extends Backend = Backend> {
    * scheduler.on('error', (e) => logger.error(e.error, 'backend problem')); // without a listener: logged
    * ```
    */
-  on<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEvents[E]) => void): this {
+  on<E extends keyof SchedulerEvents>(
+    event: E,
+    listener: (payload: SchedulerEvents[E]) => void,
+  ): this {
     this.emitter.on(event, listener);
     return this;
   }
@@ -797,7 +881,10 @@ export class Scheduler<B extends Backend = Backend> {
    * log.info(`first run: ${(await first).job}`);
    * ```
    */
-  once<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEvents[E]) => void): this {
+  once<E extends keyof SchedulerEvents>(
+    event: E,
+    listener: (payload: SchedulerEvents[E]) => void,
+  ): this {
     this.emitter.once(event, listener);
     return this;
   }
@@ -813,30 +900,87 @@ export class Scheduler<B extends Backend = Backend> {
    * scheduler.off('failure', onFailure); // e.g. during maintenance
    * ```
    */
-  off<E extends keyof SchedulerEvents>(event: E, listener: (payload: SchedulerEvents[E]) => void): this {
+  off<E extends keyof SchedulerEvents>(
+    event: E,
+    listener: (payload: SchedulerEvents[E]) => void,
+  ): this {
     this.emitter.off(event, listener);
     return this;
   }
 
+  /** What the registry of decorated objects sees of this scheduler. */
+  private createHost(): SchedulerHost {
+    const start = () =>
+      void this.start().catch((error: unknown) =>
+        this.emit('error', { error }),
+      );
+
+    return {
+      scheduler: this,
+      name: this.name,
+      add: (job, name, defaults) => this.addDeclared(job, name, defaults),
+      remove: (name) => this.remove(name),
+      has: (name) => this.registry.has(name),
+      // Not at once: a scheduler is created while an object's jobs are being added, and starting
+      // must see them added. The object is created synchronously, so the next microtask is after it.
+      startInBackground: () => queueMicrotask(start),
+    };
+  }
+
   /** Adds a job declared with a decorator, with the `register()` defaults of its object under its own options. */
-  private addDeclared(job: DeclaredJob, name: string, { timezone, ...defaults }: NonNullable<RegisterOptions['defaults']>): void {
+  private addDeclared(
+    job: DeclaredJob,
+    name: string,
+    { timezone, ...defaults }: NonNullable<RegisterOptions['defaults']>,
+  ): void {
     // The object's data and the job's are two layers, not one replacing the other.
-    const data = layerData(defaults.data, job.options.data) as JobData | undefined;
-    const options = { ...defaults, ...job.options, ...(data === undefined ? {} : { data }) };
+    const data = layerData(defaults.data, job.options.data) as
+      | JobData
+      | undefined;
+    const dataOption = data === undefined ? {} : { data };
+    const options = { ...defaults, ...job.options, ...dataOption };
+
     if (job.type === 'cron') {
-      this.cron(name, job.expression, job.handler, { ...(timezone === undefined ? {} : { timezone }), ...options });
+      const zoneOption = timezone === undefined ? {} : { timezone };
+      this.cron(name, job.expression, job.handler, {
+        ...zoneOption,
+        ...options,
+      });
     } else if (job.type === 'every') {
       this.every(name, job.interval, job.handler, options);
     } else {
       // register() defaults cover every job of the object; a one-off job has nothing to overlap.
       const { overlap, ...once } = defaults;
-      this.at(name, job.when, job.handler, { ...once, ...job.options, ...(data === undefined ? {} : { data }) });
+      this.at(name, job.when, job.handler, {
+        ...once,
+        ...job.options,
+        ...dataOption,
+      });
     }
   }
 
-  private add(name: string, schedule: Schedule, handler: JobHandler<never>, options: JobOptions): this {
-    if (this.registry.has(name)) throw coded(new Error(`Job "${name}" is already registered`), 'ANARCHON_JOB_EXISTS');
-    const job = createJob(name, schedule, handler, options, this.defaults, this.backend);
+  private add(
+    name: string,
+    schedule: Schedule,
+    handler: JobHandler<never>,
+    options: JobOptions,
+  ): this {
+    if (this.registry.has(name)) {
+      throw coded(
+        new Error(`Job "${name}" is already registered`),
+        'ANARCHON_JOB_EXISTS',
+      );
+    }
+
+    const job = createJob({
+      name,
+      schedule,
+      handler,
+      options,
+      defaults: this.defaults,
+      backend: this.backend,
+    });
+
     this.registry.set(name, job);
     if (this.state === 'running') this.schedule(job);
     return this;
@@ -855,21 +999,34 @@ export class Scheduler<B extends Backend = Backend> {
 
     const lateMs = Date.now() - slot;
     if (lateMs > job.maxLateMs) {
-      this.emit('skip', { job: job.name, slot, scheduledAt: new Date(slot), instanceId: this.instanceId, reason: 'late', lateMs });
+      this.emit('skip', {
+        job: job.name,
+        slot,
+        scheduledAt: new Date(slot),
+        instanceId: this.instanceId,
+        reason: 'late',
+        lateMs,
+      });
       return;
     }
-    return this.leases ? this.leases.run(job, slot, 'scheduled', signal) : this.claimOnly.run(job, slot, signal);
+    return this.leases
+      ? this.leases.run(job, slot, 'scheduled', signal)
+      : this.claimOnly.run(job, slot, signal);
   }
 
   private async doStop(timeoutMs: number): Promise<void> {
     if (this.state === 'running' || this.state === 'starting') {
       this.state = 'stopping';
-      for (const job of this.registry.values()) this.timers.disarm(job);
+      for (const job of this.registry.values()) {
+        this.timers.disarm(job);
+      }
       this.leases?.stopWatching();
       this.abort.abort();
+
       await this.waitForRuns(timeoutMs);
       this.leases?.stopRenewing();
     }
+
     this.state = 'idle';
     this.stopped = true;
     await this.closeBackend();
@@ -887,6 +1044,7 @@ export class Scheduler<B extends Backend = Backend> {
 
   private ensureReady(): Promise<void> {
     if (this.ready) return this.ready;
+
     const pending = this.backend.init().catch((error: unknown) => {
       if (this.ready === pending) this.ready = undefined;
       throw error;
@@ -897,21 +1055,29 @@ export class Scheduler<B extends Backend = Backend> {
 
   private prepare(job: Job): Promise<void> {
     if (job.prepared) return job.prepared;
-    const pending = this.backend.prepareJob(job.name, job.historySize).catch((error: unknown) => {
-      if (job.prepared === pending) job.prepared = undefined;
-      throw error;
-    });
+
+    const pending = this.backend
+      .prepareJob(job.name, job.historySize)
+      .catch((error: unknown) => {
+        if (job.prepared === pending) job.prepared = undefined;
+        throw error;
+      });
     job.prepared = pending;
     return pending;
   }
 
   private async closeBackend(): Promise<void> {
     this.ready = undefined;
-    for (const job of this.registry.values()) job.prepared = undefined;
+    for (const job of this.registry.values()) {
+      job.prepared = undefined;
+    }
+
     try {
       await this.backend.close();
     } catch (error) {
-      this.logger.warn(`[anarchon] closing ${this.backend.name} failed: ${errorMessage(error)}`);
+      this.logger.warn(
+        `[anarchon] closing ${this.backend.name} failed: ${errorMessage(error)}`,
+      );
     }
   }
 
@@ -924,19 +1090,34 @@ export class Scheduler<B extends Backend = Backend> {
     return promise;
   }
 
-  private emit<E extends keyof SchedulerEvents>(event: E, payload: SchedulerEvents[E]): void {
+  private emit<E extends keyof SchedulerEvents>(
+    event: E,
+    payload: SchedulerEvents[E],
+  ): void {
     if (event === 'error' && this.emitter.listenerCount('error') === 0) {
       const { error, job } = payload as SchedulerErrorEvent;
-      this.logger.error(`[anarchon]${job ? ` job "${job}":` : ''} ${errorMessage(error)}`);
+      const subject = job ? ` job "${job}":` : '';
+      this.logger.error(`[anarchon]${subject} ${errorMessage(error)}`);
       return;
     }
+
     const logFailure = (error: unknown) => {
-      this.logger.error(`[anarchon] a "${event}" listener threw: ${errorMessage(error)}`);
+      this.logger.error(
+        `[anarchon] a "${event}" listener threw: ${errorMessage(error)}`,
+      );
     };
-    for (const listener of this.emitter.rawListeners(event) as Array<(arg: SchedulerEvents[E]) => unknown>) {
+    const listeners = this.emitter.rawListeners(event) as Array<
+      (arg: SchedulerEvents[E]) => unknown
+    >;
+
+    for (const listener of listeners) {
       try {
         const result = listener.call(this.emitter, payload);
-        if (typeof (result as PromiseLike<unknown> | null)?.then === 'function') Promise.resolve(result).catch(logFailure);
+        if (
+          typeof (result as PromiseLike<unknown> | null)?.then === 'function'
+        ) {
+          Promise.resolve(result).catch(logFailure);
+        }
       } catch (error) {
         logFailure(error);
       }
@@ -945,12 +1126,15 @@ export class Scheduler<B extends Backend = Backend> {
 
   private getJob(name: string): Job {
     const job = this.registry.get(name);
-    if (!job) throw coded(new Error(`Unknown job "${name}"`), 'ANARCHON_UNKNOWN_JOB');
+    if (!job) {
+      throw coded(new Error(`Unknown job "${name}"`), 'ANARCHON_UNKNOWN_JOB');
+    }
     return job;
   }
 
   private nextRunOf(job: Job): Date | null {
-    const slot = this.state === 'running' ? job.nextSlot : job.schedule.next(Date.now());
+    const slot =
+      this.state === 'running' ? job.nextSlot : job.schedule.next(Date.now());
     return slot === null ? null : new Date(slot);
   }
 }

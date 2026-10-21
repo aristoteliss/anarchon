@@ -288,6 +288,41 @@ import { PostgresBackend, Scheduler } from 'anarchon';
 }
 ```
 
+## Compared with @nestjs/locks
+
+`@nestjs/locks` is the NestJS package for distributed locks: leased locks with fencing tokens, leader election, and `@OnOneInstance()` and `@WithoutOverlapping()` for `@nestjs/schedule` jobs. It solves a wider problem than anarchon, with different design choices for scheduled jobs. What this section says about it was checked on **24 October 2026** against version 0.0.4.
+
+anarchon runs in one of two modes, chosen by the backend. A lease backend (Redis or Valkey with the default `lease` strategy, PostgreSQL, SQLite) renews a lease while a run lasts; a claim-only backend makes one atomic claim per run and nothing more.
+
+| Capability | anarchon, lease backend | anarchon, claim only | `@nestjs/locks` |
+| --- | --- | --- | --- |
+| Primary scope | A distributed job scheduler: `every()`, `cron()`, `at()`, `@Cron`, `@Every`, `@At` | The same scheduler and API, on a backend without leases | General distributed locks (`acquire()`, `withLock()`), leader election (`@LeaderElection()`), and decorators for `@nestjs/schedule` jobs |
+| Stores in the package | Built in: Redis/Valkey with `lease` (the default), PostgreSQL, SQLite/libSQL; or your own [`Backend`](../../backends/custom/) with a `RunStore` | RabbitMQ, NATS, and Redis/Valkey with the `stream-id`, `idmp` (Redis 8.6+) or `script` strategy; or your own `Backend` without a `RunStore` | 1 built in: `InMemoryLockStore`. For several instances, a `LockStore` class (Redis, PostgreSQL) that you copy into your app and maintain |
+| How instances share a job | An atomic claim per run: no owner, and any healthy instance can win each run | One atomic write per run picks the winner: no lease, no heartbeats, no owner | A sticky owner: `@OnOneInstance()` keeps `<key>:owner` across ticks until the owner's process stops renewing it |
+| The owner is up, but the job throws | Healthy instances still win runs, about half of them with two instances. With [`yieldAfterFailure`](../../guides/job-options/#yieldafterfailure), every run after the first failure | Healthy instances still win runs, about half of them with two instances. `yieldAfterFailure` needs a lease, so it is refused | Every tick fails: the sick owner keeps its lease while its event loop is alive |
+| The job hangs (a promise that never settles) | `timeoutMs` aborts `ctx.signal`, marks the run failed and ends its lease, so later runs go ahead. The handler itself keeps running | Later runs go ahead: nothing holds the job. `timeoutMs` aborts `ctx.signal` and marks the run failed; the handler itself keeps running, and runs may overlap | The job stops on every instance: `@WithoutOverlapping()` renews the run's lock for as long as the run lasts, and there is no run timeout |
+| The runner crashes mid-run | A backup starts the same run again as attempt 2, about one `leaseMs` later | That run is lost; the next run goes to whichever instance claims it | That tick is lost; another instance takes the job over at its first tick after `ttl` |
+| Every instance was down when the job was due | The first instance to start runs the latest missed run (`catchUpMs`) | Missed: no catch-up | Missed: `@nestjs/schedule` only fires future ticks |
+| Claim-only mode (no heartbeats) | No: a run holds a lease, renewed by heartbeats | Yes | No: every lock has a lease and a renewal timer |
+| Run history and outcomes | Built in, stored in the backend: `history()`, `lastRun()` | Built in: `history()`, `lastRun()`. RabbitMQ and NATS trim by count only | None |
+| General-purpose locks in your code | No: scheduled and manual runs only | No | Yes: `locks.acquire()`, `locks.withLock()`, `await using` |
+| Leader election | No: leaderless by design | No | Yes: `@LeaderElection()`, `onLeadershipAcquired()`, `onLeadershipLost()` |
+| Fencing tokens | No token; `ctx.slot` and `ctx.attempt` identify an attempt of a run | No token; `ctx.slot` identifies the run (`ctx.attempt` is always 1) | Yes: `lock.fencingToken`, from a counter or sequence in the store |
+| Loss detected without the store's answer | No: a run counts as lost when the store refuses a heartbeat | Not applicable: there is no lease to lose | Yes: a lock counts as lost when no renewal is confirmed before its deadline |
+| Timeout on each store call | No | No | Yes: `storeTimeout` (default 10 s), failing with `LockStoreTimeoutError` |
+| Works outside NestJS | Yes: plain Node.js, Express, Fastify; NestJS 11 and 12 | Yes, as anarchon | No: needs `@nestjs/common` and `@nestjs/core` |
+| License | AGPLv3 or commercial | AGPLv3 or commercial | MIT |
+
+[`examples/nestjs/locks-comparison`](https://github.com/aristoteliss/anarchon/tree/main/examples/nestjs/locks-comparison) runs one job, due every 2 s, on two instances per setup, on the same Redis with a 2 s lease. Instance A starts first and is healthy in the control, then faulty; B is healthy. Runs that succeeded, of the next five:
+
+| Scenario | anarchon | anarchon, `yieldAfterFailure: true` | `@nestjs/locks` |
+| --- | --- | --- | --- |
+| Control: A and B are healthy | 5 of 5 | 5 of 5 | 5 of 5, all on A |
+| A throws in every run | 1 to 3 of 5: B wins some runs, A fails the ones it claims | 5 of 5: after A's first failure, B claims every run | 0 of 5: A keeps the job, B skips every tick |
+| A never ends a run | 2 to 4 of 5: `timeoutMs` fails A's runs after 1 s | 5 of 5: after A's first timeout, B claims every run | 0 of 5: no instance runs the job again |
+
+Choose `@nestjs/locks` when you need locks or leader election beyond scheduled jobs. Choose anarchon when scheduled jobs must keep running while one instance is sick, after a crash, or after a full outage.
+
 ## Next
 
 - [Rolling deploys on Kubernetes](../kubernetes/)

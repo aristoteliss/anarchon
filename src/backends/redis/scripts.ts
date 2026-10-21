@@ -17,15 +17,26 @@ export class ScriptRunner {
   /** Loads a script ahead of its first run; also checks that the server runs scripts at all. */
   async load(script: string): Promise<void> {
     const redis = await this.redis();
-    this.hashes.set(script, toStr(await redis.send('SCRIPT', ['LOAD', script])));
+    const reply = await redis.send('SCRIPT', ['LOAD', script]);
+    this.hashes.set(script, toStr(reply));
   }
 
   /** Runs a script with these keys and arguments, and resolves with its reply. */
-  async run(script: string, keys: ReadonlyArray<string>, args: ReadonlyArray<string | number>): Promise<unknown> {
+  async run(
+    script: string,
+    keys: ReadonlyArray<string>,
+    args: ReadonlyArray<string | number>,
+  ): Promise<unknown> {
     if (!this.hashes.has(script)) await this.load(script);
     const redis = await this.redis();
+
     try {
-      return await redis.send('EVALSHA', [this.hashes.get(script) ?? '', keys.length, ...keys, ...args]);
+      return await redis.send('EVALSHA', [
+        this.hashes.get(script) ?? '',
+        keys.length,
+        ...keys,
+        ...args,
+      ]);
     } catch (error) {
       if (!/NOSCRIPT/i.test(errorMessage(error))) throw error;
       return redis.send('EVAL', [script, keys.length, ...keys, ...args]);

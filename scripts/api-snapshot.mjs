@@ -26,7 +26,9 @@ function reachable(entry) {
     const source = readFileSync(file, 'utf8');
     for (const [, specifier] of source.matchAll(/\bfrom\s+'(\.[^']+)'/g)) {
       const base = resolve(dirname(file), specifier.replace(/\.js$/, ''));
-      const target = [`${base}.d.ts`, resolve(base, 'index.d.ts')].find((path) => existsSync(path));
+      const target = [`${base}.d.ts`, resolve(base, 'index.d.ts')].find(
+        (path) => existsSync(path),
+      );
       if (target) queue.push(target);
     }
   }
@@ -48,13 +50,19 @@ if (!existsSync(entry)) {
   process.exit(2);
 }
 const snapshot = `${reachable(entry)
-  .map((file) => `// ${relative(resolve(root, 'dist'), file)}\n${strip(readFileSync(file, 'utf8'))}`)
+  .map(
+    (file) =>
+      `// ${relative(resolve(root, 'dist'), file)}\n${strip(readFileSync(file, 'utf8'))}`,
+  )
   .join('\n\n')}\n`;
 
 if (mode === '--update') {
   writeFileSync(snapshotPath, snapshot);
   console.log(`api: wrote ${relative(root, snapshotPath)}`);
-} else if (!existsSync(snapshotPath) || readFileSync(snapshotPath, 'utf8') !== snapshot) {
+} else if (
+  !existsSync(snapshotPath) ||
+  readFileSync(snapshotPath, 'utf8') !== snapshot
+) {
   console.error(
     'api: the public API differs from api/anarchon.api.txt.\n' +
       'If the change is intended, run `pnpm api:update` and review the diff of that file: removing or ' +

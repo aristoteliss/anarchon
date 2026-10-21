@@ -22,7 +22,10 @@ beforeEach(() => {
 });
 
 /** Starts the scheduler, runs what the test asks, and stops it. */
-async function running(scheduler: Scheduler, body: () => Promise<void>): Promise<void> {
+async function running(
+  scheduler: Scheduler,
+  body: () => Promise<void>,
+): Promise<void> {
   await scheduler.start();
   try {
     await body();
@@ -39,15 +42,25 @@ test("ctx.data is the scheduler's data, with the job's on top and runNow()'s on 
     user?: number;
   }
   const seen: unknown[] = [];
-  const scheduler = new Scheduler({ backend: memoryBackend(), data: { tenant: 'acme', region: 'eu' } });
+  const scheduler = new Scheduler({
+    backend: memoryBackend(),
+    data: { tenant: 'acme', region: 'eu' },
+  });
   scheduler
-    .every('export', '1h', (ctx: JobContext<Tenant>) => void seen.push(ctx.data), { data: { region: 'us', permission: 'export' } })
+    .every(
+      'export',
+      '1h',
+      (ctx: JobContext<Tenant>) => void seen.push(ctx.data),
+      { data: { region: 'us', permission: 'export' } },
+    )
     .every('plain', '1h', (ctx) => void seen.push(ctx.data));
 
   await running(scheduler, async () => {
     await scheduler.runNow('export');
     await scheduler.runNow('plain');
-    await scheduler.runNow('export', { data: { permission: 'admin', user: 7 } });
+    await scheduler.runNow('export', {
+      data: { permission: 'admin', user: 7 },
+    });
   });
   assert.deepEqual(seen, [
     { tenant: 'acme', region: 'us', permission: 'export' },
@@ -58,7 +71,11 @@ test("ctx.data is the scheduler's data, with the job's on top and runNow()'s on 
 
 test('without any data given, ctx.data is undefined', async () => {
   const seen: unknown[] = ['not called'];
-  const scheduler = new Scheduler({ backend: memoryBackend() }).every('job', '1h', (ctx) => void seen.push(ctx.data));
+  const scheduler = new Scheduler({ backend: memoryBackend() }).every(
+    'job',
+    '1h',
+    (ctx) => void seen.push(ctx.data),
+  );
   await running(scheduler, async () => void (await scheduler.runNow('job')));
   assert.deepEqual(seen, ['not called', undefined]);
 });
@@ -70,10 +87,17 @@ test('a data function is called when each run starts, with the run, and may be a
     backend: memoryBackend(),
     data: async (run) => {
       await new Promise((resolve) => setTimeout(resolve, 5));
-      return { call: ++calls, job: run.name, manual: run.manual, attempt: run.attempt };
+      return {
+        call: ++calls,
+        job: run.name,
+        manual: run.manual,
+        attempt: run.attempt,
+      };
     },
   });
-  scheduler.every('job', '1h', (ctx) => void seen.push(ctx.data), { data: (run) => ({ at: run.scheduledAt instanceof Date }) });
+  scheduler.every('job', '1h', (ctx) => void seen.push(ctx.data), {
+    data: (run) => ({ at: run.scheduledAt instanceof Date }),
+  });
 
   await running(scheduler, async () => {
     await scheduler.runNow('job');
@@ -94,7 +118,10 @@ test('a data function that throws fails the run, and one that is too slow times 
         throw new Error('no permission for this job');
       },
     })
-    .every('slow', '1h', () => void handled++, { timeoutMs: 20, data: () => new Promise((resolve) => setTimeout(resolve, 200)) });
+    .every('slow', '1h', () => void handled++, {
+      timeoutMs: 20,
+      data: () => new Promise((resolve) => setTimeout(resolve, 200)),
+    });
 
   await running(scheduler, async () => {
     const denied = await scheduler.runNow('denied');
@@ -109,7 +136,10 @@ test('a data function that throws fails the run, and one that is too slow times 
 
 test("setData() replaces the scheduler's data for later runs, and a value that is not a plain object replaces", async () => {
   const seen: unknown[] = [];
-  const scheduler = new Scheduler({ backend: memoryBackend(), data: 'everyone' });
+  const scheduler = new Scheduler({
+    backend: memoryBackend(),
+    data: 'everyone',
+  });
   scheduler
     .every('plain', '1h', (ctx) => void seen.push(ctx.data))
     .every('own', '1h', (ctx) => void seen.push(ctx.data), {
@@ -125,5 +155,11 @@ test("setData() replaces the scheduler's data for later runs, and a value that i
     scheduler.setData(undefined);
     await scheduler.runNow('plain');
   });
-  assert.deepEqual(seen, ['everyone', { role: 'admin' }, { tenant: 'acme', role: 'admin' }, 0, undefined]);
+  assert.deepEqual(seen, [
+    'everyone',
+    { role: 'admin' },
+    { tenant: 'acme', role: 'admin' },
+    0,
+    undefined,
+  ]);
 });

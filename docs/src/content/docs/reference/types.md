@@ -66,6 +66,7 @@ interface LeaseJobOptions {
   overlap?: 'skip' | 'allow';
   maxAttempts?: number;
   catchUpMs?: number;
+  yieldAfterFailure?: boolean;
 }
 
 interface JobOptions extends LeaseJobOptions {

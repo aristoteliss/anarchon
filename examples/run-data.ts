@@ -48,7 +48,9 @@ async function main() {
     'export',
     '5s',
     (ctx: JobContext<Tenant & { permission: string }>) => {
-      say(`export     for ${ctx.data.tenant}, allowed to ${ctx.data.permission}`);
+      say(
+        `export     for ${ctx.data.tenant}, allowed to ${ctx.data.permission}`,
+      );
     },
     { data: { permission: 'reports:export' } },
   );
@@ -59,16 +61,25 @@ async function main() {
     'sync',
     '5s',
     (ctx: JobContext<Tenant & { token: string; startedBy: string }>) => {
-      say(`sync       with ${ctx.data.token}, started by ${ctx.data.startedBy}`);
+      say(
+        `sync       with ${ctx.data.token}, started by ${ctx.data.startedBy}`,
+      );
     },
-    { data: async (run) => ({ token: await freshToken(run.name), startedBy: run.manual ? 'an operator' : 'the schedule' }) },
+    {
+      data: async (run) => ({
+        token: await freshToken(run.name),
+        startedBy: run.manual ? 'an operator' : 'the schedule',
+      }),
+    },
   );
 
   await scheduler.start();
   say(`started on ${scheduler.backend.name}`);
 
   // 4. For this run only, on top of everything else: who asked for it.
-  await scheduler.runNow('export', { data: { permission: 'admin', requestedBy: 'maria' } });
+  await scheduler.runNow('export', {
+    data: { permission: 'admin', requestedBy: 'maria' },
+  });
   await scheduler.runNow('sync');
 
   // The scheduler's data can be replaced while it runs: later runs see the new plan.

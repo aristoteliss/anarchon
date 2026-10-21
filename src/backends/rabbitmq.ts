@@ -1,12 +1,36 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import type { Channel, ChannelModel, ConfirmChannel, ConsumeMessage, Options } from 'amqplib';
+import type {
+  Channel,
+  ChannelModel,
+  ConfirmChannel,
+  ConsumeMessage,
+  Options,
+} from 'amqplib';
 import { coded } from '../errors';
 
-import { buildHistory, type ClaimRecord, claimPayload, parseJson, toClaim, toResult } from '../history';
+import {
+  buildHistory,
+  claimPayload,
+  parseJson,
+  toClaim,
+  toResult,
+} from '../history';
 import { keysOf } from '../option-keys';
-import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
-import { assertSimpleName, positiveInt, refuseHistoryTtl, refuseUnknown, versionAtLeast } from '../util';
+import type {
+  Backend,
+  ClaimInput,
+  JobLimits,
+  RunRecord,
+  StoredResult,
+} from '../types';
+import {
+  assertSimpleName,
+  positiveInt,
+  refuseHistoryTtl,
+  refuseUnknown,
+  versionAtLeast,
+} from '../util';
 
 /**
  * The parts of an amqplib connection this backend uses: what `amqplib.connect()` returns fits.
@@ -28,7 +52,9 @@ export interface RabbitMQConnectionLike {
   /** Listens for 'error' and 'close', to reconnect on the next call. */
   on(event: string, listener: (...args: never[]) => void): unknown;
   /** Where amqplib keeps what the server said about itself. Used to check the version. */
-  readonly connection: { readonly serverProperties: { version?: string; product?: string } };
+  readonly connection: {
+    readonly serverProperties: { version?: string; product?: string };
+  };
 }
 
 /**
@@ -83,7 +109,12 @@ export interface RabbitMQBackendOptions {
   slotTtlMs?: number;
 }
 
-const RABBITMQ_OPTIONS = keysOf<RabbitMQBackendOptions>({ url: true, connection: true, prefix: true, slotTtlMs: true });
+const RABBITMQ_OPTIONS = keysOf<RabbitMQBackendOptions>({
+  url: true,
+  connection: true,
+  prefix: true,
+  slotTtlMs: true,
+});
 
 const BYTES_PER_RUN = 1_024; // claim + result records, with room to spare
 
@@ -134,10 +165,13 @@ export class RabbitMQBackend implements Backend {
   /** Validates the options. Nothing connects until init(). */
   constructor(options: RabbitMQBackendOptions = {}) {
     refuseUnknown('RabbitMQBackend', options, RABBITMQ_OPTIONS);
+    this.dedupeWindowMs = positiveInt(
+      'slotTtlMs',
+      options.slotTtlMs ?? 300_000,
+    );
     this.url = options.url ?? 'amqp://localhost';
     this.prefix = options.prefix ?? 'cron.';
     this.userConnection = options.connection;
-    this.dedupeWindowMs = positiveInt('slotTtlMs', options.slotTtlMs ?? 300_000);
   }
 
   /** Job names become queue names: letters, digits, '_' and '-' only. */
@@ -149,10 +183,14 @@ export class RabbitMQBackend implements Backend {
   /** Connects and checks for RabbitMQ 3.9+, the first version with stream queues. */
   async init(): Promise<void> {
     const connection = await this.getConnection();
-    const { product = 'RabbitMQ', version = '0' } = connection.connection.serverProperties ?? {};
+    const { product = 'RabbitMQ', version = '0' } =
+      connection.connection.serverProperties ?? {};
+
     if (!versionAtLeast(String(version), 3, 9)) {
       throw coded(
-        new Error(`The RabbitMQ backend needs RabbitMQ 3.9 or newer for stream queues (this server is ${product} ${version}).`),
+        new Error(
+          `The RabbitMQ backend needs RabbitMQ 3.9 or newer for stream queues (this server is ${product} ${version}).`,
+        ),
         'ANARCHON_SERVER',
       );
     }
@@ -161,12 +199,16 @@ export class RabbitMQBackend implements Backend {
   /** Declares the job's history stream queue, sized from historySize. */
   async prepareJob(job: string, historySize: number): Promise<void> {
     const bytes = Math.max(historySize * BYTES_PER_RUN, 100_000);
+    // A tenth of the stream per segment, between 50 kB and 1 MB.
+    const tenth = Math.floor(bytes / 10);
+    const segmentBytes = Math.min(1_000_000, Math.max(50_000, tenth));
+
     await this.declare(this.historyQueue(job), {
       durable: true,
       arguments: {
         'x-queue-type': 'stream',
         'x-max-length-bytes': bytes,
-        'x-stream-max-segment-size-bytes': Math.min(1_000_000, Math.max(50_000, Math.floor(bytes / 10))),
+        'x-stream-max-segment-size-bytes': segmentBytes,
       },
     });
   }
@@ -178,6 +220,7 @@ export class RabbitMQBackend implements Backend {
     // message can't be read without taking it off the queue for a moment, and while it's off, the
     // queue is empty and another instance's claim would be accepted.
     if (this.won.get(queue) === input.token) return true;
+
     await this.declare(queue, {
       durable: true,
       arguments: {
@@ -187,15 +230,20 @@ export class RabbitMQBackend implements Backend {
         'x-expires': this.dedupeWindowMs,
       },
     });
+
     // ack: we are first. nack: the gate is full, another instance won. If the connection drops
     // before the answer, this throws: the run is skipped here rather than risk running it twice.
-    const won = await this.publish(await this.getConfirmChannel(), queue, claimPayload(input, false));
-    if (won) {
-      this.won.set(queue, input.token);
-      const oldest = this.won.keys().next().value;
-      if (this.won.size > 1_000 && oldest !== undefined) this.won.delete(oldest);
-    }
+    const channel = await this.getConfirmChannel();
+    const won = await this.publish(channel, queue, claimPayload(input, false));
+    if (won) this.rememberWin(queue, input.token);
     return won;
+  }
+
+  /** Remembers a claim this instance won, forgetting the oldest beyond 1,000. */
+  private rememberWin(queue: string, token: string): void {
+    this.won.set(queue, token);
+    const oldest = this.won.keys().next().value;
+    if (this.won.size > 1_000 && oldest !== undefined) this.won.delete(oldest);
   }
 
   /** Appends the won claim to the history stream. (The gate queue only decides the winner.) */
@@ -218,23 +266,21 @@ export class RabbitMQBackend implements Backend {
     const connection = await this.getConnection();
     const channel = (await connection.createChannel()) as Channel;
     channel.on('error', () => {});
+
     try {
       await channel.prefetch(Math.min(2 * limit + 50, 2_000));
       const queue = this.historyQueue(job);
       const end = await this.lastOffset(channel, queue);
       if (end === null) return [];
-      const records = await this.readFrom(channel, queue, Math.max(0, end - (2 * limit + 20)), end);
-      const claims: ClaimRecord[] = [];
-      const results: StoredResult[] = [];
-      for (const record of records) {
-        if (record.type === 'claim') {
-          const claim = toClaim(record);
-          if (claim) claims.push(claim);
-        } else if (record.type === 'result') {
-          const result = toResult(record);
-          if (result) results.push(result);
-        }
-      }
+
+      const from = Math.max(0, end - (2 * limit + 20));
+      const records = await this.readFrom(channel, queue, from, end);
+      const claims = records
+        .filter((record) => record.type === 'claim')
+        .flatMap((record) => toClaim(record) ?? []);
+      const results = records
+        .filter((record) => record.type === 'result')
+        .flatMap((record) => toResult(record) ?? []);
       return buildHistory({ job, claims, results, limit });
     } catch (error) {
       if ((error as { code?: number }).code === 404) return []; // job never ran here
@@ -251,20 +297,21 @@ export class RabbitMQBackend implements Backend {
     this.confirm = undefined;
     this.connection = undefined;
     await confirm?.then((c) => c.close()).catch(() => {});
-    if (!this.userConnection) await connection?.then((c) => c.close()).catch(() => {});
+    if (!this.userConnection) {
+      await connection?.then((c) => c.close()).catch(() => {});
+    }
   }
 
   private getConnection(): Promise<ChannelModel> {
     if (this.connection) return this.connection;
+
     const pending: Promise<ChannelModel> = (async () => {
-      if (this.userConnection) return this.userConnection as unknown as ChannelModel;
-      let amqp: typeof import('amqplib') & { default: { connect: typeof import('amqplib').connect } };
-      try {
-        amqp = (await import('amqplib')) as typeof amqp;
-      } catch {
-        throw coded(new Error('The RabbitMQ backend needs "amqplib": run `npm install amqplib`.'), 'ANARCHON_MISSING_DRIVER');
+      if (this.userConnection) {
+        return this.userConnection as unknown as ChannelModel;
       }
-      const connection: ChannelModel = await (amqp.connect ?? amqp.default.connect)(this.url);
+
+      const connect = await loadConnect();
+      const connection: ChannelModel = await connect(this.url);
       connection.on('error', () => {}); // also reported through 'close'
       connection.on('close', () => {
         if (this.connection === pending) {
@@ -277,14 +324,19 @@ export class RabbitMQBackend implements Backend {
       if (this.connection === pending) this.connection = undefined;
       throw error;
     });
+
     this.connection = pending;
     return pending;
   }
 
   private getConfirmChannel(): Promise<ConfirmChannel> {
     if (this.confirm) return this.confirm;
+
     const pending: Promise<ConfirmChannel> = (async () => {
-      const channel = (await (await this.getConnection()).createConfirmChannel()) as ConfirmChannel;
+      const connection = await this.getConnection();
+      const channel =
+        (await connection.createConfirmChannel()) as ConfirmChannel;
+
       channel.on('error', () => {}); // also reported through 'close'
       channel.on('close', () => {
         if (this.confirm === pending) this.confirm = undefined;
@@ -294,14 +346,20 @@ export class RabbitMQBackend implements Backend {
       if (this.confirm === pending) this.confirm = undefined;
       throw error;
     });
+
     this.confirm = pending;
     return pending;
   }
 
   /** Declares a queue on a channel of its own: a refused declaration closes the channel it was sent on. */
-  private async declare(queue: string, options: Options.AssertQueue): Promise<void> {
-    const channel = (await (await this.getConnection()).createChannel()) as Channel;
+  private async declare(
+    queue: string,
+    options: Options.AssertQueue,
+  ): Promise<void> {
+    const connection = await this.getConnection();
+    const channel = (await connection.createChannel()) as Channel;
     channel.on('error', () => {});
+
     try {
       await channel.assertQueue(queue, options);
     } catch (error) {
@@ -312,20 +370,32 @@ export class RabbitMQBackend implements Backend {
     }
   }
 
-  private publish(channel: ConfirmChannel, queue: string, body: unknown): Promise<boolean> {
+  private publish(
+    channel: ConfirmChannel,
+    queue: string,
+    body: unknown,
+  ): Promise<boolean> {
+    const content = Buffer.from(JSON.stringify(body));
+    const options = { persistent: true, contentType: 'application/json' };
+
     return new Promise((resolve, reject) => {
-      channel.sendToQueue(queue, Buffer.from(JSON.stringify(body)), { persistent: true, contentType: 'application/json' }, (err) => {
+      const onAnswer = (err: unknown) => {
         if (!err) resolve(true);
         else if (/nacked/.test(String((err as Error).message))) resolve(false);
         else reject(err);
-      });
+      };
+      channel.sendToQueue(queue, content, options, onAnswer);
     });
   }
 
   private async append(job: string, record: unknown): Promise<void> {
     const channel = await this.getConfirmChannel();
-    if (!(await this.publish(channel, this.historyQueue(job), record))) {
-      throw coded(new Error(`RabbitMQ refused a history record for job "${job}"`), 'ANARCHON_STORE');
+    const stored = await this.publish(channel, this.historyQueue(job), record);
+    if (!stored) {
+      throw coded(
+        new Error(`RabbitMQ refused a history record for job "${job}"`),
+        'ANARCHON_STORE',
+      );
     }
   }
 
@@ -336,6 +406,7 @@ export class RabbitMQBackend implements Backend {
       let tag: string | undefined;
       let timer: NodeJS.Timeout | undefined;
       let done = false;
+
       const finish = () => {
         if (done) return;
         done = true;
@@ -347,6 +418,7 @@ export class RabbitMQBackend implements Backend {
         clearTimeout(timer);
         timer = setTimeout(finish, ms);
       };
+
       channel
         .consume(
           queue,
@@ -367,11 +439,17 @@ export class RabbitMQBackend implements Backend {
   }
 
   /** Reads records from `from` up to and including offset `end`. */
-  private readFrom(channel: Channel, queue: string, from: number, end: number): Promise<Array<Record<string, unknown>>> {
+  private readFrom(
+    channel: Channel,
+    queue: string,
+    from: number,
+    end: number,
+  ): Promise<Array<Record<string, unknown>>> {
     return new Promise((resolve, reject) => {
       const records: Array<Record<string, unknown>> = [];
       let tag: string | undefined;
       let done = false;
+
       const finish = () => {
         if (done) return;
         done = true;
@@ -380,6 +458,7 @@ export class RabbitMQBackend implements Backend {
         resolve(records);
       };
       const safety = setTimeout(finish, 5_000);
+
       channel
         .consume(
           queue,
@@ -387,7 +466,9 @@ export class RabbitMQBackend implements Backend {
             if (!msg || done) return;
             channel.ack(msg);
             const record = parseJson(msg.content.toString());
-            if (record && typeof record === 'object') records.push(record as Record<string, unknown>);
+            if (record && typeof record === 'object') {
+              records.push(record as Record<string, unknown>);
+            }
             if (offsetOf(msg) >= end) finish();
           },
           { noAck: false, arguments: { 'x-stream-offset': from } },
@@ -410,4 +491,23 @@ export class RabbitMQBackend implements Backend {
 
 function offsetOf(msg: ConsumeMessage): number {
   return Number(msg.properties.headers?.['x-stream-offset'] ?? -1);
+}
+
+/** amqplib's connect; refuses when amqplib is not installed. */
+async function loadConnect(): Promise<typeof import('amqplib').connect> {
+  let amqp: typeof import('amqplib') & {
+    default: { connect: typeof import('amqplib').connect };
+  };
+  try {
+    amqp = (await import('amqplib')) as typeof amqp;
+  } catch {
+    throw coded(
+      new Error(
+        'The RabbitMQ backend needs "amqplib": run `npm install amqplib`.',
+      ),
+      'ANARCHON_MISSING_DRIVER',
+    );
+  }
+
+  return amqp.connect ?? amqp.default.connect;
 }

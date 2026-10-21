@@ -52,8 +52,12 @@ export default async function requireServers(): Promise<void> {
   const missing: string[] = [];
   for (const name of names) {
     const probe = probes[name];
-    if (!probe) throw new Error(`REQUIRE_SERVERS: unknown server "${name}" (known: ${Object.keys(probes).join(', ')})`);
+    if (!probe)
+      throw new Error(
+        `REQUIRE_SERVERS: unknown server "${name}" (known: ${Object.keys(probes).join(', ')})`,
+      );
     if (!(await answers(probe))) missing.push(name);
   }
-  if (missing.length) throw new Error(`REQUIRE_SERVERS: no answer from ${missing.join(', ')}`);
+  if (missing.length)
+    throw new Error(`REQUIRE_SERVERS: no answer from ${missing.join(', ')}`);
 }

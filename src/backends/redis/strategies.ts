@@ -23,22 +23,46 @@ export interface ClaimStrategy {
   claim(input: StreamClaim): Promise<boolean>;
 }
 
-export function claimFields(input: ClaimInput, manual: boolean): Array<string | number> {
-  const fields: Array<string | number> = ['slot', input.slot, 'by', input.instanceId, 'token', input.token, 'at', Date.now()];
+export function claimFields(
+  input: ClaimInput,
+  manual: boolean,
+): Array<string | number> {
+  const fields: Array<string | number> = [
+    'slot',
+    input.slot,
+    'by',
+    input.instanceId,
+    'token',
+    input.token,
+    'at',
+    Date.now(),
+  ];
+
   if (manual) fields.push('manual', 1);
   return fields;
 }
 
-async function tokenAt(redis: KeyValueClient, key: string, id: string): Promise<string | undefined> {
-  const [entry] = parseEntries(await redis.send('XRANGE', [key, id, id]));
+async function tokenAt(
+  redis: KeyValueClient,
+  key: string,
+  id: string,
+): Promise<string | undefined> {
+  const reply = await redis.send('XRANGE', [key, id, id]);
+  const [entry] = parseEntries(reply);
   return entry?.fields.token;
 }
 
-async function serverInfo(redis: KeyValueClient): Promise<{ product: string; version: string }> {
-  const info = toStr(await redis.send('INFO', ['server']));
+async function serverInfo(
+  redis: KeyValueClient,
+): Promise<{ product: string; version: string }> {
+  const reply = await redis.send('INFO', ['server']);
+  const info = toStr(reply);
   const valkey = /valkey_version:([\d.]+)/.exec(info)?.[1];
   if (valkey) return { product: 'Valkey', version: valkey };
-  return { product: 'Redis', version: /redis_version:([\d.]+)/.exec(info)?.[1] ?? 'unknown' };
+  return {
+    product: 'Redis',
+    version: /redis_version:([\d.]+)/.exec(info)?.[1] ?? 'unknown',
+  };
 }
 
 /**
@@ -67,14 +91,27 @@ export class StreamIdStrategy implements ClaimStrategy {
   /** XADD with the slot as the entry ID. Won if Redis accepts it, or if the entry already there carries our token. */
   async claim(input: StreamClaim): Promise<boolean> {
     const id = `${input.slot}-0`;
+
     try {
-      await this.redis.send('XADD', [input.key, 'MAXLEN', '~', input.historySize, id, ...claimFields(input, false)]);
+      await this.redis.send('XADD', [
+        input.key,
+        'MAXLEN',
+        '~',
+        input.historySize,
+        id,
+        ...claimFields(input, false),
+      ]);
       return true;
     } catch (error) {
-      if (!/equal or smaller than the target stream top item/i.test(errorMessage(error))) throw error;
+      const taken = /equal or smaller than the target stream top item/i.test(
+        errorMessage(error),
+      );
+      if (!taken) throw error;
+
       // Someone already holds this slot (or a later one). It can be us, if the client resent the XADD
       // after a dropped connection: the token tells us.
-      return (await tokenAt(this.redis, input.key, id)) === input.token;
+      const stored = await tokenAt(this.redis, input.key, id);
+      return stored === input.token;
     }
   }
 }
@@ -103,7 +140,12 @@ export class IdmpStrategy implements ClaimStrategy {
   async init(): Promise<void> {
     const { product, version } = await serverInfo(this.redis);
     const match = /^(\d+)\.(\d+)/.exec(version);
-    const ok = product === 'Redis' && !!match && (Number(match[1]) > 8 || (Number(match[1]) === 8 && Number(match[2]) >= 6));
+    const ok =
+      product === 'Redis' &&
+      !!match &&
+      (Number(match[1]) > 8 ||
+        (Number(match[1]) === 8 && Number(match[2]) >= 6));
+
     if (!ok) {
       throw coded(
         new Error(
@@ -123,9 +165,19 @@ export class IdmpStrategy implements ClaimStrategy {
       await this.redis.send('XADD', [key, 'MAXLEN', 0, '*', 'init', 1]);
       info = (await this.streamInfo(key)) ?? {};
     }
+
     // Only set when different: XCFGSET with new values clears the stream's memory of seen IDs.
-    if (Number(info['idmp-duration']) !== this.options.durationSec || Number(info['idmp-maxsize']) !== this.options.maxSize) {
-      await this.redis.send('XCFGSET', [key, 'IDMP-DURATION', this.options.durationSec, 'IDMP-MAXSIZE', this.options.maxSize]);
+    if (
+      Number(info['idmp-duration']) !== this.options.durationSec ||
+      Number(info['idmp-maxsize']) !== this.options.maxSize
+    ) {
+      await this.redis.send('XCFGSET', [
+        key,
+        'IDMP-DURATION',
+        this.options.durationSec,
+        'IDMP-MAXSIZE',
+        this.options.maxSize,
+      ]);
     }
   }
 
@@ -142,13 +194,18 @@ export class IdmpStrategy implements ClaimStrategy {
       '*',
       ...claimFields(input, false),
     ]);
+
     // A duplicate returns the ID of the entry that was stored first, so compare tokens.
-    return (await tokenAt(this.redis, input.key, toStr(reply))) === input.token;
+    const stored = await tokenAt(this.redis, input.key, toStr(reply));
+    return stored === input.token;
   }
 
-  private async streamInfo(key: string): Promise<Record<string, unknown> | null> {
+  private async streamInfo(
+    key: string,
+  ): Promise<Record<string, unknown> | null> {
     try {
-      return toRecord(await this.redis.send('XINFO', ['STREAM', key]));
+      const reply = await this.redis.send('XINFO', ['STREAM', key]);
+      return toRecord(reply);
     } catch (error) {
       if (/no such key/i.test(errorMessage(error))) return null;
       throw error;
@@ -202,11 +259,19 @@ export class ScriptStrategy implements ClaimStrategy {
 
   /** Runs the claim script. Won if the token it returns is ours. */
   async claim(input: StreamClaim): Promise<boolean> {
+    const oldestKept = Math.max(0, input.slot - this.windowMs);
     const stored = await this.scripts.run(
       CLAIM_SCRIPT,
       [input.key],
-      [String(input.slot), String(Math.max(0, input.slot - this.windowMs)), input.historySize, input.token, ...claimFields(input, false)],
+      [
+        String(input.slot),
+        String(oldestKept),
+        input.historySize,
+        input.token,
+        ...claimFields(input, false),
+      ],
     );
+
     return toStr(stored) === input.token;
   }
 }

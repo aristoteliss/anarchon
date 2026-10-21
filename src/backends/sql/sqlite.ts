@@ -4,7 +4,14 @@ import { randomInt } from 'node:crypto';
 import { coded } from '../../errors';
 import { keysOf } from '../../option-keys';
 import { refuseUnknown, sleep } from '../../util';
-import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlRow, type SqlValue } from './base';
+import {
+  Mutex,
+  SqlBackend,
+  type SqlClient,
+  type SqlDialect,
+  type SqlRow,
+  type SqlValue,
+} from './base';
 
 /**
  * A synchronous SQLite database: `node:sqlite` DatabaseSync or `better-sqlite3`. Turn on WAL so
@@ -20,7 +27,11 @@ import { Mutex, SqlBackend, type SqlClient, type SqlDialect, type SqlRow, type S
  */
 export interface SqliteDatabaseLike {
   /** Compiles a statement. `reader` (better-sqlite3) says whether it returns rows. */
-  prepare(sql: string): { all(...params: unknown[]): unknown[]; run(...params: unknown[]): unknown; reader?: boolean };
+  prepare(sql: string): {
+    all(...params: unknown[]): unknown[];
+    run(...params: unknown[]): unknown;
+    reader?: boolean;
+  };
   /** Runs statements that return nothing (PRAGMA, BEGIN, COMMIT). */
   exec(sql: string): unknown;
 }
@@ -40,10 +51,16 @@ export interface LibsqlClientLike {
   /** 'http' or 'ws' on a remote libSQL server, 'file' on a local file. Absent: treated as a local file. */
   readonly protocol?: string;
   /** Runs one statement. */
-  execute(statement: { sql: string; args: SqlValue[] }): Promise<{ rows: ArrayLike<unknown> }>;
+  execute(statement: {
+    sql: string;
+    args: SqlValue[];
+  }): Promise<{ rows: ArrayLike<unknown> }>;
   /** Opens a write transaction. On a remote server it holds the database's write lock until commit, rollback or the server's timeout. */
   transaction(mode: 'write'): Promise<{
-    execute(statement: { sql: string; args: SqlValue[] }): Promise<{ rows: ArrayLike<unknown> }>;
+    execute(statement: {
+      sql: string;
+      args: SqlValue[];
+    }): Promise<{ rows: ArrayLike<unknown> }>;
     commit(): Promise<void>;
     rollback(): Promise<void>;
     close(): void;
@@ -98,7 +115,11 @@ export interface SqliteBackendOptions {
   busyTimeoutMs?: number;
 }
 
-const SQLITE_OPTIONS = keysOf<SqliteBackendOptions>({ database: true, table: true, busyTimeoutMs: true });
+const SQLITE_OPTIONS = keysOf<SqliteBackendOptions>({
+  database: true,
+  table: true,
+  busyTimeoutMs: true,
+});
 
 /**
  * SQLite drivers block the thread while they wait for a lock. Two connections in one process could
@@ -165,36 +186,67 @@ export class SqliteBackend extends SqlBackend {
 
   protected async connect(): Promise<{ client: SqlClient; owned: boolean }> {
     const input = this.input;
-    if (typeof input !== 'string') return { client: toSqlClient(input), owned: false };
+    if (typeof input !== 'string') {
+      return { client: toSqlClient(input), owned: false };
+    }
+
     const db = await openFile(input);
     // WAL lets readers work while one process writes; busy_timeout makes writers wait their turn.
     db.exec(`PRAGMA busy_timeout = ${Math.floor(this.busyTimeoutMs)}`);
-    // Switching a new file to WAL needs the file to itself, and SQLite fails at once instead of
-    // waiting (busy_timeout doesn't apply here). So instances starting together on a new file retry.
-    const deadline = Date.now() + this.busyTimeoutMs;
-    for (;;) {
-      try {
-        db.exec('PRAGMA journal_mode = WAL');
-        break;
-      } catch (error) {
-        if (!isBusy(error) || Date.now() >= deadline) throw error;
-        await sleep(20 + randomInt(30));
-      }
-    }
+    await switchToWal(db, this.busyTimeoutMs);
     db.exec('PRAGMA synchronous = NORMAL');
-    return { client: { ...fromSqliteDatabase(db), close: async () => (db as unknown as { close(): void }).close() }, owned: true };
+
+    return {
+      client: {
+        ...fromSqliteDatabase(db),
+        close: async () => (db as unknown as { close(): void }).close(),
+      },
+      owned: true,
+    };
   }
 
   protected async checkServer(client: SqlClient): Promise<void> {
     // Let writers from other processes wait their turn instead of failing (best effort: per
     // connection, and remote libSQL servers may ignore it).
-    await client.all(`PRAGMA busy_timeout = ${Math.floor(this.busyTimeoutMs)}`, []).catch(() => {});
+    await client
+      .all(`PRAGMA busy_timeout = ${Math.floor(this.busyTimeoutMs)}`, [])
+      .catch(() => {});
+
     const [row] = await client.all('SELECT sqlite_version() AS v', []);
     const [major = 0, minor = 0] = String(row?.v ?? '0')
       .split('.')
       .map(Number);
+
     if (major < 3 || (major === 3 && minor < 35)) {
-      throw coded(new Error(`The SQLite backend needs SQLite 3.35 or newer for RETURNING (this one is ${row?.v}).`), 'ANARCHON_SERVER');
+      throw coded(
+        new Error(
+          `The SQLite backend needs SQLite 3.35 or newer for RETURNING (this one is ${row?.v}).`,
+        ),
+        'ANARCHON_SERVER',
+      );
+    }
+  }
+}
+
+/**
+ * Switches the file to WAL, retrying until busyTimeoutMs has passed while another connection holds
+ * the file.
+ */
+async function switchToWal(
+  db: SqliteDatabaseLike,
+  busyTimeoutMs: number,
+): Promise<void> {
+  // Switching a new file to WAL needs the file to itself, and SQLite fails at once instead of
+  // waiting (busy_timeout doesn't apply here). So instances starting together on a new file retry.
+  const deadline = Date.now() + busyTimeoutMs;
+
+  for (;;) {
+    try {
+      db.exec('PRAGMA journal_mode = WAL');
+      break;
+    } catch (error) {
+      if (!isBusy(error) || Date.now() >= deadline) throw error;
+      await sleep(20 + randomInt(30));
     }
   }
 }
@@ -202,7 +254,10 @@ export class SqliteBackend extends SqlBackend {
 /** SQLITE_BUSY from node:sqlite (errcode) or better-sqlite3 (code). */
 function isBusy(error: unknown): boolean {
   const { errcode, code } = error as { errcode?: number; code?: string };
-  return (typeof errcode === 'number' && (errcode & 0xff) === 5) || (typeof code === 'string' && code.startsWith('SQLITE_BUSY'));
+  return (
+    (typeof errcode === 'number' && (errcode & 0xff) === 5) ||
+    (typeof code === 'string' && code.startsWith('SQLITE_BUSY'))
+  );
 }
 
 /**
@@ -218,7 +273,10 @@ function isBusy(error: unknown): boolean {
  */
 export function fromSqliteDatabase(db: SqliteDatabaseLike): SqlClient {
   const mutex = processQueue;
-  const query = async (sql: string, params: ReadonlyArray<SqlValue>): Promise<SqlRow[]> => {
+  const query = async (
+    sql: string,
+    params: ReadonlyArray<SqlValue>,
+  ): Promise<SqlRow[]> => {
     const statement = db.prepare(sql);
     // better-sqlite3 refuses all() on statements that return no rows.
     if (statement.reader === false) {
@@ -227,11 +285,13 @@ export function fromSqliteDatabase(db: SqliteDatabaseLike): SqlClient {
     }
     return statement.all(...params) as SqlRow[];
   };
+
   return {
     all: (sql, params) => mutex.run(() => query(sql, params)),
     transaction: (fn) =>
       mutex.run(async () => {
         db.exec('BEGIN IMMEDIATE');
+
         try {
           const result = await fn({ all: query });
           db.exec('COMMIT');
@@ -260,14 +320,19 @@ export function fromSqliteDatabase(db: SqliteDatabaseLike): SqlClient {
  */
 export function fromLibsql(client: LibsqlClientLike): SqlClient {
   // Only a local file blocks the thread while it waits for a lock (see processQueue).
-  const mutex = client.protocol === 'http' || client.protocol === 'ws' ? new Mutex() : processQueue;
+  const remote = client.protocol === 'http' || client.protocol === 'ws';
+  const mutex = remote ? new Mutex() : processQueue;
+
   return {
-    all: (sql, args) => mutex.run(async () => Array.from((await client.execute({ sql, args: [...args] })).rows) as SqlRow[]),
+    all: (sql, args) => mutex.run(() => execute(client, sql, args)),
     transaction: (fn) =>
       mutex.run(async () => {
         const tx = await client.transaction('write');
+
         try {
-          const result = await fn({ all: async (sql, args) => Array.from((await tx.execute({ sql, args: [...args] })).rows) as SqlRow[] });
+          const result = await fn({
+            all: (sql, args) => execute(tx, sql, args),
+          });
           await tx.commit();
           return result;
         } catch (error) {
@@ -280,14 +345,36 @@ export function fromLibsql(client: LibsqlClientLike): SqlClient {
   };
 }
 
-function toSqlClient(input: SqliteDatabaseLike | LibsqlClientLike | SqlClient): SqlClient {
+/** Runs one statement on a libSQL client or transaction, and returns its rows. */
+async function execute(
+  target: Pick<LibsqlClientLike, 'execute'>,
+  sql: string,
+  args: ReadonlyArray<SqlValue>,
+): Promise<SqlRow[]> {
+  const { rows } = await target.execute({ sql, args: [...args] });
+  return Array.from(rows) as SqlRow[];
+}
+
+function toSqlClient(
+  input: SqliteDatabaseLike | LibsqlClientLike | SqlClient,
+): SqlClient {
   if (typeof (input as SqlClient).all === 'function') {
-    if (typeof (input as SqlClient).transaction !== 'function')
-      throw coded(new TypeError('A custom SQL client needs both all() and transaction()'), 'ANARCHON_INVALID_ARGUMENT');
+    if (typeof (input as SqlClient).transaction !== 'function') {
+      throw coded(
+        new TypeError('A custom SQL client needs both all() and transaction()'),
+        'ANARCHON_INVALID_ARGUMENT',
+      );
+    }
     return input as SqlClient;
   }
-  if (typeof (input as LibsqlClientLike).execute === 'function') return fromLibsql(input as LibsqlClientLike);
-  if (typeof (input as SqliteDatabaseLike).prepare === 'function') return fromSqliteDatabase(input as SqliteDatabaseLike);
+
+  if (typeof (input as LibsqlClientLike).execute === 'function') {
+    return fromLibsql(input as LibsqlClientLike);
+  }
+  if (typeof (input as SqliteDatabaseLike).prepare === 'function') {
+    return fromSqliteDatabase(input as SqliteDatabaseLike);
+  }
+
   throw coded(
     new TypeError(
       'database must be a file path, a node:sqlite or better-sqlite3 database, a @libsql/client client, or { all, transaction }',
@@ -299,14 +386,19 @@ function toSqlClient(input: SqliteDatabaseLike | LibsqlClientLike | SqlClient): 
 /** Opens a file with the built-in node:sqlite (Node 22.13+, or 22.5+ with --experimental-sqlite), or better-sqlite3 if that's missing. */
 async function openFile(path: string): Promise<SqliteDatabaseLike> {
   try {
-    const { DatabaseSync } = (await import('node:sqlite')) as unknown as { DatabaseSync: new (path: string) => SqliteDatabaseLike };
+    const { DatabaseSync } = (await import('node:sqlite')) as unknown as {
+      DatabaseSync: new (path: string) => SqliteDatabaseLike;
+    };
     return new DatabaseSync(path);
   } catch (builtinError) {
     try {
       const optional = 'better-sqlite3'; // optional dependency
       type DatabaseConstructor = new (path: string) => SqliteDatabaseLike;
-      const mod = (await import(optional)) as { default?: DatabaseConstructor } & DatabaseConstructor;
+      const mod = (await import(optional)) as {
+        default?: DatabaseConstructor;
+      } & DatabaseConstructor;
       const Database = mod.default ?? mod;
+
       return new Database(path);
     } catch {
       throw coded(

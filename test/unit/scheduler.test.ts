@@ -31,55 +31,114 @@ afterEach(() => {
 });
 
 test('a scheduler needs a backend: none is assumed, and nothing connects to a store you did not name', () => {
-  const without: Array<Partial<SchedulerOptions> | undefined> = [undefined, {}, { leaseMs: 10_000, timezone: 'UTC' }];
+  const without: Array<Partial<SchedulerOptions> | undefined> = [
+    undefined,
+    {},
+    { leaseMs: 10_000, timezone: 'UTC' },
+  ];
   for (const options of without) {
     assert.throws(
       () => new Scheduler(options as SchedulerOptions),
-      (error: Error) => error instanceof TypeError && /backend/.test(error.message),
+      (error: Error) =>
+        error instanceof TypeError && /backend/.test(error.message),
       `new Scheduler(${JSON.stringify(options)}) should need a backend`,
     );
   }
 
-  assert.equal(new Scheduler({ backend: memoryBackend() }).backend.name, 'memory');
+  assert.equal(
+    new Scheduler({ backend: memoryBackend() }).backend.name,
+    'memory',
+  );
 });
 
 test('a one-off job takes no overlap', () => {
   const scheduler = new Scheduler({ backend: memoryBackend() });
-  // @ts-expect-error a one-off job has no previous run to overlap
-  assert.throws(() => scheduler.at('once', new Date(Date.now() + 60_000), () => {}, { overlap: 'allow' }), /one-off job takes no overlap/);
+  assert.throws(
+    () =>
+      scheduler.at('once', new Date(Date.now() + 60_000), () => {}, {
+        // @ts-expect-error a one-off job has no previous run to overlap
+        overlap: 'allow',
+      }),
+    /one-off job takes no overlap/,
+  );
 });
 
 test('a backend without leases takes no lease options: they fail to compile and throw', () => {
   const noLeases = /needs a backend with leases.*rabbitmq has none/;
-  // @ts-expect-error RabbitMQ has no leases
-  assert.throws(() => new Scheduler({ backend: new RabbitMQBackend(), leaseMs: 10_000 }), noLeases);
-  // @ts-expect-error RabbitMQ has no leases
-  assert.throws(() => new Scheduler({ backend: new RabbitMQBackend(), heartbeatMs: 1_000 }), noLeases);
+  assert.throws(
+    // @ts-expect-error RabbitMQ has no leases
+    () => new Scheduler({ backend: new RabbitMQBackend(), leaseMs: 10_000 }),
+    noLeases,
+  );
+  assert.throws(
+    // @ts-expect-error RabbitMQ has no leases
+    () => new Scheduler({ backend: new RabbitMQBackend(), heartbeatMs: 1_000 }),
+    noLeases,
+  );
 
   const rabbit = new Scheduler({ backend: new RabbitMQBackend() });
-  // @ts-expect-error no overlap without leases
-  assert.throws(() => rabbit.every('a', '1m', () => {}, { overlap: 'allow' }), /Job "a": overlap needs a backend with leases/);
-  // @ts-expect-error no retries without leases
-  assert.throws(() => rabbit.cron('b', '0 * * * *', () => {}, { maxAttempts: 1 }), /Job "b": maxAttempts needs/);
-  // @ts-expect-error no catch-up without leases
-  assert.throws(() => rabbit.at('c', new Date(Date.now() + 60_000), () => {}, { catchUpMs: 0 }), /Job "c": catchUpMs needs/);
+  assert.throws(
+    // @ts-expect-error no overlap without leases
+    () => rabbit.every('a', '1m', () => {}, { overlap: 'allow' }),
+    /Job "a": overlap needs a backend with leases/,
+  );
+  assert.throws(
+    // @ts-expect-error no retries without leases
+    () => rabbit.cron('b', '0 * * * *', () => {}, { maxAttempts: 1 }),
+    /Job "b": maxAttempts needs/,
+  );
+  assert.throws(
+    () =>
+      // @ts-expect-error no catch-up without leases
+      rabbit.at('c', new Date(Date.now() + 60_000), () => {}, { catchUpMs: 0 }),
+    /Job "c": catchUpMs needs/,
+  );
+  assert.throws(
+    () =>
+      // @ts-expect-error no yielding to a backup without leases
+      rabbit.every('f', '1m', () => {}, { yieldAfterFailure: true }),
+    /Job "f": yieldAfterFailure needs/,
+  );
   rabbit.every('d', '1m', () => {}, { timeoutMs: 1_000 });
 
-  const script = new Scheduler({ backend: new ValkeyBackend({ strategy: { name: 'script' } }) });
-  // @ts-expect-error the 'script' strategy has no leases
-  assert.throws(() => script.every('e', '1m', () => {}, { overlap: 'skip' }), /valkey:script has none/);
-  // @ts-expect-error NATS has no leases
-  assert.throws(() => new Scheduler({ backend: new NatsBackend(), leaseMs: 10_000 }), /nats has none/);
+  const script = new Scheduler({
+    backend: new ValkeyBackend({ strategy: { name: 'script' } }),
+  });
+  assert.throws(
+    // @ts-expect-error the 'script' strategy has no leases
+    () => script.every('e', '1m', () => {}, { overlap: 'skip' }),
+    /valkey:script has none/,
+  );
+  assert.throws(
+    // @ts-expect-error NATS has no leases
+    () => new Scheduler({ backend: new NatsBackend(), leaseMs: 10_000 }),
+    /nats has none/,
+  );
 });
 
 test('lease options stay available on a lease backend, and wherever the backend is not known', () => {
-  const lease = new Scheduler({ backend: new RedisBackend(), leaseMs: 10_000, heartbeatMs: 1_000 });
-  lease.every('a', '1m', () => {}, { overlap: 'allow', maxAttempts: 1, catchUpMs: 0 });
-  new Scheduler({ backend: new ValkeyBackend({ strategy: 'lease' }), leaseMs: 10_000 }).every('b', '1m', () => {}, { overlap: 'allow' });
+  const lease = new Scheduler({
+    backend: new RedisBackend(),
+    leaseMs: 10_000,
+    heartbeatMs: 1_000,
+  });
+  lease.every('a', '1m', () => {}, {
+    overlap: 'allow',
+    maxAttempts: 1,
+    catchUpMs: 0,
+  });
+  new Scheduler({
+    backend: new ValkeyBackend({ strategy: 'lease' }),
+    leaseMs: 10_000,
+  }).every('b', '1m', () => {}, { overlap: 'allow' });
 
   const any: Backend = new RedisBackend();
-  new Scheduler({ backend: any, leaseMs: 10_000 }).every('c', '1m', () => {}, { maxAttempts: 2 });
-  const asDefault: Scheduler = new Scheduler({ backend: new RabbitMQBackend() });
+  new Scheduler({ backend: any, leaseMs: 10_000 }).every('c', '1m', () => {}, {
+    maxAttempts: 2,
+  });
+  const asDefault: Scheduler = new Scheduler({
+    backend: new RabbitMQBackend(),
+  });
   assert.equal(asDefault.backend.name, 'rabbitmq');
 });
 
@@ -113,7 +172,11 @@ test('a read after stop() opens the connection for itself and closes it again', 
   await scheduler.stop();
   assert.equal(state.open, false);
 
-  await Promise.all([scheduler.history('a'), scheduler.lastRun('a'), scheduler.history('a', 5)]);
+  await Promise.all([
+    scheduler.history('a'),
+    scheduler.lastRun('a'),
+    scheduler.history('a', 5),
+  ]);
   assert.equal(state.open, false, 'nothing left open, so the process can exit');
 });
 
@@ -245,13 +308,25 @@ test('stop() tracks a manual run while its claim is pending and never starts its
       stopResolved = true;
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(stopResolved, false, `withLeases=${withLeases}: stop() waits for pending manual claim`);
+    assert.equal(
+      stopResolved,
+      false,
+      `withLeases=${withLeases}: stop() waits for pending manual claim`,
+    );
 
     releaseClaim();
     await stopping;
     const record = await manual;
-    assert.equal(closeBeforeClaimFinished, false, `withLeases=${withLeases}: backend stayed open while claim was pending`);
-    assert.equal(handlerCalls, 0, `withLeases=${withLeases}: handler must not run after stop()`);
+    assert.equal(
+      closeBeforeClaimFinished,
+      false,
+      `withLeases=${withLeases}: backend stayed open while claim was pending`,
+    );
+    assert.equal(
+      handlerCalls,
+      0,
+      `withLeases=${withLeases}: handler must not run after stop()`,
+    );
     assert.equal(record.status, 'interrupted');
   }
 });
@@ -301,7 +376,9 @@ test('a pending manual or scheduled operation from an earlier lifecycle does not
         'job',
         '1h',
         (ctx) => {
-          executed.push(String((ctx.data as { run?: string } | undefined)?.run ?? 'none'));
+          executed.push(
+            String((ctx.data as { run?: string } | undefined)?.run ?? 'none'),
+          );
         },
         withLeases ? { catchUpMs: 0 } : {},
       );
@@ -311,7 +388,9 @@ test('a pending manual or scheduled operation from an earlier lifecycle does not
           'late-added',
           '1h',
           (ctx) => {
-            executed.push(String((ctx.data as { run?: string } | undefined)?.run ?? 'none'));
+            executed.push(
+              String((ctx.data as { run?: string } | undefined)?.run ?? 'none'),
+            );
           },
           withLeases ? { catchUpMs: 0 } : {},
         );
@@ -324,10 +403,16 @@ test('a pending manual or scheduled operation from an earlier lifecycle does not
 
       releaseFirst();
       const staleRecord = await first;
-      assert.equal(staleRecord.status, 'interrupted', `withLeases=${withLeases}, stage=${stage}`);
+      assert.equal(
+        staleRecord.status,
+        'interrupted',
+        `withLeases=${withLeases}, stage=${stage}`,
+      );
       assert.deepEqual(executed, []);
 
-      const freshRecord = await scheduler.runNow(target, { data: { run: 'fresh' } });
+      const freshRecord = await scheduler.runNow(target, {
+        data: { run: 'fresh' },
+      });
       assert.equal(freshRecord.status, 'success');
       assert.deepEqual(executed, ['fresh']);
       await scheduler.stop();

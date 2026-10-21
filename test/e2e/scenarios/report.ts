@@ -14,7 +14,10 @@ async function main() {
   const strategies = process.argv.slice(2);
   if (strategies.length === 0) strategies.push('stream-id');
   const redisUrl = REDIS_URL;
-  const results: Record<string, Array<{ name: string; summary: string; facts: unknown }>> = {};
+  const results: Record<
+    string,
+    Array<{ name: string; summary: string; facts: unknown }>
+  > = {};
   for (const strategy of strategies) {
     results[strategy] = [];
     for (const scenario of SCENARIOS) {

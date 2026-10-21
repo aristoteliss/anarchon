@@ -22,6 +22,7 @@ scheduler.every('report', '35m', buildReport, {
 | [`overlap`](#overlap) | `'skip'` | yes | Whether a run may start while the previous one is going |
 | [`maxAttempts`](#maxattempts) | `3` | yes | How many times a run may be started when runners die |
 | [`catchUpMs`](#catchupms) | `300000` (5 min) | yes | How old a missed run may be and still run on start |
+| [`yieldAfterFailure`](#yieldafterfailure) | `false` | yes | Whether an instance that just failed the job lets a healthy one claim the next run first |
 | [`historySize`](#historysize-and-historyttlms) | scheduler's (1000) | no | How many runs to remember |
 | [`historyTtlMs`](#historysize-and-historyttlms) | scheduler's (none) | no, but not RabbitMQ or NATS | How long to remember them |
 | `offsetMs` | `0` | no | `every()` only: [shifts the grid](../defining-jobs/#shifting-the-grid-offsetms) |
@@ -30,7 +31,7 @@ scheduler.every('report', '35m', buildReport, {
 
 "Scheduler's" means the option of the same name on `new Scheduler()`. See [Scheduler options](../scheduler-options/).
 
-An option that needs a lease backend isn't offered on another one. On a scheduler whose backend is RabbitMQ, NATS, or Redis/Valkey without the `lease` strategy, `every()`, `cron()` and `at()` don't accept `overlap`, `maxAttempts` or `catchUpMs`: the code doesn't compile. Decorators and plain JavaScript can't be checked that way, so the job is refused when it is added, with an error that names the option and the backend. `at()` never takes `overlap`, since a one-off job has no previous run.
+An option that needs a lease backend isn't offered on another one. On a scheduler whose backend is RabbitMQ, NATS, or Redis/Valkey without the `lease` strategy, `every()`, `cron()` and `at()` don't accept `overlap`, `maxAttempts`, `catchUpMs` or `yieldAfterFailure`: the code doesn't compile. Decorators and plain JavaScript can't be checked that way, so the job is refused when it is added, with an error that names the option and the backend. `at()` never takes `overlap`, since a one-off job has no previous run.
 
 ```ts
 const scheduler = new Scheduler({ backend: new RabbitMQBackend({ url }) });
@@ -40,7 +41,7 @@ scheduler.every('sync', '5m', sync, { overlap: 'allow' });    // type error: Rab
 
 ## `jitterMs`
 
-Each instance waits a random time between 0 and `jitterMs` after the slot before it claims the run.
+Each instance waits a random time between 0 and `jitterMs` after the slot before it claims the run. With [`yieldAfterFailure`](#yieldafterfailure), an instance whose last run of the job failed waits longer.
 
 ```mermaid
 flowchart LR
@@ -209,6 +210,32 @@ scheduler.cron('monthly-invoices', '0 6 1 * *', invoice, { catchUpMs: 24 * 60 * 
 scheduler.every('hourly-rollup', '1h', rollup, { catchUpMs: 50 * 60_000 });                 // until the next is nearly due
 scheduler.every('heartbeat', '10s', beat, { catchUpMs: 0 });                                 // never
 ```
+
+## `yieldAfterFailure`
+
+*Needs a lease backend.*
+
+Each run goes to the instance that claims it first, healthy or not. A fault that stays with one instance (a broken connection pool, a full disk, a dependency only that instance can't reach) fails every run that instance wins, while a healthy instance could have run them. A run that throws isn't retried.
+
+With `yieldAfterFailure: true`, an instance whose last run of the job failed (it threw or timed out) waits before claiming the job's next scheduled run:
+
+- **Healthy instances first.** They claim by `slot + jitterMs`. The instance that failed waits until `slot + jitterMs + heartbeatMs`, so one of them wins.
+- **It still runs when no one else does.** If no other instance has claimed the run by then, the instance that failed claims and runs it. A single instance keeps running its jobs.
+- **It recovers by itself.** A run that succeeds on that instance ends the waiting.
+- **Never refused as late.** The wait never ends past `maxLateMs` after the slot.
+
+```ts
+scheduler.every('sync-orders', '1m', syncOrders, { yieldAfterFailure: true });
+```
+
+**What it costs.** When only failing instances are left, a run starts up to `heartbeatMs` later than usual: between `slot + jitterMs` and `slot + jitterMs + heartbeatMs`. With the default timings (`jitterMs` 2 s, `heartbeatMs` 5 s), that is up to 7 s after the slot instead of 2 s. Manual runs, takeovers and catch-up never wait.
+
+**What it doesn't do.** The run that failed isn't retried, and a handler that hung keeps running on its instance (see [`timeoutMs`](#timeoutms)). Every instance remembers only its own last run, so after a failure on every instance, all of them wait the same and the race goes on as before, `heartbeatMs` later.
+
+**Works on** lease backends. **Use it when:**
+
+- **Instances can be sick on their own:** jobs that use a connection or resource per instance.
+- **A job is frequent enough that a few seconds' delay doesn't matter.** Leave it off where the start time matters more than the instance.
 
 ## `historySize` and `historyTtlMs`
 

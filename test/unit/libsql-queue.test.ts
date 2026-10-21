@@ -6,7 +6,10 @@ import { test } from 'vitest';
 import { fromLibsql, type LibsqlClientLike } from '../../src';
 import { sleep } from '../support';
 
-function held(protocol?: string): { client: LibsqlClientLike; open: () => void } {
+function held(protocol?: string): {
+  client: LibsqlClientLike;
+  open: () => void;
+} {
   let open = () => {};
   const gate = new Promise<void>((resolve) => {
     open = resolve;
@@ -22,13 +25,19 @@ function held(protocol?: string): { client: LibsqlClientLike; open: () => void }
   return { client, open };
 }
 
-async function runsAlongside(first: string | undefined, second: string | undefined): Promise<boolean> {
+async function runsAlongside(
+  first: string | undefined,
+  second: string | undefined,
+): Promise<boolean> {
   const slow = held(first);
   const fast = held(second);
   fast.open();
   const pending = fromLibsql(slow.client).all('SELECT 1', []);
   const next = fromLibsql(fast.client).all('SELECT 1', []);
-  const ran = await Promise.race([next.then(() => true), sleep(100).then(() => false)]);
+  const ran = await Promise.race([
+    next.then(() => true),
+    sleep(100).then(() => false),
+  ]);
   slow.open();
   await Promise.all([pending, next]);
   return ran;
@@ -36,11 +45,23 @@ async function runsAlongside(first: string | undefined, second: string | undefin
 
 test('a libSQL server client does not wait for statements of other clients in the process', async () => {
   assert.equal(await runsAlongside('http', 'ws'), true, 'two remote clients');
-  assert.equal(await runsAlongside('file', 'http'), true, 'a remote client next to a local file');
-  assert.equal(await runsAlongside('ws', 'file'), true, 'a local file next to a remote client');
+  assert.equal(
+    await runsAlongside('file', 'http'),
+    true,
+    'a remote client next to a local file',
+  );
+  assert.equal(
+    await runsAlongside('ws', 'file'),
+    true,
+    'a local file next to a remote client',
+  );
 });
 
 test('libSQL clients on a local file, or of an unknown kind, take turns with every SQLite statement in the process', async () => {
   assert.equal(await runsAlongside('file', 'file'), false, 'two local files');
-  assert.equal(await runsAlongside('file', undefined), false, 'a client that does not say what it is');
+  assert.equal(
+    await runsAlongside('file', undefined),
+    false,
+    'a client that does not say what it is',
+  );
 });

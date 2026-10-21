@@ -8,7 +8,15 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'vitest';
 
-import { LIBSQL_URL, POSTGRES_URL, probeLibsql, probePostgres, probeRedis, probeSqlite, REDIS_URL } from '../../support';
+import {
+  LIBSQL_URL,
+  POSTGRES_URL,
+  probeLibsql,
+  probePostgres,
+  probeRedis,
+  probeSqlite,
+  REDIS_URL,
+} from '../../support';
 import {
   allDownAtRunTime,
   allRestartMidRun,
@@ -21,9 +29,24 @@ import {
 } from './harness';
 
 const BACKENDS = [
-  { strategy: 'lease', label: 'Redis, lease strategy', probe: () => probeRedis(REDIS_URL), missing: `nothing at ${REDIS_URL}` },
-  { strategy: 'postgres', label: 'PostgreSQL', probe: () => probePostgres(POSTGRES_URL), missing: `nothing at ${POSTGRES_URL}` },
-  { strategy: 'sqlite', label: 'SQLite', probe: () => probeSqlite(), missing: 'this Node has no node:sqlite' },
+  {
+    strategy: 'lease',
+    label: 'Redis, lease strategy',
+    probe: () => probeRedis(REDIS_URL),
+    missing: `nothing at ${REDIS_URL}`,
+  },
+  {
+    strategy: 'postgres',
+    label: 'PostgreSQL',
+    probe: () => probePostgres(POSTGRES_URL),
+    missing: `nothing at ${POSTGRES_URL}`,
+  },
+  {
+    strategy: 'sqlite',
+    label: 'SQLite',
+    probe: () => probeSqlite(),
+    missing: 'this Node has no node:sqlite',
+  },
   {
     strategy: 'libsql',
     label: 'libSQL server',
@@ -52,7 +75,10 @@ function scenarios(backend: (typeof BACKENDS)[number]): void {
       if (!available) return t.skip(backend.missing);
       const { facts } = await longRuns(config('long'));
       assert.equal(facts.maxRunningAtOnce, 1);
-      assert.ok((facts.overlapSkips as number) > 0, 'runs due during a long run are skipped');
+      assert.ok(
+        (facts.overlapSkips as number) > 0,
+        'runs due during a long run are skipped',
+      );
       assert.equal(facts.errors, 0);
     });
 
@@ -61,7 +87,10 @@ function scenarios(backend: (typeof BACKENDS)[number]): void {
       const { facts } = await winnerCrashes(config('crash'));
       assert.ok(facts.finishedBy, 'someone finished the run');
       assert.match(String(facts.finishedBy), /#2\(takeover\)$/);
-      assert.ok((facts.takeoverAfterMs as number) < 4_000, `took over after ${facts.takeoverAfterMs} ms`);
+      assert.ok(
+        (facts.takeoverAfterMs as number) < 4_000,
+        `took over after ${facts.takeoverAfterMs} ms`,
+      );
       assert.deepEqual(
         (facts.history as string[]).map((h) => h.split(':')[1]),
         ['success', 'interrupted'],
@@ -78,7 +107,11 @@ function scenarios(backend: (typeof BACKENDS)[number]): void {
     test('when all instances restart mid-run, the run is finished after they come back', async (t) => {
       if (!available) return t.skip(backend.missing);
       const { facts } = await allRestartMidRun(config('all-restart'));
-      assert.equal((facts.finished as string[]).length, 1, `finished: ${facts.finished}`);
+      assert.equal(
+        (facts.finished as string[]).length,
+        1,
+        `finished: ${facts.finished}`,
+      );
       assert.match((facts.finished as string[])[0]!, /#2\(takeover\)$/);
     });
 
@@ -95,7 +128,10 @@ function scenarios(backend: (typeof BACKENDS)[number]): void {
       assert.ok(facts.backup, 'a backup took over');
       assert.equal(facts.backupFinished, true);
       assert.equal(facts.originalAbortedAfterWaking, true);
-      assert.ok((facts.lostEvents as number) >= 1, 'the frozen instance emitted "lost"');
+      assert.ok(
+        (facts.lostEvents as number) >= 1,
+        'the frozen instance emitted "lost"',
+      );
     });
 
     test('a winner stopped gracefully (rolling deploy) hands the run to a backup', async (t) => {
@@ -103,7 +139,10 @@ function scenarios(backend: (typeof BACKENDS)[number]): void {
       const { facts } = await winnerStopsGracefully(config('graceful'));
       assert.match(String(facts.finishedBy), /#2\(takeover\)$/);
       // Released at once, so a backup picks it up at its next check (within one lease), not after the lease runs out
-      assert.ok((facts.handoverAfterMs as number) < 2_000, `handed over after ${facts.handoverAfterMs} ms`);
+      assert.ok(
+        (facts.handoverAfterMs as number) < 2_000,
+        `handed over after ${facts.handoverAfterMs} ms`,
+      );
       assert.deepEqual(
         (facts.history as string[]).map((h) => h.split(':')[1]),
         ['success', 'interrupted'],

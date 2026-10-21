@@ -73,6 +73,8 @@ A skipped run then costs a delay, not lost work.
 
 A run starts between its slot and `slot + jitterMs`, on some instance. Don't rely on the start being exact; use `ctx.scheduledAt` for the nominal time.
 
+With [`yieldAfterFailure`](../../guides/job-options/#yieldafterfailure), an instance whose last run of the job failed waits until `slot + jitterMs + heartbeatMs` (never past `maxLateMs`) before it claims. A healthy instance still starts the run by `slot + jitterMs`; only when no healthy instance claims it does the run start up to `heartbeatMs` later, 7 s after its slot with the default timings.
+
 ### Order between jobs
 
 Different jobs are independent. Two jobs due at the same time may run on different instances, in either order.

@@ -106,16 +106,30 @@ export default defineConfig({
     mermaid({ autoTheme: true }),
     starlight({
       title: 'anarchon',
-      description: 'Leaderless cron and interval scheduling for Node.js services, coordinated through your existing datastore.',
+      description:
+        'Leaderless cron and interval scheduling for Node.js services, coordinated through your existing datastore.',
       defaultLocale: 'root',
       locales,
       sidebar,
-      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/aristoteliss/anarchon' }],
+      social: [
+        {
+          icon: 'github',
+          label: 'GitHub',
+          href: 'https://github.com/aristoteliss/anarchon',
+        },
+      ],
       head: [
         { tag: 'meta', attrs: { property: 'og:image', content: socialCard } },
         { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
         { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
-        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'anarchon: leaderless cron and interval scheduling for Node.js' } },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:alt',
+            content:
+              'anarchon: leaderless cron and interval scheduling for Node.js',
+          },
+        },
         { tag: 'meta', attrs: { name: 'twitter:image', content: socialCard } },
       ],
       customCss: ['./src/styles/custom.css'],

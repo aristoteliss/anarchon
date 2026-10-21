@@ -33,7 +33,10 @@ const checkpoints = new Map<number, number>();
 
 async function exportOrders(ctx: JobContext): Promise<void> {
   const from = checkpoints.get(ctx.slot) ?? 0;
-  say(`${ctx.instanceId}: attempt ${ctx.attempt} (${ctx.reason}) starts at page ${from + 1}`);
+  say(
+    `${ctx.instanceId}: attempt ${ctx.attempt} (${ctx.reason}) starts at page ${from + 1}`,
+  );
+
   for (let page = from + 1; page <= PAGES; page++) {
     ctx.signal.throwIfAborted();
     await work(ctx.signal, 1_000); // fetch the page and write it; both take the signal
@@ -42,34 +45,63 @@ async function exportOrders(ctx: JobContext): Promise<void> {
   }
 }
 
+/** One worker, with its first export at `firstRunAt` and every 30 s after. */
+function instance(id: string, firstRunAt: number): Scheduler {
+  const scheduler = new Scheduler({
+    backend: backendFromEnv('export'),
+    instanceId: id,
+    leaseMs: 3_000,
+    heartbeatMs: 500,
+  });
+
+  scheduler.every('export-orders', '30s', exportOrders, {
+    offsetMs: firstRunAt % 30_000,
+    timeoutMs: 25_000,
+    catchUpMs: 0,
+  });
+  scheduler.on('interrupted', (run) => {
+    const handover = run.handedOver ? 'handed over' : 'not handed over';
+    say(`${run.instanceId}: stopped mid-run, ${handover}`);
+  });
+
+  return scheduler;
+}
+
 async function main() {
   const startedAt = Date.now();
   const firstRunAt = startedAt + 2_000;
-  const instance = (id: string) => {
-    const scheduler = new Scheduler({ backend: backendFromEnv('export'), instanceId: id, leaseMs: 3_000, heartbeatMs: 500 });
-    scheduler.every('export-orders', '30s', exportOrders, { offsetMs: firstRunAt % 30_000, timeoutMs: 25_000, catchUpMs: 0 });
-    scheduler.on('interrupted', (run) => say(`${run.instanceId}: stopped mid-run, ${run.handedOver ? 'handed over' : 'not handed over'}`));
-    return scheduler;
-  };
-  const [a, b] = [instance('worker-a'), instance('worker-b')];
+  const [a, b] = [
+    instance('worker-a', firstRunAt),
+    instance('worker-b', firstRunAt),
+  ];
   const instances = [a, b];
 
   let runner: Scheduler | undefined;
-  for (const scheduler of instances) scheduler.on('start', () => (runner ??= scheduler));
+  for (const scheduler of instances) {
+    scheduler.on('start', () => (runner ??= scheduler));
+  }
   await Promise.all(instances.map((s) => s.start()));
   say('two workers up; the export starts in 2 s');
 
-  while ((checkpoints.values().next().value ?? 0) < 4) await sleep(100);
+  while ((checkpoints.values().next().value ?? 0) < 4) {
+    await sleep(100);
+  }
   say(`deploy: ${runner?.instanceId} is stopped, with 1 s for its job to stop`);
   await runner?.stop({ timeoutMs: 1_000 });
 
-  while ((checkpoints.values().next().value ?? 0) < PAGES) await sleep(100);
+  while ((checkpoints.values().next().value ?? 0) < PAGES) {
+    await sleep(100);
+  }
   const survivor = runner === a ? b : a;
-  const history = (await survivor.history('export-orders', 10)).filter((run) => run.startedAt.getTime() >= startedAt).reverse();
+  const history = (await survivor.history('export-orders', 10))
+    .filter((run) => run.startedAt.getTime() >= startedAt)
+    .reverse();
   await survivor.stop();
 
   for (const run of history) {
-    say(`  attempt ${run.attempt} on ${run.instanceId}: ${run.status} (${run.reason})`);
+    say(
+      `  attempt ${run.attempt} on ${run.instanceId}: ${run.status} (${run.reason})`,
+    );
   }
 }
 

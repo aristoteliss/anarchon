@@ -53,9 +53,15 @@ export interface KeyValueStrategies {
  * const name: KeyValueStrategyName<'valkey'> = 'idmp'; // type error: Valkey has no 'idmp'
  * ```
  */
-export type KeyValueStrategyName<Server extends keyof KeyValueStrategies = 'redis'> = KeyValueStrategies[Server];
+export type KeyValueStrategyName<
+  Server extends keyof KeyValueStrategies = 'redis',
+> = KeyValueStrategies[Server];
 
-type StrategySettings<Name> = Name extends 'idmp' ? IdmpOptions : Name extends 'script' ? ScriptOptions : unknown;
+type StrategySettings<Name> = Name extends 'idmp'
+  ? IdmpOptions
+  : Name extends 'script'
+    ? ScriptOptions
+    : unknown;
 
 /**
  * The `strategy` option of `RedisBackend` and `ValkeyBackend`: a strategy's name, or an object with

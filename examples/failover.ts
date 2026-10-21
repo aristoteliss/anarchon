@@ -24,7 +24,14 @@ const LEASE = { leaseMs: 3_000, heartbeatMs: 500 };
 
 async function main() {
   const instances = new Map(
-    ['A', 'B', 'C'].map((id) => [id, new Scheduler({ backend: backendFromEnv('failover'), instanceId: id, ...LEASE })]),
+    ['A', 'B', 'C'].map((id) => [
+      id,
+      new Scheduler({
+        backend: backendFromEnv('failover'),
+        instanceId: id,
+        ...LEASE,
+      }),
+    ]),
   );
   let ignoreSignal = false;
   let running: { by: string; slot: number } | undefined;
@@ -41,17 +48,18 @@ async function main() {
       // No catch-up of the run before start: the example begins with the next scheduled run.
       { jitterMs: 300, catchUpMs: 0 },
     );
-    scheduler.on('start', (e) => say(`${e.instanceId} started the ${at(e.slot)} run (attempt ${e.attempt}, ${e.reason})`));
-    scheduler.on('success', (r) => say(`${r.instanceId} finished it in ${r.durationMs} ms`));
-    scheduler.on('interrupted', (r) => say(`${r.instanceId} was interrupted${r.handedOver ? ' and handed the run over' : ''}`));
-    scheduler.on('skip', (e) => say(`${e.instanceId} skipped the ${at(e.slot)} run (${e.reason})`));
-    scheduler.on('error', (e) => say(`error: ${String(e.error)}`));
+    narrate(scheduler);
   }
+
   await Promise.all([...instances.values()].map((s) => s.start()));
-  say(`3 instances on ${instances.get('A')?.backend.name}; "report" runs every ${INTERVAL_MS / 1000} s and takes ${JOB_MS / 1000} s`);
+  say(
+    `3 instances on ${instances.get('A')?.backend.name}; "report" runs every ${INTERVAL_MS / 1000} s and takes ${JOB_MS / 1000} s`,
+  );
 
   const nextRunner = async (after?: number) => {
-    while (!running || running.slot === after) await sleep(50);
+    while (!running || running.slot === after) {
+      await sleep(50);
+    }
     return running;
   };
 
@@ -63,14 +71,22 @@ async function main() {
   ignoreSignal = true;
   const second = await nextRunner(first.slot);
   await sleep(1_500);
-  say(`--- ${second.by} stops renewing its lease, like a crash; a backup needs up to ${LEASE.leaseMs + 2 * LEASE.heartbeatMs} ms`);
+  say(
+    `--- ${second.by} stops renewing its lease, like a crash; a backup needs up to ${LEASE.leaseMs + 2 * LEASE.heartbeatMs} ms`,
+  );
   await instances.get(second.by)?.stop({ timeoutMs: 100 });
 
   await sleep(LEASE.leaseMs + JOB_MS + 2_000);
-  const survivor = [...instances.entries()].find(([id]) => id !== first.by && id !== second.by)?.[1];
-  if (!survivor) throw new Error('the same instance ran both runs; run the example again');
+  const survivor = [...instances.entries()].find(
+    ([id]) => id !== first.by && id !== second.by,
+  )?.[1];
+  if (!survivor) {
+    throw new Error('the same instance ran both runs; run the example again');
+  }
+
+  const runs = await survivor.history('report', 10);
   console.table(
-    (await survivor.history('report', 10)).map((r) => ({
+    runs.map((r) => ({
       scheduled: at(r.slot),
       by: r.instanceId,
       attempt: r.attempt,
@@ -80,6 +96,27 @@ async function main() {
     })),
   );
   await survivor.stop();
+}
+
+/** Prints what an instance does with the runs: starts, finishes, interruptions, skips and errors. */
+function narrate(scheduler: Scheduler): void {
+  scheduler.on('start', (e) =>
+    say(
+      `${e.instanceId} started the ${at(e.slot)} run (attempt ${e.attempt}, ${e.reason})`,
+    ),
+  );
+  scheduler.on('success', (r) =>
+    say(`${r.instanceId} finished it in ${r.durationMs} ms`),
+  );
+  scheduler.on('interrupted', (r) => {
+    const handover = r.handedOver ? ' and handed the run over' : '';
+    say(`${r.instanceId} was interrupted${handover}`);
+  });
+
+  scheduler.on('skip', (e) =>
+    say(`${e.instanceId} skipped the ${at(e.slot)} run (${e.reason})`),
+  );
+  scheduler.on('error', (e) => say(`error: ${String(e.error)}`));
 }
 
 const at = (slot: number) => new Date(slot).toISOString().slice(11, 19);

@@ -85,16 +85,28 @@ export interface RunStore {
   /** Decides one claim atomically. Exactly one caller gets 'won' for each attempt of a run. */
   claim(input: RunClaim): Promise<ClaimOutcome>;
   /** Renews the lease. false: the run is no longer ours (a backup took it over). */
-  heartbeat(job: string, slot: number, token: string, leaseMs: number): Promise<boolean>;
+  heartbeat(
+    job: string,
+    slot: number,
+    token: string,
+    leaseMs: number,
+  ): Promise<boolean>;
   /** Marks the run finished. false: the run is no longer ours. */
-  finish(job: string, slot: number, token: string, status: 'success' | 'failed' | 'interrupted'): Promise<boolean>;
+  finish(
+    job: string,
+    slot: number,
+    token: string,
+    status: 'success' | 'failed' | 'interrupted',
+  ): Promise<boolean>;
   /**
    * Gives an unfinished run up so a backup can take it over now (graceful shutdown). This doesn't
    * count against maxAttempts. false: the run is no longer ours.
    */
   release(job: string, slot: number, token: string): Promise<boolean>;
   /** Runs of this job not finished yet, and whether their lease is still alive. */
-  active(job: string): Promise<Array<{ slot: number; attempt: number; alive: boolean }>>;
+  active(
+    job: string,
+  ): Promise<Array<{ slot: number; attempt: number; alive: boolean }>>;
 }
 
 /**
@@ -254,7 +266,12 @@ export interface Backend {
   /** Records a manual run (runNow), not deduplicated. May return the slot it actually used. */
   recordManualRun(input: ClaimInput): Promise<number | undefined>;
   /** Stores how an attempt ended, and trims the job's history to historySize and historyTtlMs. */
-  saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void>;
+  saveResult(
+    job: string,
+    result: StoredResult,
+    historySize: number,
+    historyTtlMs?: number,
+  ): Promise<void>;
   /**
    * Latest runs of a job from all instances, newest first, at most `limit` attempts. What
    * `scheduler.history()` and `lastRun()` return.

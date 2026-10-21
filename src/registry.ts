@@ -12,7 +12,11 @@ import {
 // Which schedulers there are (the default one, the named ones, the ones that can be created from
 // settings), and on which of them the jobs of each decorated object live.
 import { coded } from './errors';
-import { CONFIGURE_OPTIONS, REGISTER_DEFAULTS, REGISTER_OPTIONS } from './option-keys';
+import {
+  CONFIGURE_OPTIONS,
+  REGISTER_DEFAULTS,
+  REGISTER_OPTIONS,
+} from './option-keys';
 import type { Backend, SchedulerOptions } from './types';
 import { refuseUnknown } from './util';
 
@@ -48,7 +52,8 @@ import { refuseUnknown } from './util';
  * Scheduler.configure('billing', { backend: new PostgresBackend({ connection: billingPool }), leaseMs: 10_000 });
  * ```
  */
-export interface ConfigureOptions extends Omit<SchedulerOptions, 'backend' | 'name'> {
+export interface ConfigureOptions
+  extends Omit<SchedulerOptions, 'backend' | 'name'> {
   /**
    * Where runs are claimed and recorded. A function is called with the scheduler's name
    * (`'default'` for the default one) and returns a backend for it: that lets one set of settings
@@ -82,7 +87,11 @@ export interface SchedulerHost {
   /** Its name, or undefined for an unnamed scheduler (which can be the default one). */
   readonly name: string | undefined;
   /** Adds one declared job under `name`, with the object's `register()` defaults under its own options. */
-  add(job: DeclaredJob, name: string, defaults: NonNullable<RegisterOptions['defaults']>): void;
+  add(
+    job: DeclaredJob,
+    name: string,
+    defaults: NonNullable<RegisterOptions['defaults']>,
+  ): void;
   /** Removes a job. false when there was none by that name. */
   remove(name: string): boolean;
   /** Whether a job by that name is on the scheduler. */
@@ -135,7 +144,9 @@ let factory: ((options: SchedulerOptions) => object) | undefined;
  * setSchedulerFactory((options) => new Scheduler(options)); // once, in scheduler.ts
  * ```
  */
-export function setSchedulerFactory(create: (options: SchedulerOptions) => object): void {
+export function setSchedulerFactory(
+  create: (options: SchedulerOptions) => object,
+): void {
   factory = create;
 }
 
@@ -143,8 +154,10 @@ export function setSchedulerFactory(create: (options: SchedulerOptions) => objec
 function settingsFor(name: string | undefined): ConfigureOptions | undefined {
   const own = settings.get(name);
   if (own || name === undefined) return own;
+
   const shared = settings.get(undefined);
   if (!shared || typeof shared.backend === 'function') return shared;
+
   throw coded(
     new Error(
       `Scheduler "${name}" has no settings of its own, and the default settings hold a backend object, which two schedulers can't share. ` +
@@ -155,24 +168,54 @@ function settingsFor(name: string | undefined): ConfigureOptions | undefined {
 }
 
 /** Creates a scheduler from settings, and starts it in the background with `autoStart`. */
-function create(name: string | undefined, { autoStart, backend, ...options }: ConfigureOptions): SchedulerHost {
-  if (!factory) throw coded(new Error('No scheduler can be created yet'), 'ANARCHON_INTERNAL');
-  const built = typeof backend === 'function' ? backend(name ?? DEFAULT_NAME) : backend;
-  const host = hosts.get(factory({ ...options, backend: built, ...(name === undefined ? {} : { name }) }));
-  if (!host) throw coded(new Error('The scheduler that was created is not known to the registry'), 'ANARCHON_INTERNAL');
+function create(
+  name: string | undefined,
+  { autoStart, backend, ...options }: ConfigureOptions,
+): SchedulerHost {
+  if (!factory) {
+    throw coded(
+      new Error('No scheduler can be created yet'),
+      'ANARCHON_INTERNAL',
+    );
+  }
+
+  const built =
+    typeof backend === 'function' ? backend(name ?? DEFAULT_NAME) : backend;
+  const wanted: SchedulerOptions = { ...options, backend: built };
+  if (name !== undefined) wanted.name = name;
+  const host = hosts.get(factory(wanted));
+  if (!host) {
+    throw coded(
+      new Error('The scheduler that was created is not known to the registry'),
+      'ANARCHON_INTERNAL',
+    );
+  }
+
   if (autoStart) host.startInBackground();
   return host;
 }
 
 /** The scheduler a job goes to: an existing one, or one created from settings. Undefined when there is neither. */
-function resolve(reference: string | object | undefined): SchedulerHost | undefined {
+function resolve(
+  reference: string | object | undefined,
+): SchedulerHost | undefined {
   if (typeof reference === 'object') {
     const host = hosts.get(reference);
-    if (!host) throw coded(new TypeError('scheduler must be the name of a scheduler, or a Scheduler'), 'ANARCHON_INVALID_ARGUMENT');
+    if (!host) {
+      throw coded(
+        new TypeError(
+          'scheduler must be the name of a scheduler, or a Scheduler',
+        ),
+        'ANARCHON_INVALID_ARGUMENT',
+      );
+    }
     return host;
   }
-  const existing = reference === undefined ? defaultScheduler : named.get(reference);
+
+  const existing =
+    reference === undefined ? defaultScheduler : named.get(reference);
   if (existing) return existing;
+
   const from = settingsFor(reference);
   return from ? create(reference, from) : undefined;
 }
@@ -184,23 +227,19 @@ function resolve(reference: string | object | undefined): SchedulerHost | undefi
  * @param forced The scheduler that takes every job, whatever scheduler each job names.
  * @returns false when a scheduler one of the jobs names doesn't exist and can't be created yet.
  */
-function place(target: object, options: RegisterOptions, forced: SchedulerHost | undefined): boolean {
-  const declared = declaredJobs(target);
-  if (declared.length === 0) {
-    throw coded(
-      new TypeError('register() needs an object whose class has methods decorated with @Cron, @Every or @At'),
-      'ANARCHON_INVALID_ARGUMENT',
-    );
-  }
-  const plan: Array<{ host: SchedulerHost; job: DeclaredJob; name: string }> = [];
-  for (const job of declared) {
-    const host = forced ?? resolve(job.scheduler);
-    if (!host) return false;
-    plan.push({ host, job, name: (options.prefix ?? '') + job.name });
-  }
+function place(
+  target: object,
+  options: RegisterOptions,
+  forced: SchedulerHost | undefined,
+): boolean {
+  const plan = planPlacement(target, options, forced);
+  if (!plan) return false;
 
   const previous = placements.get(target);
-  for (const { host, name } of previous?.jobs ?? []) host.remove(name);
+  for (const { host, name } of previous?.jobs ?? []) {
+    host.remove(name);
+  }
+
   const added: Placement['jobs'] = [];
   try {
     for (const { host, job, name } of plan) {
@@ -208,35 +247,84 @@ function place(target: object, options: RegisterOptions, forced: SchedulerHost |
       added.push({ host, name });
     }
   } catch (error) {
-    for (const { host, name } of added) host.remove(name);
-    placements.delete(target);
-    if (previous) {
-      try {
-        place(target, previous.options, previous.forced);
-      } catch {
-        // The jobs that were there can't be put back; the error that caused this is the one to report.
-      }
-    }
+    rollBack(target, added, previous);
     throw error;
   }
+
   placements.set(target, { jobs: added, options, forced });
-  for (const [key, waited] of waiting) if (waited === target) waiting.delete(key);
+  for (const [key, waited] of waiting) {
+    if (waited === target) waiting.delete(key);
+  }
   markAdded(target);
   return true;
 }
 
+/** Each declared job with its scheduler and full name; undefined when one of the schedulers is missing. */
+function planPlacement(
+  target: object,
+  options: RegisterOptions,
+  forced: SchedulerHost | undefined,
+): Array<{ host: SchedulerHost; job: DeclaredJob; name: string }> | undefined {
+  const declared = declaredJobs(target);
+  if (declared.length === 0) {
+    throw coded(
+      new TypeError(
+        'register() needs an object whose class has methods decorated with @Cron, @Every or @At',
+      ),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
+  }
+
+  const plan: Array<{ host: SchedulerHost; job: DeclaredJob; name: string }> =
+    [];
+  for (const job of declared) {
+    const host = forced ?? resolve(job.scheduler);
+    if (!host) return undefined;
+    plan.push({ host, job, name: (options.prefix ?? '') + job.name });
+  }
+  return plan;
+}
+
+/** Takes back the jobs a failed placement added, and puts back the jobs the object had before. */
+function rollBack(
+  target: object,
+  added: Placement['jobs'],
+  previous: Placement | undefined,
+): void {
+  for (const { host, name } of added) {
+    host.remove(name);
+  }
+  placements.delete(target);
+  if (!previous) return;
+
+  try {
+    place(target, previous.options, previous.forced);
+  } catch {
+    // The jobs that were there can't be put back; the error that caused this is the one to report.
+  }
+}
+
 /** Retries the objects that waited for a scheduler, once one may exist. */
 function placeWaiting(): void {
-  for (const target of [...waiting.values()]) place(target, {}, undefined);
+  for (const target of [...waiting.values()]) {
+    place(target, {}, undefined);
+  }
 }
 
 onObjectCreated((target) => {
   if (placements.has(target)) return;
+
   try {
     if (!place(target, {}, undefined)) waiting.set(target.constructor, target);
   } catch (error) {
     // The usual cause is a second object of one class, which register() with a prefix solves.
-    if (!(error instanceof Error) || !/is already registered$/.test(error.message)) throw error;
+    if (
+      !(error instanceof Error) ||
+      !/is already registered$/.test(error.message)
+    ) {
+      throw error;
+    }
+
     throw coded(
       new Error(
         `${error.message}. To use several objects of one class, register each of them with a prefix of its own: scheduler.register(object, { prefix })`,
@@ -257,19 +345,38 @@ onObjectCreated((target) => {
  * // registerOn(host of scheduler, object, { prefix: 'acme:', ... }): adds 'acme:sync', 'acme:report', ...
  * ```
  */
-export function registerOn(host: SchedulerHost, target: object, options: RegisterOptions): void {
+export function registerOn(
+  host: SchedulerHost,
+  target: object,
+  options: RegisterOptions,
+): void {
   refuseUnknown('register()', options, REGISTER_OPTIONS);
-  if (options.prefix !== undefined && typeof options.prefix !== 'string')
-    throw coded(new TypeError('register(): prefix must be a string'), 'ANARCHON_INVALID_ARGUMENT');
-  if (options.defaults !== undefined && (typeof options.defaults !== 'object' || options.defaults === null)) {
-    throw coded(new TypeError('register(): defaults must be an object of job options'), 'ANARCHON_INVALID_ARGUMENT');
+  if (options.prefix !== undefined && typeof options.prefix !== 'string') {
+    throw coded(
+      new TypeError('register(): prefix must be a string'),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
+  }
+  if (
+    options.defaults !== undefined &&
+    (typeof options.defaults !== 'object' || options.defaults === null)
+  ) {
+    throw coded(
+      new TypeError('register(): defaults must be an object of job options'),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
   }
   refuseUnknown('register() defaults', options.defaults, REGISTER_DEFAULTS);
+
   const placed = placements.get(target);
-  const here = placed?.jobs.every((job) => job.host === host) ? placed : undefined;
+  const here = placed?.jobs.every((job) => job.host === host)
+    ? placed
+    : undefined;
   const asked = options.prefix !== undefined || options.defaults !== undefined;
   if (here && !asked && here.jobs.every(({ name }) => host.has(name))) return;
-  place(target, here && !asked ? here.options : options, host);
+
+  const chosen = here && !asked ? here.options : options;
+  place(target, chosen, host);
 }
 
 /**
@@ -283,11 +390,17 @@ export function registerOn(host: SchedulerHost, target: object, options: Registe
  */
 export function schedulerCreated(host: SchedulerHost): void {
   if (host.name !== undefined) {
-    if (named.has(host.name)) throw coded(new Error(`A scheduler named "${host.name}" already exists`), 'ANARCHON_SCHEDULER_EXISTS');
+    if (named.has(host.name)) {
+      throw coded(
+        new Error(`A scheduler named "${host.name}" already exists`),
+        'ANARCHON_SCHEDULER_EXISTS',
+      );
+    }
     named.set(host.name, host);
   } else {
     defaultScheduler ??= host;
   }
+
   hosts.set(host.scheduler, host);
 }
 
@@ -309,9 +422,15 @@ export function schedulerStarting(host: SchedulerHost): string[] {
     if (defaultScheduler !== host) return [];
   } else {
     const holder = named.get(host.name);
-    if (holder && holder !== host) throw coded(new Error(`A scheduler named "${host.name}" already exists`), 'ANARCHON_SCHEDULER_EXISTS');
+    if (holder && holder !== host) {
+      throw coded(
+        new Error(`A scheduler named "${host.name}" already exists`),
+        'ANARCHON_SCHEDULER_EXISTS',
+      );
+    }
     named.set(host.name, host);
   }
+
   placeWaiting();
   return takeUnaddedWarnings();
 }
@@ -328,7 +447,9 @@ export function schedulerStarting(host: SchedulerHost): string[] {
  */
 export function schedulerStopped(host: SchedulerHost): void {
   if (defaultScheduler === host) defaultScheduler = undefined;
-  if (host.name !== undefined && named.get(host.name) === host) named.delete(host.name);
+  if (host.name !== undefined && named.get(host.name) === host) {
+    named.delete(host.name);
+  }
 }
 
 /**
@@ -359,24 +480,35 @@ export function setDefaultScheduler(host: SchedulerHost | undefined): void {
  * Scheduler.configure({ backend });            // configure(undefined, ...): the default scheduler
  * ```
  */
-export function configure(name: string | undefined, options: ConfigureOptions): void {
-  if (name !== undefined && (typeof name !== 'string' || name === ''))
-    throw coded(new TypeError('Scheduler.configure(): name must be a non-empty string'), 'ANARCHON_INVALID_ARGUMENT');
+export function configure(
+  name: string | undefined,
+  options: ConfigureOptions,
+): void {
+  if (name !== undefined && (typeof name !== 'string' || name === '')) {
+    throw coded(
+      new TypeError('Scheduler.configure(): name must be a non-empty string'),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
+  }
   if (typeof options !== 'object' || options === null || !options.backend) {
     throw coded(
-      new TypeError('Scheduler.configure() needs a backend, e.g. backend: new RedisBackend({ redis: url })'),
+      new TypeError(
+        'Scheduler.configure() needs a backend, e.g. backend: new RedisBackend({ redis: url })',
+      ),
       'ANARCHON_INVALID_ARGUMENT',
     );
   }
   refuseUnknown('Scheduler.configure()', options, CONFIGURE_OPTIONS);
-  if (name === undefined ? defaultScheduler : named.get(name)) {
+  const existing = name === undefined ? defaultScheduler : named.get(name);
+  if (existing) {
+    const subject =
+      name === undefined ? 'The default scheduler' : `The scheduler "${name}"`;
     throw coded(
-      new Error(
-        `${name === undefined ? 'The default scheduler' : `The scheduler "${name}"`} already exists: configure it before it is created`,
-      ),
+      new Error(`${subject} already exists: configure it before it is created`),
       'ANARCHON_SCHEDULER_EXISTS',
     );
   }
+
   settings.set(name, options);
   placeWaiting();
 }
@@ -394,14 +526,12 @@ export function configure(name: string | undefined, options: ConfigureOptions): 
 export function getScheduler(name: string | undefined): object {
   const host = resolve(name);
   if (host) return host.scheduler;
-  throw coded(
-    new Error(
-      name === undefined
-        ? 'There is no default scheduler: create one with new Scheduler(...), or give its settings to Scheduler.configure({ ... })'
-        : `There is no scheduler named "${name}": create it with new Scheduler({ name: "${name}", ... }), or give its settings to Scheduler.configure("${name}", { ... })`,
-    ),
-    'ANARCHON_NO_SCHEDULER',
-  );
+
+  const message =
+    name === undefined
+      ? 'There is no default scheduler: create one with new Scheduler(...), or give its settings to Scheduler.configure({ ... })'
+      : `There is no scheduler named "${name}": create it with new Scheduler({ name: "${name}", ... }), or give its settings to Scheduler.configure("${name}", { ... })`;
+  throw coded(new Error(message), 'ANARCHON_NO_SCHEDULER');
 }
 
 /**
@@ -413,7 +543,9 @@ export function getScheduler(name: string | undefined): object {
  * ```
  */
 export function knownSchedulers(): object[] {
-  return [...new Set([...(defaultScheduler ? [defaultScheduler] : []), ...named.values()])].map((host) => host.scheduler);
+  const fallback = defaultScheduler ? [defaultScheduler] : [];
+  const unique = new Set([...fallback, ...named.values()]);
+  return [...unique].map((host) => host.scheduler);
 }
 
 /**

@@ -12,6 +12,7 @@ export const STORE_FORMAT = 1;
 /** Throws when the store holds data in a newer format than this version of anarchon reads. */
 export function checkStoreFormat(found: unknown, where: string): void {
   const version = Number(found);
+
   if (Number.isInteger(version) && version > STORE_FORMAT) {
     throw coded(
       new Error(

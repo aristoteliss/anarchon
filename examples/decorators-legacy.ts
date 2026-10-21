@@ -31,7 +31,9 @@ class Reports {
   @Every('sync', '10s')
   async sync(ctx: JobContext) {
     await sleep(100);
-    say(`sync of ${ctx.scheduledAt.toISOString()} (${++this.sent} run by this instance)`);
+    say(
+      `sync of ${ctx.scheduledAt.toISOString()} (${++this.sent} run by this instance)`,
+    );
   }
 
   @Cron('half-minute-digest', '*/30 * * * * *', { timezone: 'Europe/Athens' })
@@ -51,14 +53,21 @@ class Cleanup {
 }
 
 async function main() {
-  const scheduler = new Scheduler({ backend: backendFromEnv('decorators_legacy'), log: true });
+  const scheduler = new Scheduler({
+    backend: backendFromEnv('decorators_legacy'),
+    log: true,
+  });
 
   const reports = new Reports();
   scheduler.register(new Cleanup());
 
   await scheduler.start();
-  say(`compiled with ${style} decorators; started as ${scheduler.instanceId} on ${scheduler.backend.name}`);
-  for (const job of scheduler.jobs()) say(`  ${job.name.padEnd(22)} ${job.schedule}`);
+  say(
+    `compiled with ${style} decorators; started as ${scheduler.instanceId} on ${scheduler.backend.name}`,
+  );
+  for (const job of scheduler.jobs()) {
+    say(`  ${job.name.padEnd(22)} ${job.schedule}`);
+  }
 
   const shutdown = async () => {
     await scheduler.stop();

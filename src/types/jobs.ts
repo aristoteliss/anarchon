@@ -43,7 +43,10 @@ export interface JobContext<Data = unknown> {
    * ```
    */
   slot: number;
-  /** `slot` as a Date: when the run was due, not when it actually started (up to jitterMs later). */
+  /**
+   * `slot` as a Date: when the run was due, not when it actually started (up to jitterMs later, or
+   * jitterMs + heartbeatMs on an instance waiting under yieldAfterFailure).
+   */
   scheduledAt: Date;
   /**
    * The instance running this job (you): the scheduler's `instanceId`.
@@ -185,7 +188,13 @@ export type JobDataProvider = (run: Omit<JobContext, 'data'>) => unknown;
  * scheduler.every('c', '1h', run, { data: { notify: sendMail } });          // a function, inside an object
  * ```
  */
-export type JobData = object | string | number | boolean | null | JobDataProvider;
+export type JobData =
+  | object
+  | string
+  | number
+  | boolean
+  | null
+  | JobDataProvider;
 
 /**
  * The job options that need a backend with leases: Redis or Valkey with the 'lease' strategy,
@@ -235,6 +244,22 @@ export interface LeaseJobOptions {
    * ```
    */
   catchUpMs?: number;
+  /**
+   * After this instance's last run of the job failed (it threw or timed out), wait before
+   * claiming the job's next scheduled run, so a healthy instance claims it first. The wait ends
+   * `jitterMs + heartbeatMs` after the run's time, never later than `maxLateMs`; if no other
+   * instance has claimed the run by then, this one claims and runs it. A run that succeeds here
+   * ends the waiting. Use it when a fault can stay with one instance, such as a broken connection
+   * or a full disk, so a sick but running instance doesn't keep failing runs that a healthy one
+   * could do. A run that waited starts up to `jitterMs + heartbeatMs` after its time instead of
+   * `jitterMs`. Manual runs, takeovers and catch-up don't wait. Default false.
+   *
+   * @example
+   * ```ts
+   * scheduler.every('sync-orders', '1m', syncOrders, { yieldAfterFailure: true });
+   * ```
+   */
+  yieldAfterFailure?: boolean;
 }
 
 /**
@@ -264,7 +289,8 @@ export interface JobOptions extends LeaseJobOptions {
   /**
    * Each instance waits a random 0..jitterMs before trying to claim a run, so a random instance
    * wins each time and the work is spread. 0 = no spreading: the instance with the fastest clock
-   * and connection wins every time. Must be under half the time between runs.
+   * and connection wins every time. Must be under half the time between runs. An instance waiting
+   * under `yieldAfterFailure` claims at `jitterMs + heartbeatMs` instead.
    * Default: the scheduler's `jitterMs` (2000), or a quarter of the time between runs if smaller.
    *
    * @example

@@ -9,12 +9,34 @@ const T = 1_791_633_600_000;
 
 test('buildHistory joins each claim with its result, newest first, one record per attempt', () => {
   const claims: ClaimRecord[] = [
-    { slot: T, by: 'api-1', at: T + 10, manual: false, attempt: 1, reason: 'scheduled' },
-    { slot: T, by: 'api-2', at: T + 40_000, manual: false, attempt: 2, reason: 'takeover' },
+    {
+      slot: T,
+      by: 'api-1',
+      at: T + 10,
+      manual: false,
+      attempt: 1,
+      reason: 'scheduled',
+    },
+    {
+      slot: T,
+      by: 'api-2',
+      at: T + 40_000,
+      manual: false,
+      attempt: 2,
+      reason: 'takeover',
+    },
     { slot: T + 60_000, by: 'api-3', at: T + 60_010, manual: true },
   ];
   const results: StoredResult[] = [
-    { slot: T, by: 'api-2', attempt: 2, status: 'success', startedAt: T + 40_001, finishedAt: T + 41_001, durationMs: 1_000 },
+    {
+      slot: T,
+      by: 'api-2',
+      attempt: 2,
+      status: 'success',
+      startedAt: T + 40_001,
+      finishedAt: T + 41_001,
+      durationMs: 1_000,
+    },
   ];
   const runs = buildHistory({ job: 'report', claims, results, limit: 10 });
   assert.deepEqual(
@@ -30,8 +52,19 @@ test('buildHistory joins each claim with its result, newest first, one record pe
 });
 
 test('buildHistory keeps the newest `limit` records, and a backend can say what an unfinished attempt is', () => {
-  const claims: ClaimRecord[] = [1, 2, 3].map((n) => ({ slot: T + n * 60_000, by: 'api-1', at: T + n * 60_000, manual: false }));
-  const runs = buildHistory({ job: 'sync', claims, results: [], limit: 2, pendingStatus: () => 'interrupted' });
+  const claims: ClaimRecord[] = [1, 2, 3].map((n) => ({
+    slot: T + n * 60_000,
+    by: 'api-1',
+    at: T + n * 60_000,
+    manual: false,
+  }));
+  const runs = buildHistory({
+    job: 'sync',
+    claims,
+    results: [],
+    limit: 2,
+    pendingStatus: () => 'interrupted',
+  });
   assert.deepEqual(
     runs.map((r) => [r.slot, r.status]),
     [

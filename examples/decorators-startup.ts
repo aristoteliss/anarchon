@@ -37,7 +37,11 @@ async function main() {
     Scheduler.configure({ backend: storeFor, autoStart: true });
     jobs = new Jobs();
     // With autoStart nobody awaits start(), so a failure to connect arrives as an 'error' event.
-    for (const scheduler of Scheduler.all()) scheduler.on('error', ({ error }) => console.error('scheduler error:', error));
+    for (const scheduler of Scheduler.all()) {
+      scheduler.on('error', ({ error }) =>
+        console.error('scheduler error:', error),
+      );
+    }
   } else if (flow === 'manual') {
     // The schedulers are created when the object is, and stay stopped until you start them: do it
     // when the rest of your app is ready. A failure to connect rejects here, where you can handle it.
@@ -50,7 +54,10 @@ async function main() {
     // schedulers they name starts. The first scheduler without a name is the default one.
     jobs = new Jobs();
     const main = new Scheduler({ backend: storeFor('default') });
-    const reports = new Scheduler({ name: 'reports', backend: storeFor('reports') });
+    const reports = new Scheduler({
+      name: 'reports',
+      backend: storeFor('reports'),
+    });
     await main.start();
     await reports.start();
   } else {

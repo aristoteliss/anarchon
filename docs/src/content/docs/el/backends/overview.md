@@ -31,6 +31,7 @@ flowchart TD
 | Χωρίς επικαλυπτόμενες εκτελέσεις (`overlap: 'skip'`) | ναι | όχι | ναι | ναι | όχι | όχι |
 | Επαναλήψεις μετά από ανενεργό runner (`maxAttempts`) | ναι | όχι | ναι | ναι | όχι | όχι |
 | Catch-up μετά από downtime (`catchUpMs`) | ναι | όχι | ναι | ναι | όχι | όχι |
+| Τα υγιή instances διεκδικούν πρώτα μετά από αποτυχία (`yieldAfterFailure`) | ναι | όχι | ναι | ναι | όχι | όχι |
 | Παράδοση (hand-over) στο `stop()` | ναι | όχι | ναι | ναι | όχι | όχι |
 | Ιστορικό (`history()`, `lastRun()`) | ναι | ναι | ναι | ναι | ναι | ναι |
 | Ιστορικό βάσει ηλικίας (`historyTtlMs`) | ναι | ναι ¹ | ναι | ναι | όχι | όχι |
@@ -53,7 +54,7 @@ flowchart TD
 | `maxLateMs` | εργασία, scheduler | ναι | ναι | Στα backends μόνο για claim το `jitterMs + maxLateMs` πρέπει να είναι μικρότερο από όσο το backend θυμάται μια εκτέλεση· ελέγχεται όταν προστίθεται η εργασία |
 | `historySize` | εργασία, scheduler | ναι | ναι | NATS: κερδίζει το μεγαλύτερο, δείτε ² |
 | `historyTtlMs` | εργασία, scheduler | ναι | μόνο Redis/Valkey | Τα RabbitMQ και NATS το απορρίπτουν |
-| `overlap`, `maxAttempts`, `catchUpMs` | εργασία | ναι | απορρίπτονται | Το `at()` δεν δέχεται ποτέ `overlap` |
+| `overlap`, `maxAttempts`, `catchUpMs`, `yieldAfterFailure` | εργασία | ναι | απορρίπτονται | Το `at()` δεν δέχεται ποτέ `overlap` |
 | `leaseMs`, `heartbeatMs` | scheduler | ναι | απορρίπτονται | |
 
 ```ts

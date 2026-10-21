@@ -3,14 +3,27 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { Injectable, Module, type OnApplicationBootstrap, type OnApplicationShutdown } from '@nestjs/common';
+import {
+  Injectable,
+  Module,
+  type OnApplicationBootstrap,
+  type OnApplicationShutdown,
+} from '@nestjs/common';
 import { Scheduler, SqliteBackend } from 'anarchon';
 
-import { AuditService, ForgottenService, InvoicesService, Mailer, ReportsService } from './jobs';
+import {
+  AuditService,
+  ForgottenService,
+  InvoicesService,
+  Mailer,
+  ReportsService,
+} from './jobs';
 
 /** Starts the scheduler when every provider exists, and stops it when the app shuts down. */
 @Injectable()
-class SchedulerLifecycle implements OnApplicationBootstrap, OnApplicationShutdown {
+class SchedulerLifecycle
+  implements OnApplicationBootstrap, OnApplicationShutdown
+{
   constructor(private readonly scheduler: Scheduler) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -36,7 +49,11 @@ class SchedulerLifecycle implements OnApplicationBootstrap, OnApplicationShutdow
       provide: Scheduler,
       useFactory: () =>
         new Scheduler({
-          backend: new SqliteBackend({ database: process.env.SQLITE_FILE ?? join(tmpdir(), 'anarchon-nestjs-example.db') }),
+          backend: new SqliteBackend({
+            database:
+              process.env.SQLITE_FILE ??
+              join(tmpdir(), 'anarchon-nestjs-example.db'),
+          }),
         }),
     },
     SchedulerLifecycle,

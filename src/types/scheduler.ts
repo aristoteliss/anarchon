@@ -1,7 +1,12 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import type { Backend } from './backend';
-import type { AtJobOptions, JobData, JobOptions, LeaseJobOptions } from './jobs';
+import type {
+  AtJobOptions,
+  JobData,
+  JobOptions,
+  LeaseJobOptions,
+} from './jobs';
 
 /**
  * Where the scheduler writes its own messages. `console` fits, and so do pino and winston loggers.
@@ -226,7 +231,11 @@ export interface LeaseSchedulerOptions {
  * True when backend type B has no leases (no `runs`): RabbitMQ, NATS, and Redis or Valkey with a
  * strategy other than 'lease'. A backend typed only as `Backend` may have them.
  */
-type HasNoLeases<B> = 'runs' extends keyof B ? (B[keyof B & 'runs'] extends undefined ? true : false) : true;
+type HasNoLeases<B> = 'runs' extends keyof B
+  ? B[keyof B & 'runs'] extends undefined
+    ? true
+    : false
+  : true;
 
 /**
  * Options of `new Scheduler()`. `backend` is required: no store is assumed.
@@ -254,8 +263,9 @@ type HasNoLeases<B> = 'runs' extends keyof B ? (B[keyof B & 'runs'] extends unde
  * new Scheduler({ backend: new SqliteBackend({ database: ':memory:' }), unrefTimers: true });
  * ```
  */
-export type SchedulerOptions<B extends Backend = Backend> = CommonSchedulerOptions<B> &
-  (HasNoLeases<B> extends true ? unknown : LeaseSchedulerOptions);
+export type SchedulerOptions<B extends Backend = Backend> =
+  CommonSchedulerOptions<B> &
+    (HasNoLeases<B> extends true ? unknown : LeaseSchedulerOptions);
 
 /**
  * The options a job takes on a scheduler with backend B: `Options` without {@link LeaseJobOptions}

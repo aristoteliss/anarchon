@@ -4,7 +4,10 @@ import assert from 'node:assert/strict';
 import { afterEach, test, vi } from 'vitest';
 
 const COPIES = Symbol.for('anarchon.copies');
-const globals = globalThis as unknown as Record<symbol, Set<string> | undefined>;
+const globals = globalThis as unknown as Record<
+  symbol,
+  Set<string> | undefined
+>;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -12,7 +15,9 @@ afterEach(() => {
 });
 
 test('a second copy of anarchon in the process is reported: decorators of one are not seen by the other', async () => {
-  globals[COPIES] = new Set(['/app/node_modules/some-lib/node_modules/anarchon/dist/registry.js']);
+  globals[COPIES] = new Set([
+    '/app/node_modules/some-lib/node_modules/anarchon/dist/registry.js',
+  ]);
   const warn = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
   vi.resetModules();
   await import('../../src/registry.js');

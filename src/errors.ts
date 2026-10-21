@@ -47,7 +47,10 @@ export type ErrorCode =
   | 'ANARCHON_INTERNAL';
 
 /** Gives an error its code; returns the same error, to be thrown. */
-export function coded<E extends Error>(error: E, code: ErrorCode): E & { readonly code: ErrorCode } {
+export function coded<E extends Error>(
+  error: E,
+  code: ErrorCode,
+): E & { readonly code: ErrorCode } {
   return Object.assign(error, { code });
 }
 
@@ -63,8 +66,15 @@ export function coded<E extends Error>(error: E, code: ErrorCode): E & { readonl
  * if (isAnarchonError(error)) log.warn(`${error.code}: ${error.message}`);
  * ```
  */
-export function isAnarchonError(error: unknown, code?: ErrorCode): error is Error & { readonly code: ErrorCode } {
+export function isAnarchonError(
+  error: unknown,
+  code?: ErrorCode,
+): error is Error & { readonly code: ErrorCode } {
   if (!(error instanceof Error)) return false;
   const actual = (error as { code?: unknown }).code;
-  return typeof actual === 'string' && actual.startsWith('ANARCHON_') && (code === undefined || actual === code);
+  return (
+    typeof actual === 'string' &&
+    actual.startsWith('ANARCHON_') &&
+    (code === undefined || actual === code)
+  );
 }

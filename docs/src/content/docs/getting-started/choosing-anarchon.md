@@ -77,7 +77,7 @@ Choose a CronJob when the work is a batch program with its own image, resources 
 
 - **Every occurrence must be processed.** anarchon skips slots by design: while the previous run is going, after long downtime, or when an instance is too late. Use a queue, or have each run work on everything outstanding.
 - **Workflows.** It has no dependent jobs, fan-out, priorities or rate limits.
-- **Hard real-time.** A run starts between its slot and `slot + jitterMs`, and a takeover comes about one lease after a crash.
+- **Hard real-time.** A run starts between its slot and `slot + jitterMs` (up to `heartbeatMs` later with `yieldAfterFailure`, when only failing instances are left), and a takeover comes about one lease after a crash.
 - **Exactly-once side effects.** A run whose runner fails is started again from the beginning. No scheduler removes the need for idempotent handlers.
 - **No shared store.** Instances that share nothing can't coordinate through anarchon.
 - **The license doesn't fit.** anarchon is offered under the AGPLv3 or a commercial license; BullMQ and redlock are MIT, node-cron is ISC and Kubernetes is Apache-2.0. See [Licensing](../../reference/licensing/).

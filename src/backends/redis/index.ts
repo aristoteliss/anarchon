@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { coded } from '../../errors';
-import { buildHistory, parseJson, toClaim, toResult } from '../../history';
+import { buildHistory, toClaim } from '../../history';
 import { keysOf, STRATEGY_SETTINGS } from '../../option-keys';
 import { checkStoreFormat, STORE_FORMAT } from '../../store-format';
 import type {
@@ -15,11 +15,27 @@ import type {
   RunStore,
   StoredResult,
 } from '../../types';
-import { intInRange, positiveInt, refuseUnknown, versionAtLeast } from '../../util';
-import { checkConnectionOptions, type KeyValueClient, type KeyValueConnection, resolveRedis } from './client';
+import {
+  intInRange,
+  positiveInt,
+  refuseUnknown,
+  versionAtLeast,
+} from '../../util';
+import {
+  checkConnectionOptions,
+  type KeyValueClient,
+  type KeyValueConnection,
+  resolveRedis,
+} from './client';
 import { LeaseStore } from './lease';
-import { parseEntries, toStr } from './replies';
-import { type ClaimStrategy, claimFields, IdmpStrategy, ScriptStrategy, StreamIdStrategy } from './strategies';
+import { parseEntries, toResults, toStr } from './replies';
+import {
+  type ClaimStrategy,
+  claimFields,
+  IdmpStrategy,
+  ScriptStrategy,
+  StreamIdStrategy,
+} from './strategies';
 
 /**
  * Options of {@link RedisBackend}.
@@ -32,7 +48,9 @@ import { type ClaimStrategy, claimFields, IdmpStrategy, ScriptStrategy, StreamId
  * new RedisBackend({ strategy: { name: 'idmp', durationSec: 600 } }); // Redis 8.6+
  * ```
  */
-export interface RedisBackendOptions<S extends KeyValueStrategyName = KeyValueStrategyName> {
+export interface RedisBackendOptions<
+  S extends KeyValueStrategyName = KeyValueStrategyName,
+> {
   /**
    * Where Redis is: a URL (`redis://`, or `rediss://` for TLS), `{ host, port, ... }`, or a client
    * your app already has (ioredis, iovalkey, node-redis, Valkey GLIDE, or anything with
@@ -74,7 +92,11 @@ export interface RedisBackendOptions<S extends KeyValueStrategyName = KeyValueSt
   prefix?: string;
 }
 
-const REDIS_OPTIONS = keysOf<RedisBackendOptions>({ redis: true, strategy: true, prefix: true });
+const REDIS_OPTIONS = keysOf<RedisBackendOptions>({
+  redis: true,
+  strategy: true,
+  prefix: true,
+});
 /** A strategy's settings given beside it, as older versions took them. */
 const STRATEGY_ALIASES = {
   idmp: 'strategy',
@@ -83,7 +105,8 @@ const STRATEGY_ALIASES = {
   durationSec: 'strategy',
   maxSize: 'strategy',
 };
-const STRATEGY_HINT = ": a strategy's settings go inside it, e.g. strategy: { name: 'script', windowMs: 600000 }";
+const STRATEGY_HINT =
+  ": a strategy's settings go inside it, e.g. strategy: { name: 'script', windowMs: 600000 }";
 
 /**
  * Redis. Valkey works too, but {@link ValkeyBackend} offers only the strategies Valkey supports.
@@ -132,7 +155,9 @@ const STRATEGY_HINT = ": a strategy's settings go inside it, e.g. strategy: { na
  * new Scheduler({ backend: new RedisBackend({ redis }) });
  * ```
  */
-export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName> implements Backend {
+export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
+  implements Backend
+{
   /** 'redis:' and the strategy, e.g. 'redis:lease'. */
   readonly name: string;
   /**
@@ -157,63 +182,79 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
   private readonly input: KeyValueConnection | undefined;
   private readonly idmp: Required<IdmpOptions>;
   private readonly scriptWindowMs: number;
-  private connection: Promise<{ client: KeyValueClient; owned: boolean }> | undefined;
+  private connection:
+    | Promise<{ client: KeyValueClient; owned: boolean }>
+    | undefined;
   private ready: Promise<ClaimStrategy> | undefined;
 
   /** Validates the options. Nothing connects until init(). */
   constructor(options: RedisBackendOptions<S> = {}) {
-    refuseUnknown('RedisBackend', options, REDIS_OPTIONS, STRATEGY_ALIASES, STRATEGY_HINT);
+    refuseUnknown('RedisBackend', options, REDIS_OPTIONS, {
+      aliases: STRATEGY_ALIASES,
+      hint: STRATEGY_HINT,
+    });
     checkConnectionOptions('redis', options.redis);
-    const { name = 'lease', ...settings } = (typeof options.strategy === 'object' ? options.strategy : { name: options.strategy }) as {
-      name?: KeyValueStrategyName;
-    } & IdmpOptions & { windowMs?: number };
-    if (!Object.hasOwn(STRATEGY_SETTINGS, name)) {
-      throw coded(
-        new TypeError(`Unknown strategy "${String(name)}" (use "lease", "stream-id", "idmp" or "script")`),
-        'ANARCHON_INVALID_ARGUMENT',
-      );
-    }
-    for (const key of Object.keys(settings)) {
-      if (!STRATEGY_SETTINGS[name].includes(key))
-        throw coded(new TypeError(`The "${name}" strategy has no setting "${key}"`), 'ANARCHON_UNKNOWN_OPTION');
-    }
+    const { name, settings } = readStrategy(options.strategy);
+    this.idmp = toIdmpOptions(settings);
+    this.scriptWindowMs = positiveInt(
+      'strategy.windowMs',
+      settings.windowMs ?? 300_000,
+    );
+
     this.strategy = name as S;
     this.name = `redis:${this.strategy}`;
     this.prefix = options.prefix ?? 'cron:';
     this.input = options.redis;
-    this.idmp = {
-      durationSec: intInRange('strategy.durationSec', settings.durationSec ?? 300, 1, 86_400),
-      maxSize: intInRange('strategy.maxSize', settings.maxSize ?? 1_000, 1, 10_000),
-    };
-    this.scriptWindowMs = positiveInt('strategy.windowMs', settings.windowMs ?? 300_000);
-    this.dedupeWindowMs = name === 'idmp' ? this.idmp.durationSec * 1_000 : name === 'script' ? this.scriptWindowMs : Infinity;
-    if (name === 'lease') this.lease = new LeaseStore(async () => (await this.getConnection()).client, this.prefix);
+    this.dedupeWindowMs =
+      name === 'idmp'
+        ? this.idmp.durationSec * 1_000
+        : name === 'script'
+          ? this.scriptWindowMs
+          : Infinity;
+
+    if (name === 'lease') {
+      this.lease = new LeaseStore(
+        async () => (await this.getConnection()).client,
+        this.prefix,
+      );
+    }
     this.runs = this.lease as this['runs'];
   }
 
   /** 'idmp' and 'script' remember a limited number of runs: refuses a job whose late claims could outlive that memory. */
   checkJob(job: JobLimits): void {
-    const needed = job.jitterMs + job.maxLateMs;
+    const { name, jitterMs, maxLateMs, minGapMs, historySize, historyTtlMs } =
+      job;
+    const needed = jitterMs + maxLateMs;
+
     // The server must still remember a run while late instances may try to claim it.
-    if (this.strategy === 'idmp' && this.idmp.maxSize * job.minGapMs <= needed) {
+    if (this.strategy === 'idmp' && this.idmp.maxSize * minGapMs <= needed) {
       throw coded(
         new RangeError(
-          `Job "${job.name}": the idmp strategy's maxSize (${this.idmp.maxSize}) runs × ${job.minGapMs} ms between runs must cover jitterMs + maxLateMs (${needed} ms)`,
+          `Job "${name}": the idmp strategy's maxSize (${this.idmp.maxSize}) runs × ${minGapMs} ms between runs must cover jitterMs + maxLateMs (${needed} ms)`,
         ),
         'ANARCHON_UNSAFE_JOB',
       );
     }
-    if (this.strategy === 'script' && job.historyTtlMs !== undefined && job.historyTtlMs <= this.scriptWindowMs) {
+
+    if (
+      this.strategy === 'script' &&
+      historyTtlMs !== undefined &&
+      historyTtlMs <= this.scriptWindowMs
+    ) {
       throw coded(
-        new RangeError(`Job "${job.name}": historyTtlMs must be longer than the script strategy's windowMs (${this.scriptWindowMs} ms)`),
+        new RangeError(
+          `Job "${name}": historyTtlMs must be longer than the script strategy's windowMs (${this.scriptWindowMs} ms)`,
+        ),
         'ANARCHON_UNSAFE_JOB',
       );
     }
+
     // ('lease' needs no such check: it never forgets a run that a late claim could still ask for.)
-    if (this.strategy === 'script' && job.historySize * job.minGapMs <= needed) {
+    if (this.strategy === 'script' && historySize * minGapMs <= needed) {
       throw coded(
         new RangeError(
-          `Job "${job.name}": historySize (${job.historySize}) runs × ${job.minGapMs} ms between runs must cover jitterMs + maxLateMs (${needed} ms) for the "script" strategy`,
+          `Job "${name}": historySize (${historySize}) runs × ${minGapMs} ms between runs must cover jitterMs + maxLateMs (${needed} ms) for the "script" strategy`,
         ),
         'ANARCHON_UNSAFE_JOB',
       );
@@ -225,22 +266,19 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
     const { client } = await this.getConnection();
     const marker = `${this.prefix}format`;
     await client.send('SET', [marker, STORE_FORMAT, 'NX']);
-    checkStoreFormat(toStr(await client.send('GET', [marker])), `The keys under "${this.prefix}"`);
-    if (this.lease) {
-      // Streams (XADD) arrived in Redis 5; Valkey reports redis_version 7.2.4.
-      const info = toStr(await (await this.getConnection()).client.send('INFO', ['server']));
-      const version = /redis_version:([\d.]+)/.exec(info)?.[1] ?? '0';
-      if (!versionAtLeast(version, 5, 0))
-        throw coded(new Error(`The "lease" strategy needs Redis 5 or newer (this server is ${version}).`), 'ANARCHON_SERVER');
-      return;
-    }
+    const format = await client.send('GET', [marker]);
+    const stored = toStr(format);
+    checkStoreFormat(stored, `The keys under "${this.prefix}"`);
+
+    if (this.lease) return refuseOldRedis(client);
     await this.getStrategy();
   }
 
   /** 'idmp' configures the job's stream here; the other strategies need nothing. */
   async prepareJob(job: string): Promise<void> {
     if (this.lease) return;
-    await (await this.getStrategy()).prepareStream(this.streamKey(job));
+    const strategy = await this.getStrategy();
+    await strategy.prepareStream(this.streamKey(job));
   }
 
   /** The plain one-winner claim. (With 'lease' the scheduler claims through `runs` instead.) */
@@ -257,7 +295,9 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
       });
       return outcome.kind === 'won';
     }
-    return (await this.getStrategy()).claim({ ...input, key: this.streamKey(input.job) });
+
+    const strategy = await this.getStrategy();
+    return strategy.claim({ ...input, key: this.streamKey(input.job) });
   }
 
   /**
@@ -266,53 +306,84 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
    */
   async recordManualRun(input: ClaimInput): Promise<number | undefined> {
     // (lease strategy: the scheduler claims manual runs itself, through runs.claim)
-    if (this.lease) {
-      for (let slot = input.slot; slot < input.slot + 10; slot++) {
-        const outcome = await this.lease.claim({
-          ...input,
-          slot,
-          mode: 'new',
-          reason: 'manual',
-          leaseMs: 86_400_000,
-          overlap: 'allow',
-          maxAttempts: 1,
-        });
-        if (outcome.kind === 'won') return slot;
-      }
-      throw coded(new Error(`Could not record a manual run of "${input.job}"`), 'ANARCHON_STORE');
-    }
+    if (this.lease) return claimManualSlot(this.lease, input);
+
     const { client } = await this.getConnection();
     // A server-clock ID in the claim stream would refuse 'stream-id' claims of a run already due.
-    await client.send('XADD', [this.manualKey(input.job), 'MAXLEN', '~', input.historySize, '*', ...claimFields(input, true)]);
+    await client.send('XADD', [
+      this.manualKey(input.job),
+      'MAXLEN',
+      '~',
+      input.historySize,
+      '*',
+      ...claimFields(input, true),
+    ]);
   }
 
   /** Adds the result to the job's sorted set and trims it by count and age. */
-  async saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void> {
-    if (this.lease) return this.lease.saveResult(job, result, historySize, historyTtlMs);
+  async saveResult(
+    job: string,
+    result: StoredResult,
+    historySize: number,
+    historyTtlMs?: number,
+  ): Promise<void> {
+    if (this.lease) {
+      return this.lease.saveResult(job, result, historySize, historyTtlMs);
+    }
+
     const { client } = await this.getConnection();
-    await client.send('ZADD', [this.resultsKey(job), Math.max(result.slot, result.finishedAt), JSON.stringify(result)]);
-    await client.send('ZREMRANGEBYRANK', [this.resultsKey(job), 0, -(historySize + 1)]);
+    await client.send('ZADD', [
+      this.resultsKey(job),
+      Math.max(result.slot, result.finishedAt),
+      JSON.stringify(result),
+    ]);
+    await client.send('ZREMRANGEBYRANK', [
+      this.resultsKey(job),
+      0,
+      -(historySize + 1),
+    ]);
+
     if (historyTtlMs) {
-      await client.send('ZREMRANGEBYSCORE', [this.resultsKey(job), '-inf', `(${result.finishedAt - historyTtlMs}`]);
-      const oldestClaim = Math.min(result.slot, result.startedAt) - historyTtlMs;
+      await client.send('ZREMRANGEBYSCORE', [
+        this.resultsKey(job),
+        '-inf',
+        `(${result.finishedAt - historyTtlMs}`,
+      ]);
+      const oldestClaim =
+        Math.min(result.slot, result.startedAt) - historyTtlMs;
       // XTRIM MINID needs Redis 6.2+; older servers keep the count limit only.
-      for (const key of [this.streamKey(job), this.manualKey(job)]) await client.send('XTRIM', [key, 'MINID', oldestClaim]).catch(() => {});
+      for (const key of [this.streamKey(job), this.manualKey(job)]) {
+        await client.send('XTRIM', [key, 'MINID', oldestClaim]).catch(() => {});
+      }
     }
   }
 
   /** Joins the claims and manual runs in the streams with the results in the sorted set. */
   async history(job: string, limit: number): Promise<RunRecord[]> {
     if (this.lease) return this.lease.history(job, limit);
+
     const { client } = await this.getConnection();
     const streams = await Promise.all(
-      [this.streamKey(job), this.manualKey(job)].map((key) => client.send('XREVRANGE', [key, '+', '-', 'COUNT', limit])),
+      [this.streamKey(job), this.manualKey(job)].map((key) =>
+        client.send('XREVRANGE', [key, '+', '-', 'COUNT', limit]),
+      ),
     );
-    const claims = streams.flatMap((reply) => parseEntries(reply)).flatMap((entry) => toClaim(entry.fields) ?? []);
+    const claims = streams
+      .flatMap((reply) => parseEntries(reply))
+      .flatMap((entry) => toClaim(entry.fields) ?? []);
     if (claims.length === 0) return [];
-    let min = Infinity;
-    for (const { slot } of claims) min = Math.min(min, slot);
-    const members = await client.send('ZRANGEBYSCORE', [this.resultsKey(job), min, '+inf']);
-    const results = (Array.isArray(members) ? members : []).flatMap((m) => toResult(parseJson(toStr(m))) ?? []);
+
+    const oldest = claims.reduce(
+      (min, claim) => Math.min(min, claim.slot),
+      Infinity,
+    );
+    const members = await client.send('ZRANGEBYSCORE', [
+      this.resultsKey(job),
+      oldest,
+      '+inf',
+    ]);
+    const results = toResults(members);
+
     return buildHistory({ job, claims, results, limit });
   }
 
@@ -322,6 +393,7 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
     this.connection = undefined;
     this.ready = undefined;
     if (!connection) return;
+
     try {
       const { client, owned } = await connection;
       if (owned) await client.close?.();
@@ -339,21 +411,25 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
   }
 
   private getStrategy(): Promise<ClaimStrategy> {
-    this.ready ??= (async () => {
-      const { client } = await this.getConnection();
-      const strategy: ClaimStrategy =
-        this.strategy === 'idmp'
-          ? new IdmpStrategy(client, this.idmp)
-          : this.strategy === 'script'
-            ? new ScriptStrategy(client, this.scriptWindowMs)
-            : new StreamIdStrategy(client);
-      await strategy.init();
-      return strategy;
-    })().catch((error: unknown) => {
+    this.ready ??= this.createStrategy().catch((error: unknown) => {
       this.ready = undefined;
       throw error;
     });
     return this.ready;
+  }
+
+  /** Builds the strategy on the connection and checks the server supports it. */
+  private async createStrategy(): Promise<ClaimStrategy> {
+    const { client } = await this.getConnection();
+    const strategy: ClaimStrategy =
+      this.strategy === 'idmp'
+        ? new IdmpStrategy(client, this.idmp)
+        : this.strategy === 'script'
+          ? new ScriptStrategy(client, this.scriptWindowMs)
+          : new StreamIdStrategy(client);
+
+    await strategy.init();
+    return strategy;
   }
 
   private streamKey(job: string): string {
@@ -369,6 +445,93 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
   }
 }
 
+/** A strategy's settings, as given inside `strategy`. */
+type StrategySettings = IdmpOptions & { windowMs?: number };
+
+/** The strategy's name and settings; refuses an unknown name or setting. */
+function readStrategy<S extends KeyValueStrategyName>(
+  strategy: RedisBackendOptions<S>['strategy'],
+): {
+  name: KeyValueStrategyName;
+  settings: StrategySettings;
+} {
+  const given = typeof strategy === 'object' ? strategy : { name: strategy };
+  const { name = 'lease', ...settings } = given as {
+    name?: KeyValueStrategyName;
+  } & StrategySettings;
+
+  if (!Object.hasOwn(STRATEGY_SETTINGS, name)) {
+    throw coded(
+      new TypeError(
+        `Unknown strategy "${String(name)}" (use "lease", "stream-id", "idmp" or "script")`,
+      ),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
+  }
+  for (const key of Object.keys(settings)) {
+    if (!STRATEGY_SETTINGS[name].includes(key)) {
+      throw coded(
+        new TypeError(`The "${name}" strategy has no setting "${key}"`),
+        'ANARCHON_UNKNOWN_OPTION',
+      );
+    }
+  }
+
+  return { name, settings };
+}
+
+/** The 'idmp' settings, each checked against the range the server accepts. */
+function toIdmpOptions(settings: StrategySettings): Required<IdmpOptions> {
+  const durationSec = settings.durationSec ?? 300;
+  const maxSize = settings.maxSize ?? 1_000;
+
+  return {
+    durationSec: intInRange('strategy.durationSec', durationSec, 1, 86_400),
+    maxSize: intInRange('strategy.maxSize', maxSize, 1, 10_000),
+  };
+}
+
+/** Refuses a server older than Redis 5 for the 'lease' strategy. */
+async function refuseOldRedis(client: KeyValueClient): Promise<void> {
+  // Streams (XADD) arrived in Redis 5; Valkey reports redis_version 7.2.4.
+  const reply = await client.send('INFO', ['server']);
+  const info = toStr(reply);
+  const version = /redis_version:([\d.]+)/.exec(info)?.[1] ?? '0';
+
+  if (!versionAtLeast(version, 5, 0)) {
+    throw coded(
+      new Error(
+        `The "lease" strategy needs Redis 5 or newer (this server is ${version}).`,
+      ),
+      'ANARCHON_SERVER',
+    );
+  }
+}
+
+/** Claims a runNow() run at the first free millisecond from its slot, and returns that slot. */
+async function claimManualSlot(
+  lease: LeaseStore,
+  input: ClaimInput,
+): Promise<number> {
+  for (let slot = input.slot; slot < input.slot + 10; slot++) {
+    const outcome = await lease.claim({
+      ...input,
+      slot,
+      mode: 'new',
+      reason: 'manual',
+      leaseMs: 86_400_000,
+      overlap: 'allow',
+      maxAttempts: 1,
+    });
+    if (outcome.kind === 'won') return slot;
+  }
+
+  throw coded(
+    new Error(`Could not record a manual run of "${input.job}"`),
+    'ANARCHON_STORE',
+  );
+}
+
 /**
  * Options of {@link ValkeyBackend}: those of {@link RedisBackendOptions}, with `valkey` in place of
  * `redis`, and a strategy Valkey supports (no 'idmp').
@@ -379,8 +542,9 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
  * new ValkeyBackend({ valkey: new GlideClient(...), strategy: { name: 'script', windowMs: 10 * 60_000 } });
  * ```
  */
-export interface ValkeyBackendOptions<S extends KeyValueStrategyName<'valkey'> = KeyValueStrategyName<'valkey'>>
-  extends Omit<RedisBackendOptions<S>, 'redis'> {
+export interface ValkeyBackendOptions<
+  S extends KeyValueStrategyName<'valkey'> = KeyValueStrategyName<'valkey'>,
+> extends Omit<RedisBackendOptions<S>, 'redis'> {
   /**
    * Where Valkey is: a URL, `{ host, port, ... }`, or your iovalkey, Valkey GLIDE or node-redis
    * client. A client you pass in is never closed by stop(). Default: localhost:6379, opened with
@@ -395,7 +559,11 @@ export interface ValkeyBackendOptions<S extends KeyValueStrategyName<'valkey'> =
   valkey?: KeyValueConnection;
 }
 
-const VALKEY_OPTIONS = keysOf<ValkeyBackendOptions>({ valkey: true, strategy: true, prefix: true });
+const VALKEY_OPTIONS = keysOf<ValkeyBackendOptions>({
+  valkey: true,
+  strategy: true,
+  prefix: true,
+});
 
 /**
  * Valkey: a {@link RedisBackend} whose `strategy` can only be one Valkey supports, so 'idmp' is a
@@ -406,16 +574,22 @@ const VALKEY_OPTIONS = keysOf<ValkeyBackendOptions>({ valkey: true, strategy: tr
  * new Scheduler({ backend: new ValkeyBackend({ valkey: 'redis://localhost:6379' }) });
  * ```
  */
-export class ValkeyBackend<S extends KeyValueStrategyName<'valkey'> = KeyValueStrategyName<'valkey'>> extends RedisBackend<S> {
+export class ValkeyBackend<
+  S extends KeyValueStrategyName<'valkey'> = KeyValueStrategyName<'valkey'>,
+> extends RedisBackend<S> {
   /** 'valkey:' and the strategy, e.g. 'valkey:lease'. */
   override readonly name: string;
 
   /** Validates the options. Nothing connects until init(). */
   constructor(options: ValkeyBackendOptions<S> = {}) {
-    refuseUnknown('ValkeyBackend', options, VALKEY_OPTIONS, { ...STRATEGY_ALIASES, redis: 'valkey' });
+    refuseUnknown('ValkeyBackend', options, VALKEY_OPTIONS, {
+      aliases: { ...STRATEGY_ALIASES, redis: 'valkey' },
+    });
     checkConnectionOptions('valkey', options.valkey);
+
     const { valkey, ...rest } = options;
-    const name = typeof rest.strategy === 'object' ? rest.strategy.name : rest.strategy;
+    const name =
+      typeof rest.strategy === 'object' ? rest.strategy.name : rest.strategy;
     if ((name as string) === 'idmp') {
       throw coded(
         new TypeError(
@@ -424,6 +598,7 @@ export class ValkeyBackend<S extends KeyValueStrategyName<'valkey'> = KeyValueSt
         'ANARCHON_UNSUPPORTED',
       );
     }
+
     super({ ...rest, redis: valkey });
     this.name = `valkey:${this.strategy}`;
   }

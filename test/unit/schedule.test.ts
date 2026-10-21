@@ -3,9 +3,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
 
-import { cronSchedule, everySchedule, formatDuration, parseDuration } from '../../src/schedule';
+import {
+  cronSchedule,
+  everySchedule,
+  formatDuration,
+  parseDuration,
+} from '../../src/schedule';
 
-const at = (h: number, m: number, s = 0, ms = 0) => Date.UTC(2026, 9, 9, h, m, s, ms);
+const at = (h: number, m: number, s = 0, ms = 0) =>
+  Date.UTC(2026, 9, 9, h, m, s, ms);
 
 test('parseDuration accepts ms and duration strings', () => {
   assert.equal(parseDuration(10_000), 10_000);
@@ -19,7 +25,11 @@ test('parseDuration accepts ms and duration strings', () => {
   assert.equal(parseDuration('2d'), 172_800_000);
   assert.equal(parseDuration('500ms'), 500);
   for (const bad of ['', 'abc', '10x', '-5s', '10 s m', 0, -1, 1.5]) {
-    assert.throws(() => parseDuration(bad), RangeError, `should reject ${JSON.stringify(bad)}`);
+    assert.throws(
+      () => parseDuration(bad),
+      RangeError,
+      `should reject ${JSON.stringify(bad)}`,
+    );
   }
 });
 
@@ -54,7 +64,10 @@ test('cron(): next run is strictly after, with seconds and time zones', () => {
 
   // 06:18 in Athens (UTC+3 in October) -> next even hour in Athens is 08:00 = 05:00 UTC
   const twoHoursAthens = cronSchedule('0 */2 * * *', 'Europe/Athens');
-  assert.equal(new Date(twoHoursAthens.next(at(3, 18))!).toISOString(), '2026-10-09T05:00:00.000Z');
+  assert.equal(
+    new Date(twoHoursAthens.next(at(3, 18))!).toISOString(),
+    '2026-10-09T05:00:00.000Z',
+  );
 
   assert.throws(() => cronSchedule('not a cron'));
   assert.throws(() => cronSchedule('0 * * * *', 'Not/AZone'));

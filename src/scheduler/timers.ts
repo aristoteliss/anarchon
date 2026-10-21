@@ -29,13 +29,16 @@ export class JobTimers {
   }
 
   private sleepUntil(job: Job, at: number, then: () => void): void {
-    const wait = Math.max(0, Math.min(at - Date.now(), MAX_TIMER_MS));
+    const remaining = at - Date.now();
+    const wait = Math.max(0, Math.min(remaining, MAX_TIMER_MS));
+
     job.timer = setTimeout(() => {
       job.timer = undefined;
       if (!this.core.isRunning() || job.removed) return;
       if (Date.now() < at) this.sleepUntil(job, at, then);
       else then();
     }, wait);
+
     if (this.core.unrefTimers) job.timer.unref();
   }
 }

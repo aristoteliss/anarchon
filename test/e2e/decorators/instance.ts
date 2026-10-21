@@ -3,7 +3,15 @@
 // Declares jobs with decorator syntax and no register(), runs one, and prints what happened as one
 // line of JSON. Started by syntax.test.ts once per decorator style; the tsconfig given to tsx
 // selects the style.
-import { At, type Backend, Cron, Every, type JobContext, Scheduled, Scheduler } from '../../../src';
+import {
+  At,
+  type Backend,
+  Cron,
+  Every,
+  type JobContext,
+  Scheduled,
+  Scheduler,
+} from '../../../src';
 
 const backend: Backend = {
   name: 'memory',
@@ -88,7 +96,10 @@ async function main(): Promise<void> {
   scheduler.register(b, { prefix: 'b-', defaults: { timeoutMs: 5_000 } });
   await scheduler.runNow('b-tenant-sync');
 
-  Scheduler.configure('extra', { backend: { ...backend, name: 'extra-memory' }, autoStart: true });
+  Scheduler.configure('extra', {
+    backend: { ...backend, name: 'extra-memory' },
+    autoStart: true,
+  });
   const elsewhere = new Elsewhere();
   const extra = Scheduler.get('extra');
   await new Promise((resolve) => setTimeout(resolve, 20));

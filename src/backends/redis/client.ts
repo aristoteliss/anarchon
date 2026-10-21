@@ -119,32 +119,71 @@ export interface ValkeyGlideLike {
  * new RedisBackend({ redis: existingIoredis });                             // shared with the app
  * ```
  */
-export type KeyValueConnection = KeyValueClient | IORedisLike | NodeRedisLike | ValkeyGlideLike | KeyValueConnectionOptions | string;
+export type KeyValueConnection =
+  | KeyValueClient
+  | IORedisLike
+  | NodeRedisLike
+  | ValkeyGlideLike
+  | KeyValueConnectionOptions
+  | string;
 
-const CONNECTION_OPTIONS = keysOf<KeyValueConnectionOptions>({ host: true, port: true, username: true, password: true, db: true });
+const CONNECTION_OPTIONS = keysOf<KeyValueConnectionOptions>({
+  host: true,
+  port: true,
+  username: true,
+  password: true,
+  db: true,
+});
 
 /**
  * Refuses a key that connection options don't have (a client passes through). Settings beyond
  * these, such as TLS, go in a URL or in a client you create yourself.
  */
-export function checkConnectionOptions(label: string, input: KeyValueConnection | undefined): void {
-  if (input === undefined || typeof input !== 'object' || !isPlainObject(input) || isClient(input)) return;
-  refuseUnknown(label, input, CONNECTION_OPTIONS, {}, ' (for TLS and other client settings, pass a rediss:// URL or your own client)');
+export function checkConnectionOptions(
+  label: string,
+  input: KeyValueConnection | undefined,
+): void {
+  if (
+    input === undefined ||
+    typeof input !== 'object' ||
+    !isPlainObject(input) ||
+    isClient(input)
+  ) {
+    return;
+  }
+
+  refuseUnknown(label, input, CONNECTION_OPTIONS, {
+    hint: ' (for TLS and other client settings, pass a rediss:// URL or your own client)',
+  });
 }
 
 function isClient(value: object): boolean {
-  return isCommandClient(value) || isGlide(value) || isNodeRedis(value) || isIORedis(value);
+  return (
+    isCommandClient(value) ||
+    isGlide(value) ||
+    isNodeRedis(value) ||
+    isIORedis(value)
+  );
 }
 
-export async function resolveRedis(input: KeyValueConnection | undefined): Promise<{ client: KeyValueClient; owned: boolean }> {
+export async function resolveRedis(
+  input: KeyValueConnection | undefined,
+): Promise<{ client: KeyValueClient; owned: boolean }> {
   if (input === undefined || typeof input === 'string') {
     return { client: await createNodeRedis(input), owned: true };
   }
+
   if (isCommandClient(input)) return { client: input, owned: false };
   if (isGlide(input)) return { client: fromValkeyGlide(input), owned: false };
   if (isNodeRedis(input)) return { client: fromNodeRedis(input), owned: false };
-  if (isIORedis(input)) return { client: fromIORedis(input, false), owned: false };
-  if (isPlainObject(input)) return { client: await createNodeRedis(input), owned: true };
+  if (isIORedis(input)) {
+    return { client: fromIORedis(input, false), owned: false };
+  }
+
+  if (isPlainObject(input)) {
+    return { client: await createNodeRedis(input), owned: true };
+  }
+
   throw coded(
     new TypeError(
       'redis must be connection options, a URL, an ioredis/iovalkey, node-redis or Valkey GLIDE client, or an object with send(command, args).',
@@ -165,15 +204,18 @@ export async function resolveRedis(input: KeyValueConnection | undefined): Promi
  * new RedisBackend({ redis: traced });
  * ```
  */
-export function fromIORedis(client: IORedisLike, owned = false): KeyValueClient {
+export function fromIORedis(
+  client: IORedisLike,
+  owned = false,
+): KeyValueClient {
+  const close = async () => {
+    await client.quit();
+  };
+
   return {
     // ioredis flattens array arguments, so this works on v5, v6 and iovalkey.
     send: (command, args) => client.call(command, [...args]),
-    close: owned
-      ? async () => {
-          await client.quit();
-        }
-      : undefined,
+    close: owned ? close : undefined,
   };
 }
 
@@ -188,7 +230,9 @@ export function fromIORedis(client: IORedisLike, owned = false): KeyValueClient 
  * ```
  */
 export function fromNodeRedis(client: NodeRedisLike): KeyValueClient {
-  return { send: (command, args) => client.sendCommand([command, ...args.map(String)]) };
+  return {
+    send: (command, args) => client.sendCommand([command, ...args.map(String)]),
+  };
 }
 
 /**
@@ -201,7 +245,10 @@ export function fromNodeRedis(client: NodeRedisLike): KeyValueClient {
  * ```
  */
 export function fromValkeyGlide(client: ValkeyGlideLike): KeyValueClient {
-  return { send: (command, args) => client.customCommand([command, ...args.map(String)]) };
+  return {
+    send: (command, args) =>
+      client.customCommand([command, ...args.map(String)]),
+  };
 }
 
 /** The parts of a node-redis client that anarchon opens and closes itself. */
@@ -211,31 +258,48 @@ interface NodeRedisClientLike extends NodeRedisLike {
   on(event: 'error', listener: () => void): unknown;
 }
 
-async function createNodeRedis(input: string | KeyValueConnectionOptions | undefined): Promise<KeyValueClient> {
+async function createNodeRedis(
+  input: string | KeyValueConnectionOptions | undefined,
+): Promise<KeyValueClient> {
   let mod: { createClient(options: object): NodeRedisClientLike };
   try {
     // node-redis's typings are generic over its modules; only createClient is used here.
     mod = (await import('redis')) as unknown as typeof mod;
   } catch {
     throw coded(
-      new Error('No Redis client was given and "redis" is not installed. Run `npm install redis`, or pass your own client as redis.'),
+      new Error(
+        'No Redis client was given and "redis" is not installed. Run `npm install redis`, or pass your own client as redis.',
+      ),
       'ANARCHON_MISSING_DRIVER',
     );
   }
-  const options =
-    typeof input === 'string'
-      ? { url: input }
-      : {
-          socket: { host: input?.host ?? 'localhost', port: input?.port ?? 6379 },
-          username: input?.username,
-          password: input?.password,
-          database: input?.db ?? 0,
-        };
-  const client = mod.createClient(options);
+
+  const client = mod.createClient(toNodeRedisOptions(input));
   // node-redis reconnects on its own; without a listener Node would throw on 'error'. Failed commands still reject.
   client.on('error', () => {});
   await client.connect();
-  return { ...fromNodeRedis(client), close: async () => void (await client.quit()) };
+
+  return {
+    ...fromNodeRedis(client),
+    close: async () => void (await client.quit()),
+  };
+}
+
+/** node-redis's createClient options for a URL or for connection options. */
+function toNodeRedisOptions(
+  input: string | KeyValueConnectionOptions | undefined,
+): object {
+  if (typeof input === 'string') return { url: input };
+
+  return {
+    socket: {
+      host: input?.host ?? 'localhost',
+      port: input?.port ?? 6379,
+    },
+    username: input?.username,
+    password: input?.password,
+    database: input?.db ?? 0,
+  };
 }
 
 function isCommandClient(value: object): value is KeyValueClient {
@@ -243,7 +307,9 @@ function isCommandClient(value: object): value is KeyValueClient {
 }
 
 function isGlide(value: object): value is ValkeyGlideLike {
-  return typeof (value as Partial<ValkeyGlideLike>).customCommand === 'function';
+  return (
+    typeof (value as Partial<ValkeyGlideLike>).customCommand === 'function'
+  );
 }
 
 function isNodeRedis(value: object): value is NodeRedisLike {

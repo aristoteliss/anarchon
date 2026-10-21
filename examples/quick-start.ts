@@ -34,12 +34,20 @@ type Report =
   | { type: 'success'; durationMs: number }
   | { type: 'error'; message: string };
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** One instance of the service: a scheduler with the job, reporting its events to the demo. */
-async function instance(id: string, database: string, offsetMs: number): Promise<void> {
-  const report = (message: Report) => process.send?.(message);
-  const scheduler = new Scheduler({ backend: new SqliteBackend({ database }), instanceId: id, ...LEASE });
+async function instance(
+  id: string,
+  database: string,
+  offsetMs: number,
+): Promise<void> {
+  const scheduler = new Scheduler({
+    backend: new SqliteBackend({ database }),
+    instanceId: id,
+    ...LEASE,
+  });
 
   scheduler.every(
     'report',
@@ -53,11 +61,7 @@ async function instance(id: string, database: string, offsetMs: number): Promise
     // No catch-up of the run before start: the demo begins with the next scheduled run.
     { offsetMs, jitterMs: 300, catchUpMs: 0 },
   );
-  scheduler.on('start', (e) => report({ type: 'start', slot: e.slot, attempt: e.attempt, reason: e.reason }));
-  scheduler.on('skip', (e) => report({ type: 'skip', reason: e.reason }));
-  scheduler.on('interrupted', (r) => report({ type: 'interrupted', handedOver: r.handedOver }));
-  scheduler.on('success', (r) => report({ type: 'success', durationMs: r.durationMs ?? 0 }));
-  scheduler.on('error', (e) => report({ type: 'error', message: String(e.error) }));
+  forwardEvents(scheduler);
 
   process.on('SIGINT', async () => {
     await scheduler.stop();
@@ -66,12 +70,96 @@ async function instance(id: string, database: string, offsetMs: number): Promise
   await scheduler.start();
 }
 
+/** Sends each event of an instance's scheduler to the demo process, which narrates it. */
+function forwardEvents(scheduler: Scheduler): void {
+  const report = (message: Report) => process.send?.(message);
+
+  scheduler.on('start', (e) =>
+    report({
+      type: 'start',
+      slot: e.slot,
+      attempt: e.attempt,
+      reason: e.reason,
+    }),
+  );
+  scheduler.on('skip', (e) => report({ type: 'skip', reason: e.reason }));
+  scheduler.on('interrupted', (r) =>
+    report({ type: 'interrupted', handedOver: r.handedOver }),
+  );
+  scheduler.on('success', (r) =>
+    report({ type: 'success', durationMs: r.durationMs ?? 0 }),
+  );
+  scheduler.on('error', (e) =>
+    report({ type: 'error', message: String(e.error) }),
+  );
+}
+
+const seconds = (ms: number) => `${ms / 1000}s`;
+const at = (slot: number) =>
+  `\x1b[33m${new Date(slot).toISOString().slice(11, 19)}\x1b[0m`;
+const name = (id: string) => `\x1b[1m${id}\x1b[0m`;
+
+/** The two faults the demo injects: a graceful stop of the first run, then a crash of the next one. */
+interface Faults {
+  graceful?: { slot: number };
+  crash?: { slot: number; killedAt: number; takenOverBy?: string };
+}
+
+/** Stops the first runner gracefully mid-run, and kills the runner of the next new run. */
+function injectFault(
+  faults: Faults,
+  children: Map<string, ChildProcess>,
+  id: string,
+  slot: number,
+): void {
+  if (!faults.graceful) {
+    faults.graceful = { slot };
+    setTimeout(() => {
+      console.log(
+        `\n\x1b[35m⚡ Graceful stop: Ctrl+C (SIGINT) on ${id}...\x1b[0m`,
+      );
+      children.get(id)?.kill('SIGINT');
+    }, MID_RUN_MS);
+    return;
+  }
+
+  if (faults.crash || slot === faults.graceful.slot) return;
+  const crash = { slot, killedAt: 0 };
+  faults.crash = crash;
+  setTimeout(() => {
+    console.log(
+      `\n\x1b[35m⚡ Crash: kill -9 (SIGKILL) on ${id}, waiting for the ${seconds(LEASE.leaseMs)} lease...\x1b[0m`,
+    );
+    crash.killedAt = Date.now();
+    children.get(id)?.kill('SIGKILL');
+  }, MID_RUN_MS);
+}
+
+/** Says which instance won a run, and how long after the kill a takeover came; injects the faults. */
+function narrateStart(
+  id: string,
+  message: Extract<Report, { type: 'start' }>,
+  faults: Faults,
+  children: Map<string, ChildProcess>,
+): void {
+  const { crash } = faults;
+  const takeover =
+    crash?.slot === message.slot && message.attempt > 1 && crash.killedAt;
+  const after = takeover
+    ? ` \x1b[35m${((Date.now() - takeover) / 1000).toFixed(1)}s after the kill\x1b[0m`
+    : '';
+
+  if (message.attempt === 1) console.log('');
+  console.log(
+    `  \x1b[32m✔\x1b[0m ${name(id)} won lease (slot ${at(message.slot)}, attempt ${message.attempt}, ${message.reason})${after}`,
+  );
+
+  if (takeover && crash) crash.takenOverBy = id;
+  if (message.attempt === 1) injectFault(faults, children, id, message.slot);
+}
+
 /** Starts the three instances, stops one runner gracefully and kills the next, and narrates what they report. */
 async function demo(): Promise<void> {
-  const at = (slot: number) => `\x1b[33m${new Date(slot).toISOString().slice(11, 19)}\x1b[0m`;
-  const name = (id: string) => `\x1b[1m${id}\x1b[0m`;
-  const seconds = (ms: number) => `${ms / 1000}s`;
-
   const database = join(tmpdir(), `anarchon-quick-start-${process.pid}.db`);
   // Every process computes the same grid; this shift puts the first run 2.5 s from now.
   const offsetMs = (Date.now() + 2_500) % INTERVAL_MS;
@@ -81,75 +169,78 @@ async function demo(): Promise<void> {
   );
 
   const children = new Map<string, ChildProcess>();
-  let graceful: { slot: number } | undefined;
-  let crash: { slot: number; killedAt?: number; takenOverBy?: string } | undefined;
+  const faults: Faults = {};
 
   const finish = async () => {
-    for (const child of children.values()) child.kill('SIGINT');
+    for (const child of children.values()) {
+      child.kill('SIGINT');
+    }
     await sleep(1_000);
-    for (const suffix of ['', '-wal', '-shm']) rmSync(database + suffix, { force: true });
+    for (const suffix of ['', '-wal', '-shm']) {
+      rmSync(database + suffix, { force: true });
+    }
     process.exit(0);
   };
 
   const onReport = (id: string, message: Report) => {
     switch (message.type) {
-      case 'start': {
-        const takeover = crash?.slot === message.slot && message.attempt > 1 && crash.killedAt;
-        const after = takeover ? ` \x1b[35m${((Date.now() - takeover) / 1000).toFixed(1)}s after the kill\x1b[0m` : '';
-        if (message.attempt === 1) console.log('');
-        console.log(
-          `  \x1b[32m✔\x1b[0m ${name(id)} won lease (slot ${at(message.slot)}, attempt ${message.attempt}, ${message.reason})${after}`,
-        );
-        if (takeover && crash) crash.takenOverBy = id;
-        if (message.attempt !== 1) return;
-        if (!graceful) {
-          graceful = { slot: message.slot };
-          setTimeout(() => {
-            console.log(`\n\x1b[35m⚡ Graceful stop: Ctrl+C (SIGINT) on ${id}...\x1b[0m`);
-            children.get(id)?.kill('SIGINT');
-          }, MID_RUN_MS);
-        } else if (!crash && message.slot !== graceful.slot) {
-          const killed = { slot: message.slot, killedAt: 0 };
-          crash = killed;
-          setTimeout(() => {
-            console.log(`\n\x1b[35m⚡ Crash: kill -9 (SIGKILL) on ${id}, waiting for the ${seconds(LEASE.leaseMs)} lease...\x1b[0m`);
-            killed.killedAt = Date.now();
-            children.get(id)?.kill('SIGKILL');
-          }, MID_RUN_MS);
-        }
-        return;
+      case 'start':
+        return narrateStart(id, message, faults, children);
+
+      case 'skip': {
+        const run =
+          message.reason === 'taken'
+            ? 'taken by another instance'
+            : message.reason;
+        return console.log(`  \x1b[90m- ${id} skipped (run ${run})\x1b[0m`);
       }
-      case 'skip':
+
+      case 'interrupted': {
+        const note = message.handedOver ? ' \x1b[33m(handed over)\x1b[0m' : '';
         return console.log(
-          `  \x1b[90m- ${id} skipped (run ${message.reason === 'taken' ? 'taken by another instance' : message.reason})\x1b[0m`,
+          `  \x1b[31m✖\x1b[0m ${name(id)} interrupted mid-run${note}`,
         );
-      case 'interrupted':
-        return console.log(
-          `  \x1b[31m✖\x1b[0m ${name(id)} interrupted mid-run${message.handedOver ? ' \x1b[33m(handed over)\x1b[0m' : ''}`,
-        );
+      }
+
       case 'success':
-        console.log(`  \x1b[32m✔\x1b[0m ${name(id)} finished successfully in ${message.durationMs}ms`);
-        if (crash?.takenOverBy === id) void finish();
+        console.log(
+          `  \x1b[32m✔\x1b[0m ${name(id)} finished successfully in ${message.durationMs}ms`,
+        );
+        if (faults.crash?.takenOverBy === id) void finish();
         return;
+
       case 'error':
-        return console.log(`  \x1b[31merror on ${id}: ${message.message}\x1b[0m`);
+        return console.log(
+          `  \x1b[31merror on ${id}: ${message.message}\x1b[0m`,
+        );
     }
   };
 
   for (const id of ['node-1', 'node-2', 'node-3']) {
-    const child = fork(__filename, ['instance', id, database, String(offsetMs)], {
-      // The built-in SQLite prints an ExperimentalWarning in every process.
-      execArgv: [...process.execArgv, '--disable-warning=ExperimentalWarning'],
-    });
+    const child = fork(
+      __filename,
+      ['instance', id, database, String(offsetMs)],
+      {
+        // The built-in SQLite prints an ExperimentalWarning in every process.
+        execArgv: [
+          ...process.execArgv,
+          '--disable-warning=ExperimentalWarning',
+        ],
+      },
+    );
     child.on('message', (message) => onReport(id, message as Report));
     child.on('exit', () => children.delete(id));
     children.set(id, child);
   }
+
   process.on('SIGINT', () => void finish());
 }
 
 const [role, id, database, offsetMs] = process.argv.slice(2);
-const main = role === 'instance' && id && database ? instance(id, database, Number(offsetMs)) : demo();
+const main =
+  role === 'instance' && id && database
+    ? instance(id, database, Number(offsetMs))
+    : demo();
 main.catch((error: unknown) => {
   console.error(error);
   process.exit(1);

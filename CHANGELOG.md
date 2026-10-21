@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`yieldAfterFailure` job option** (lease backends, default `false`). An instance whose last run
+  of the job failed waits until `slot + jitterMs + heartbeatMs` (at most `maxLateMs`) before
+  claiming the next scheduled run, so a healthy instance claims it first; with no healthy
+  instance, it still runs the job. A run that waited starts up to `heartbeatMs` later than
+  `slot + jitterMs`.
+
 ## 0.4.1
 
 Fixes found by a review of 0.4.0: recovery after a broken RabbitMQ channel, listeners and
