@@ -51,31 +51,55 @@ export interface Spec {
 export function makeBackend(spec: Spec): Backend {
   switch (spec.kind ?? 'redis') {
     case 'redis':
-      return new RedisBackend({ redis: spec.url, strategy: spec.strategy, prefix: `test:${spec.id}:` });
+      return new RedisBackend({
+        redis: spec.url,
+        strategy: spec.strategy,
+        prefix: `test:${spec.id}:`,
+      });
     case 'valkey':
-      return new ValkeyBackend({ valkey: spec.url, strategy: spec.strategy as KeyValueStrategyName<'valkey'>, prefix: `test:${spec.id}:` });
+      return new ValkeyBackend({
+        valkey: spec.url,
+        strategy: spec.strategy as KeyValueStrategyName<'valkey'>,
+        prefix: `test:${spec.id}:`,
+      });
     case 'postgres':
-      return new PostgresBackend({ connection: spec.url, table: `t_${spec.id}` });
+      return new PostgresBackend({
+        connection: spec.url,
+        table: `t_${spec.id}`,
+      });
     case 'sqlite': {
       const table = `t_${spec.id}`;
-      if (spec.driver === 'libsql-server') return new SqliteBackend({ database: libsqlServer(spec.url), table });
+      if (spec.driver === 'libsql-server')
+        return new SqliteBackend({ database: libsqlServer(spec.url), table });
       const file = join(spec.url, `anarchon-${spec.id}.db`);
       if (spec.driver === 'better-sqlite3') {
         const db = new BetterSqlite3(file);
         db.pragma('journal_mode = WAL');
         return new SqliteBackend({ database: db, table });
       }
-      if (spec.driver === 'libsql') return new SqliteBackend({ database: createLibsqlClient({ url: `file:${file}` }), table });
+      if (spec.driver === 'libsql')
+        return new SqliteBackend({
+          database: createLibsqlClient({ url: `file:${file}` }),
+          table,
+        });
       return new SqliteBackend({ database: file, table });
     }
     case 'rabbitmq':
       return new RabbitMQBackend({ url: spec.url, prefix: `${spec.id}.` });
     case 'nats':
-      return new NatsBackend({ servers: spec.url, prefix: `${spec.id}.`, stream: spec.id.toUpperCase() });
+      return new NatsBackend({
+        servers: spec.url,
+        prefix: `${spec.id}.`,
+        stream: spec.id.toUpperCase(),
+      });
   }
 }
 
-export type SpecEntry = { label: string; spec: Omit<Spec, 'id'>; skip?: string };
+export type SpecEntry = {
+  label: string;
+  spec: Omit<Spec, 'id'>;
+  skip?: string;
+};
 
 /** Every Redis / Valkey server × strategy to test, with the server version, or a reason to skip. */
 export async function redisSpecs(): Promise<SpecEntry[]> {
@@ -95,7 +119,12 @@ export async function redisSpecs(): Promise<SpecEntry[]> {
   for (const { url, fallback, kind, server } of servers) {
     for (const strategy of ['lease', 'stream-id', 'idmp', 'script'] as const) {
       const label = `${server ? `${server.product} ${server.version}` : fallback} · ${strategy}`;
-      if (!server) specs.push({ label, spec: { kind, url, strategy }, skip: `nothing at ${url}` });
+      if (!server)
+        specs.push({
+          label,
+          spec: { kind, url, strategy },
+          skip: `nothing at ${url}`,
+        });
       else if (strategy === 'idmp' && !supportsIdmp(server))
         continue; // covered by the "refuses" test
       else specs.push({ label, spec: { kind, url, strategy } });
@@ -106,7 +135,11 @@ export async function redisSpecs(): Promise<SpecEntry[]> {
 
 /** Postgres, SQLite (every driver) and a libSQL server: the other backends with leases. */
 export async function sqlSpecs(): Promise<SpecEntry[]> {
-  const [postgres, sqlite, libsql] = await Promise.all([probePostgres(POSTGRES_URL), probeSqlite(), probeLibsql(LIBSQL_URL)]);
+  const [postgres, sqlite, libsql] = await Promise.all([
+    probePostgres(POSTGRES_URL),
+    probeSqlite(),
+    probeLibsql(LIBSQL_URL),
+  ]);
   const specs: SpecEntry[] = [
     {
       label: `PostgreSQL ${postgres ?? ''}`.trim(),
@@ -118,7 +151,9 @@ export async function sqlSpecs(): Promise<SpecEntry[]> {
     specs.push({
       label: `SQLite ${sqlite ?? ''} (${driver})`.replace('  ', ' '),
       spec: { kind: 'sqlite', url: SQLITE_DIR, driver },
-      ...(driver === 'node:sqlite' && !sqlite ? { skip: 'this Node has no node:sqlite' } : {}),
+      ...(driver === 'node:sqlite' && !sqlite
+        ? { skip: 'this Node has no node:sqlite' }
+        : {}),
     });
   }
   specs.push({
@@ -131,23 +166,37 @@ export async function sqlSpecs(): Promise<SpecEntry[]> {
 
 /** RabbitMQ and NATS: simple claim only. */
 export async function queueSpecs(): Promise<SpecEntry[]> {
-  const [rabbit, nats] = await Promise.all([probeRabbit(RABBITMQ_URL), probeNats(NATS_URL)]);
+  const [rabbit, nats] = await Promise.all([
+    probeRabbit(RABBITMQ_URL),
+    probeNats(NATS_URL),
+  ]);
   return [
     {
       label: `RabbitMQ ${rabbit ?? ''}`.trim(),
       spec: { kind: 'rabbitmq', url: RABBITMQ_URL },
       ...(rabbit ? {} : { skip: `nothing at ${RABBITMQ_URL}` }),
     },
-    { label: `NATS ${nats ?? ''}`.trim(), spec: { kind: 'nats', url: NATS_URL }, ...(nats ? {} : { skip: `nothing at ${NATS_URL}` }) },
+    {
+      label: `NATS ${nats ?? ''}`.trim(),
+      spec: { kind: 'nats', url: NATS_URL },
+      ...(nats ? {} : { skip: `nothing at ${NATS_URL}` }),
+    },
   ];
 }
 
 /** Every backend to test. */
 export async function availableSpecs(): Promise<SpecEntry[]> {
-  return [...(await redisSpecs()), ...(await sqlSpecs()), ...(await queueSpecs())];
+  return [
+    ...(await redisSpecs()),
+    ...(await sqlSpecs()),
+    ...(await queueSpecs()),
+  ];
 }
 
 /** The backends with leases: Redis 'lease' on each server, Postgres and SQLite. */
 export async function leaseSpecs(): Promise<SpecEntry[]> {
-  return [...(await redisSpecs()).filter((s) => s.spec.strategy === 'lease'), ...(await sqlSpecs())];
+  return [
+    ...(await redisSpecs()).filter((s) => s.spec.strategy === 'lease'),
+    ...(await sqlSpecs()),
+  ];
 }

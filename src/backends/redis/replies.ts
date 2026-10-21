@@ -1,5 +1,8 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
+import { parseJson, toResult } from '../../history';
+import type { StoredResult } from '../../types';
+
 /**
  * Reads Redis/Valkey replies the same way whatever the client or protocol:
  * RESP2 flat arrays, RESP3 objects/Maps, or Valkey GLIDE's `{ key, value }` records.
@@ -19,43 +22,88 @@ export function toStr(value: unknown): string {
 }
 
 function isKeyValue(value: unknown): value is { key: unknown; value: unknown } {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) && 'key' in value && 'value' in value;
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    'key' in value &&
+    'value' in value
+  );
 }
 
 /** Turns `[k1, v1, k2, v2]`, `[[k, v], ...]`, `[{ key, value }, ...]`, a Map or an object into an object. */
 export function toRecord(reply: unknown): Record<string, unknown> {
+  if (Array.isArray(reply)) return fromPairs(toPairs(reply));
+  if (reply instanceof Map) return fromPairs(reply);
+  if (reply !== null && typeof reply === 'object') {
+    return reply as Record<string, unknown>;
+  }
+  return {};
+}
+
+/** The key-value pairs of an array reply, in any of the three layouts clients return. */
+function toPairs(reply: unknown[]): Iterable<[unknown, unknown]> {
+  const isPairList =
+    reply.length > 0 &&
+    reply.every((item) => Array.isArray(item) && item.length === 2);
+  if (isPairList) return reply as Array<[unknown, unknown]>;
+
+  if (reply.length > 0 && reply.every(isKeyValue)) {
+    return reply.map(({ key, value }) => [key, value] as [unknown, unknown]);
+  }
+
+  const pairs: Array<[unknown, unknown]> = [];
+  for (let i = 0; i + 1 < reply.length; i += 2) {
+    const key = reply[i];
+    const value = reply[i + 1];
+    pairs.push([key, value]);
+  }
+  return pairs;
+}
+
+/** An object of the pairs, each key read as a string. */
+function fromPairs(
+  pairs: Iterable<[unknown, unknown]>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (Array.isArray(reply)) {
-    if (reply.length > 0 && reply.every((item) => Array.isArray(item) && item.length === 2)) {
-      for (const [k, v] of reply as Array<[unknown, unknown]>) out[toStr(k)] = v;
-    } else if (reply.length > 0 && reply.every(isKeyValue)) {
-      for (const { key, value } of reply as Array<{ key: unknown; value: unknown }>) out[toStr(key)] = value;
-    } else {
-      for (let i = 0; i + 1 < reply.length; i += 2) out[toStr(reply[i])] = reply[i + 1];
-    }
-    return out;
+  for (const [key, value] of pairs) {
+    out[toStr(key)] = value;
   }
-  if (reply instanceof Map) {
-    for (const [k, v] of reply) out[toStr(k)] = v;
-    return out;
-  }
-  if (reply !== null && typeof reply === 'object') return reply as Record<string, unknown>;
   return out;
 }
 
 /** Parses an XRANGE / XREVRANGE reply. */
 export function parseEntries(reply: unknown): StreamEntry[] {
   if (!Array.isArray(reply)) return [];
-  const entries: StreamEntry[] = [];
-  for (const item of reply) {
-    let id: unknown;
-    let rawFields: unknown;
-    if (Array.isArray(item) && item.length >= 2) [id, rawFields] = item;
-    else if (isKeyValue(item)) [id, rawFields] = [item.key, item.value];
-    else continue;
-    const fields: Record<string, string> = {};
-    for (const [k, v] of Object.entries(toRecord(rawFields))) fields[k] = toStr(v);
-    entries.push({ id: toStr(id), fields });
+  return reply.flatMap((item) => toEntry(item) ?? []);
+}
+
+/** One entry, as `[id, fields]` or `{ key, value }`; undefined for any other shape. */
+function toEntry(item: unknown): StreamEntry | undefined {
+  if (Array.isArray(item) && item.length >= 2) {
+    const [id, fields] = item;
+    return { id: toStr(id), fields: toFields(fields) };
   }
-  return entries;
+  if (isKeyValue(item)) {
+    return { id: toStr(item.key), fields: toFields(item.value) };
+  }
+  return undefined;
+}
+
+/** An entry's field-value pairs, each value read as a string. */
+function toFields(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(toRecord(raw))) {
+    out[name] = toStr(value);
+  }
+  return out;
+}
+
+/** The results in a ZRANGEBYSCORE reply; members that don't parse are left out. */
+export function toResults(members: unknown): StoredResult[] {
+  if (!Array.isArray(members)) return [];
+  return members.flatMap((member) => {
+    const raw = parseJson(toStr(member));
+    return toResult(raw) ?? [];
+  });
 }

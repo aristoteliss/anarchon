@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node check.mjs --run",
     "start:nest11": "node check.mjs --run --nest 11",
-    "test": "node check.mjs && node check.mjs --nest 11"
+    "test": "node check.mjs && node check.mjs --nest 11",
+    "locks:stores": "node locks-stores.cjs",
+    "locks:compare": "pnpm --dir ../.. build && tsc -p locks-comparison && node dist/locks-comparison/compare.js"
   },
   "dependencies": {
     "@nestjs/common": "^12.1.3",
@@ -17,7 +19,10 @@
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
+    "@nestjs/locks": "0.0.4",
+    "@nestjs/schedule": "12.0.2",
     "@types/node": "^26.6.5",
+    "ioredis": "^6.0.0",
     "typescript": "^7.0.2"
   }
 }

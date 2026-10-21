@@ -20,7 +20,13 @@ export interface Schedule {
   prev(atOrBefore: number): number | null;
 }
 
-const UNIT_MS: Record<string, number> = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+const UNIT_MS: Record<string, number> = {
+  ms: 1,
+  s: 1_000,
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+};
 
 /**
  * Accepts milliseconds (`10000`) or a duration string: `'10s'`, `'10m'`, `'35m'`, `'1h30m'`, `'2d'`, `'500ms'`.
@@ -36,27 +42,60 @@ const UNIT_MS: Record<string, number> = { ms: 1, s: 1_000, m: 60_000, h: 3_600_0
  */
 export function parseDuration(value: number | string): number {
   if (typeof value === 'number') {
-    if (!Number.isInteger(value) || value <= 0)
-      throw coded(new RangeError(`Invalid duration: ${value} (use a positive whole number of ms)`), 'ANARCHON_INVALID_ARGUMENT');
+    if (!Number.isInteger(value) || value <= 0) {
+      throw coded(
+        new RangeError(
+          `Invalid duration: ${value} (use a positive whole number of ms)`,
+        ),
+        'ANARCHON_INVALID_ARGUMENT',
+      );
+    }
     return value;
   }
+
   const text = value.trim().toLowerCase();
   if (/^\d+$/.test(text)) return parseDuration(Number(text));
+
   const tokens = text.split(/(ms|s|m|h|d)/);
-  if (tokens.length < 3 || tokens.length % 2 === 0 || tokens[tokens.length - 1] !== '') {
-    throw coded(new RangeError(`Invalid duration: "${value}" (examples: "10s", "35m", "1h30m")`), 'ANARCHON_INVALID_ARGUMENT');
+  if (
+    tokens.length < 3 ||
+    tokens.length % 2 === 0 ||
+    tokens[tokens.length - 1] !== ''
+  ) {
+    throw coded(
+      new RangeError(
+        `Invalid duration: "${value}" (examples: "10s", "35m", "1h30m")`,
+      ),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
   }
+
+  const total = sumTokens(value, tokens);
+  return parseDuration(Math.round(total));
+}
+
+/**
+ * The ms of the amount and unit pairs that a duration string splits into. `value` is the string
+ * as given, for the error message.
+ */
+function sumTokens(value: string, tokens: string[]): number {
   let total = 0;
   for (let i = 0; i < tokens.length - 1; i += 2) {
     const amount = (tokens[i] ?? '').trim();
     const unit = tokens[i + 1] ?? '';
     const ms = UNIT_MS[unit];
     if (!/^\d+(?:\.\d+)?$/.test(amount) || ms === undefined) {
-      throw coded(new RangeError(`Invalid duration: "${value}" (examples: "10s", "35m", "1h30m")`), 'ANARCHON_INVALID_ARGUMENT');
+      throw coded(
+        new RangeError(
+          `Invalid duration: "${value}" (examples: "10s", "35m", "1h30m")`,
+        ),
+        'ANARCHON_INVALID_ARGUMENT',
+      );
     }
     total += Number(amount) * ms;
   }
-  return parseDuration(Math.round(total));
+
+  return total;
 }
 
 /**
@@ -72,6 +111,7 @@ export function parseDuration(value: number | string): number {
 export function formatDuration(ms: number): string {
   const parts: string[] = [];
   let rest = ms;
+
   for (const [unit, size] of [
     ['d', 86_400_000],
     ['h', 3_600_000],
@@ -83,6 +123,7 @@ export function formatDuration(ms: number): string {
       rest %= size;
     }
   }
+
   if (rest > 0 || parts.length === 0) parts.push(`${rest}ms`);
   return parts.join('');
 }
@@ -92,25 +133,41 @@ export function formatDuration(ms: number): string {
  * All instances share the grid, so they agree on run times no matter when each one started.
  */
 export function everySchedule(intervalMs: number, offsetMs = 0): Schedule {
-  if (!Number.isInteger(offsetMs))
-    throw coded(new RangeError(`offsetMs must be a whole number of ms (got ${offsetMs})`), 'ANARCHON_INVALID_ARGUMENT');
+  if (!Number.isInteger(offsetMs)) {
+    throw coded(
+      new RangeError(`offsetMs must be a whole number of ms (got ${offsetMs})`),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
+  }
+
   const offset = ((offsetMs % intervalMs) + intervalMs) % intervalMs;
+
   return {
     type: 'every',
     description: `every ${formatDuration(intervalMs)}${offset ? ` (offset ${formatDuration(offset)})` : ''}`,
     minGapMs: intervalMs,
     next(after) {
-      return (Math.floor((after - offset) / intervalMs) + 1) * intervalMs + offset;
+      return (
+        (Math.floor((after - offset) / intervalMs) + 1) * intervalMs + offset
+      );
     },
     prev(atOrBefore) {
-      return Math.floor((atOrBefore - offset) / intervalMs) * intervalMs + offset;
+      return (
+        Math.floor((atOrBefore - offset) / intervalMs) * intervalMs + offset
+      );
     },
   };
 }
 
 /** Runs once, at `at` (ms since epoch). */
 export function onceSchedule(at: number): Schedule {
-  if (!Number.isFinite(at)) throw coded(new RangeError('Invalid date for a one-off job'), 'ANARCHON_INVALID_ARGUMENT');
+  if (!Number.isFinite(at)) {
+    throw coded(
+      new RangeError('Invalid date for a one-off job'),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
+  }
+
   return {
     type: 'once',
     description: `once at ${new Date(at).toISOString()}`,
@@ -126,10 +183,18 @@ export function onceSchedule(at: number): Schedule {
 
 /** Standard cron syntax; a 6th leading field adds seconds (`'*\/10 * * * * *'`). */
 export function cronSchedule(expression: string, timezone?: string): Schedule {
-  const cron = new Cron(expression, timezone ? { timezone } : {});
+  const zone = timezone ? { timezone } : {};
+  const cron = new Cron(expression, zone);
   const runs = cron.nextRuns(64, new Date());
-  if (runs.length === 0)
-    throw coded(new RangeError(`Cron expression "${expression}" never runs in the future`), 'ANARCHON_INVALID_ARGUMENT');
+  if (runs.length === 0) {
+    throw coded(
+      new RangeError(
+        `Cron expression "${expression}" never runs in the future`,
+      ),
+      'ANARCHON_INVALID_ARGUMENT',
+    );
+  }
+
   let minGapMs = Infinity;
   let previous: number | undefined;
   for (const run of runs) {
@@ -137,6 +202,7 @@ export function cronSchedule(expression: string, timezone?: string): Schedule {
     if (previous !== undefined) minGapMs = Math.min(minGapMs, time - previous);
     previous = time;
   }
+
   return {
     type: 'cron',
     description: `cron "${expression}"${timezone ? ` (${timezone})` : ''}`,
@@ -146,7 +212,10 @@ export function cronSchedule(expression: string, timezone?: string): Schedule {
     },
     prev(atOrBefore) {
       // croner works in whole seconds and returns runs strictly before the time it is given.
-      const [previous] = cron.previousRuns(1, new Date(Math.floor(atOrBefore / 1_000) * 1_000 + 1_000));
+      const [previous] = cron.previousRuns(
+        1,
+        new Date(Math.floor(atOrBefore / 1_000) * 1_000 + 1_000),
+      );
       return previous ? previous.getTime() : null;
     },
   };

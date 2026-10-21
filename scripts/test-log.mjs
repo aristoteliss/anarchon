@@ -22,8 +22,14 @@ const lines = stripVTControlCharacters(readFileSync(LOG, 'utf8')).split('\n');
 function counts(label) {
   const line = lines.find((l) => new RegExp(`^\\s*${label}\\s+\\d`).test(l));
   if (!line) return null;
-  const count = (word) => Number(line.match(new RegExp(`(\\d+) ${word}`))?.[1] ?? 0);
-  return { failed: count('failed'), passed: count('passed'), skipped: count('skipped'), total: Number(line.match(/\((\d+)\)/)?.[1] ?? 0) };
+  const count = (word) =>
+    Number(line.match(new RegExp(`(\\d+) ${word}`))?.[1] ?? 0);
+  return {
+    failed: count('failed'),
+    passed: count('passed'),
+    skipped: count('skipped'),
+    total: Number(line.match(/\((\d+)\)/)?.[1] ?? 0),
+  };
 }
 
 function describe(c) {
@@ -39,7 +45,9 @@ const tests = counts('Tests');
 
 if (process.argv[2] === 'fails') {
   if (tests && !tests.failed && !files?.failed) {
-    console.log(`${green('✔ No failures found! All tests passed.')} (Recorded: ${recorded})`);
+    console.log(
+      `${green('✔ No failures found! All tests passed.')} (Recorded: ${recorded})`,
+    );
     process.exit(0);
   }
   console.log(`${red(`✖ Failures detected in test run (${recorded}):`)}\n`);
@@ -48,18 +56,28 @@ if (process.argv[2] === 'fails') {
   if (start < 0) {
     for (const line of lines) if (/^\s*[×✕] /.test(line)) console.log(line);
   } else {
-    const end = lines.findIndex((l, i) => i > start && /^\s*Test Files\s/.test(l));
+    const end = lines.findIndex(
+      (l, i) => i > start && /^\s*Test Files\s/.test(l),
+    );
     console.log(lines.slice(start, end < 0 ? undefined : end).join('\n'));
   }
   console.log('-'.repeat(80));
   process.exit(0);
 }
 
-const duration = lines.map((l) => l.match(/^\s*Duration\s+([0-9.]+[mµ]?s)/)?.[1]).findLast(Boolean) ?? '-';
+const duration =
+  lines
+    .map((l) => l.match(/^\s*Duration\s+([0-9.]+[mµ]?s)/)?.[1])
+    .findLast(Boolean) ?? '-';
 const coverage =
   lines.map((l) => l.match(/Lines\s*:\s*([0-9.]+%)/)?.[1]).find(Boolean) ??
   lines
-    .map((l) => l.match(/^All files\s*\|\s*[0-9.]+\s*\|\s*[0-9.]+\s*\|\s*[0-9.]+\s*\|\s*([0-9.]+)/)?.[1])
+    .map(
+      (l) =>
+        l.match(
+          /^All files\s*\|\s*[0-9.]+\s*\|\s*[0-9.]+\s*\|\s*[0-9.]+\s*\|\s*([0-9.]+)/,
+        )?.[1],
+    )
     .find(Boolean)
     ?.concat('%') ??
   '-';
@@ -73,8 +91,12 @@ console.log(`${'Tests'.padEnd(14)}${describe(tests)}`);
 console.log(`${'Duration'.padEnd(14)}${duration}`);
 console.log(`${'Line cov'.padEnd(14)}${coverage}`);
 console.log('-'.repeat(80));
-if (!tests || tests.total === 0) console.log('\x1b[33m? No tests recorded in log.\x1b[0m');
-else if (!tests.failed && !files?.failed) console.log(green(`✔ OVERALL VERDICT: ALL TESTS PASSED! (${describe(tests)})`));
+if (!tests || tests.total === 0)
+  console.log('\x1b[33m? No tests recorded in log.\x1b[0m');
+else if (!tests.failed && !files?.failed)
+  console.log(
+    green(`✔ OVERALL VERDICT: ALL TESTS PASSED! (${describe(tests)})`),
+  );
 else
   console.log(
     `${red(`✖ OVERALL VERDICT: ${tests.failed} TESTS FAILED`)}\n  Run "pnpm test:last:fails" to see failure details and stack traces.`,

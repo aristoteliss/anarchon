@@ -31,6 +31,7 @@ Use what you already run. If you have both Redis and PostgreSQL, Redis has the l
 | No overlapping runs (`overlap: 'skip'`) | yes | no | yes | yes | no | no |
 | Retries after a dead runner (`maxAttempts`) | yes | no | yes | yes | no | no |
 | Catch-up after downtime (`catchUpMs`) | yes | no | yes | yes | no | no |
+| Healthy instances claim first after a failure (`yieldAfterFailure`) | yes | no | yes | yes | no | no |
 | Hand-over on `stop()` | yes | no | yes | yes | no | no |
 | History (`history()`, `lastRun()`) | yes | yes | yes | yes | yes | yes |
 | History by age (`historyTtlMs`) | yes | yes ¹ | yes | yes | no | no |
@@ -53,7 +54,7 @@ Most options work everywhere. The ones that need a lease are refused elsewhere, 
 | `maxLateMs` | job, scheduler | yes | yes | On claim-only backends `jitterMs + maxLateMs` must be shorter than how long the backend remembers a run; checked when the job is added |
 | `historySize` | job, scheduler | yes | yes | NATS: the largest wins, see ² |
 | `historyTtlMs` | job, scheduler | yes | Redis/Valkey only | RabbitMQ and NATS refuse it |
-| `overlap`, `maxAttempts`, `catchUpMs` | job | yes | refused | `at()` never takes `overlap` |
+| `overlap`, `maxAttempts`, `catchUpMs`, `yieldAfterFailure` | job | yes | refused | `at()` never takes `overlap` |
 | `leaseMs`, `heartbeatMs` | scheduler | yes | refused | |
 
 ```ts

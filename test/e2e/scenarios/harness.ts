@@ -48,26 +48,37 @@ export interface Execution {
 }
 
 const FIXTURE = join(__dirname, 'instance.ts');
-export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+export const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export class Cluster {
   readonly events: Ev[] = [];
   private readonly procs = new Map<string, ChildProcess>();
-  private readonly waiters: Array<{ match: (e: Ev) => boolean; resolve: (e: Ev) => void }> = [];
+  private readonly waiters: Array<{
+    match: (e: Ev) => boolean;
+    resolve: (e: Ev) => void;
+  }> = [];
 
   constructor(readonly cfg: ScenarioConfig) {}
 
   /** Starts an instance and waits until its scheduler is running. */
   start(instance: string): Promise<void> {
     const child = spawn(process.execPath, ['--import', 'tsx', FIXTURE], {
-      env: { ...process.env, SCENARIO: JSON.stringify({ ...this.cfg, instanceId: instance }) },
+      env: {
+        ...process.env,
+        SCENARIO: JSON.stringify({ ...this.cfg, instanceId: instance }),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.procs.set(instance, child);
     let buffer = '';
     child.stdout!.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
-      for (let newline = buffer.indexOf('\n'); newline >= 0; newline = buffer.indexOf('\n')) {
+      for (
+        let newline = buffer.indexOf('\n');
+        newline >= 0;
+        newline = buffer.indexOf('\n')
+      ) {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
         if (!line.startsWith('{')) continue;
@@ -82,7 +93,10 @@ export class Cluster {
       }
     });
     child.stderr!.on('data', () => {});
-    return this.waitFor((e) => e.type === 'ready' && e.pid === child.pid, 15_000).then(() => undefined);
+    return this.waitFor(
+      (e) => e.type === 'ready' && e.pid === child.pid,
+      15_000,
+    ).then(() => undefined);
   }
 
   /** Kills an instance like a crash (default) and records when. */
@@ -90,18 +104,33 @@ export class Cluster {
     const child = this.procs.get(instance);
     if (!child || child.exitCode !== null) return;
     child.kill(signal);
-    this.events.push({ type: 'killed', t: Date.now(), instance, pid: child.pid! });
+    this.events.push({
+      type: 'killed',
+      t: Date.now(),
+      instance,
+      pid: child.pid!,
+    });
   }
 
   /** Freezes an instance (like a long GC pause or a stalled VM). */
   pause(instance: string): void {
     this.procs.get(instance)?.kill('SIGSTOP');
-    this.events.push({ type: 'paused', t: Date.now(), instance, pid: this.procs.get(instance)!.pid! });
+    this.events.push({
+      type: 'paused',
+      t: Date.now(),
+      instance,
+      pid: this.procs.get(instance)!.pid!,
+    });
   }
 
   resume(instance: string): void {
     this.procs.get(instance)?.kill('SIGCONT');
-    this.events.push({ type: 'resumed', t: Date.now(), instance, pid: this.procs.get(instance)!.pid! });
+    this.events.push({
+      type: 'resumed',
+      t: Date.now(),
+      instance,
+      pid: this.procs.get(instance)!.pid!,
+    });
   }
 
   waitFor(match: (e: Ev) => boolean, timeoutMs: number): Promise<Ev> {
@@ -114,7 +143,9 @@ export class Cluster {
         const i = this.waiters.indexOf(waiter);
         if (i >= 0) {
           this.waiters.splice(i, 1);
-          reject(new Error(`timed out after ${timeoutMs} ms waiting for an event`));
+          reject(
+            new Error(`timed out after ${timeoutMs} ms waiting for an event`),
+          );
         }
       }, timeoutMs);
     });
@@ -129,9 +160,16 @@ export class Cluster {
     const list: Execution[] = [];
     for (const e of this.events.filter((x) => x.type === 'run-start')) {
       const end = this.events.find(
-        (x) => x.type === 'run-end' && x.pid === e.pid && x.slot === e.slot && x.attempt === e.attempt && x.t >= e.t,
+        (x) =>
+          x.type === 'run-end' &&
+          x.pid === e.pid &&
+          x.slot === e.slot &&
+          x.attempt === e.attempt &&
+          x.t >= e.t,
       );
-      const death = this.events.find((x) => x.type === 'killed' && x.pid === e.pid && x.t >= e.t);
+      const death = this.events.find(
+        (x) => x.type === 'killed' && x.pid === e.pid && x.t >= e.t,
+      );
       const killed = !end && !!death;
       list.push({
         slot: e.slot!,
@@ -161,7 +199,10 @@ export class Cluster {
 }
 
 /** Largest number of executions of the job running at the same moment. */
-export function maxConcurrency(executions: Execution[], until = Date.now()): number {
+export function maxConcurrency(
+  executions: Execution[],
+  until = Date.now(),
+): number {
   const points = executions.flatMap((e) => [
     { t: e.start, d: 1 },
     { t: e.end ?? until, d: -1 },
@@ -181,8 +222,10 @@ const completed = (e: Execution) => e.end !== null && !e.aborted && !e.killed;
  * A run that started on time, so the next one is a whole interval away. (A catch-up run at start-up
  * can be late in its cycle; if it crashed, the next run would simply replace it.)
  */
-const onTimeRun = (e: Ev) => e.type === 'run-start' && (e.reason ?? 'scheduled') === 'scheduled';
-const describe = (e: Execution) => `${e.instance}#${e.attempt}${e.reason !== 'scheduled' ? `(${e.reason})` : ''}`;
+const onTimeRun = (e: Ev) =>
+  e.type === 'run-start' && (e.reason ?? 'scheduled') === 'scheduled';
+const describe = (e: Execution) =>
+  `${e.instance}#${e.attempt}${e.reason !== 'scheduled' ? `(${e.reason})` : ''}`;
 
 export interface ScenarioResult {
   name: string;
@@ -202,7 +245,9 @@ export async function longRuns(base: ScenarioConfig): Promise<ScenarioResult> {
   const facts = {
     executions: ex.length,
     maxRunningAtOnce: maxConcurrency(ex),
-    overlapSkips: c.events.filter((e) => e.type === 'skip' && e.reason === 'overlap').length,
+    overlapSkips: c.events.filter(
+      (e) => e.type === 'skip' && e.reason === 'overlap',
+    ).length,
     errors: c.events.filter((e) => e.type === 'error').length,
   };
   return {
@@ -213,7 +258,9 @@ export async function longRuns(base: ScenarioConfig): Promise<ScenarioResult> {
 }
 
 /** 2. The instance running the job crashes 1 s into a 4 s run. */
-export async function winnerCrashes(base: ScenarioConfig): Promise<ScenarioResult> {
+export async function winnerCrashes(
+  base: ScenarioConfig,
+): Promise<ScenarioResult> {
   const c = new Cluster({ ...base, intervalMs: 10_000, jobMs: 4_000 });
   await Promise.all(IDS.map((id) => c.start(id)));
   const first = await c.waitFor(onTimeRun, 25_000);
@@ -223,13 +270,18 @@ export async function winnerCrashes(base: ScenarioConfig): Promise<ScenarioResul
   await sleep(8_000);
   c.killAll();
   const ofSlot = c.executions().filter((e) => e.slot === first.slot);
-  const finisher = ofSlot.find((e) => e.instance !== first.instance && completed(e));
+  const finisher = ofSlot.find(
+    (e) => e.instance !== first.instance && completed(e),
+  );
   const history = (await c.history()).filter((r) => r.slot === first.slot);
   const facts = {
     crashed: first.instance,
     finishedBy: finisher ? describe(finisher) : null,
     takeoverAfterMs: finisher ? finisher.start - crashAt : null,
-    history: history.map((r) => `${r.instanceId}#${(r as { attempt?: number }).attempt ?? 1}:${r.status}`),
+    history: history.map(
+      (r) =>
+        `${r.instanceId}#${(r as { attempt?: number }).attempt ?? 1}:${r.status}`,
+    ),
   };
   return {
     name: 'Winner crashes mid-run',
@@ -241,7 +293,9 @@ export async function winnerCrashes(base: ScenarioConfig): Promise<ScenarioResul
 }
 
 /** 3. A non-winner is killed and restarted while the winner is mid-run. */
-export async function nonWinnerRestarts(base: ScenarioConfig): Promise<ScenarioResult> {
+export async function nonWinnerRestarts(
+  base: ScenarioConfig,
+): Promise<ScenarioResult> {
   const c = new Cluster({ ...base, intervalMs: 10_000, jobMs: 4_000 });
   await Promise.all(IDS.map((id) => c.start(id)));
   const first = await c.waitFor(onTimeRun, 25_000);
@@ -267,7 +321,9 @@ export async function nonWinnerRestarts(base: ScenarioConfig): Promise<ScenarioR
 }
 
 /** 4. All three instances crash 1 s into a 4 s run, and come back 1 s later. */
-export async function allRestartMidRun(base: ScenarioConfig): Promise<ScenarioResult> {
+export async function allRestartMidRun(
+  base: ScenarioConfig,
+): Promise<ScenarioResult> {
   const c = new Cluster({ ...base, intervalMs: 10_000, jobMs: 4_000 });
   await Promise.all(IDS.map((id) => c.start(id)));
   const first = await c.waitFor(onTimeRun, 25_000);
@@ -284,7 +340,10 @@ export async function allRestartMidRun(base: ScenarioConfig): Promise<ScenarioRe
     finished: finished.map(describe),
     history: (await c.history())
       .filter((r) => r.slot === first.slot)
-      .map((r) => `${r.instanceId}#${(r as { attempt?: number }).attempt ?? 1}:${r.status}`),
+      .map(
+        (r) =>
+          `${r.instanceId}#${(r as { attempt?: number }).attempt ?? 1}:${r.status}`,
+      ),
   };
   return {
     name: 'All 3 restart in the middle of a run',
@@ -296,7 +355,9 @@ export async function allRestartMidRun(base: ScenarioConfig): Promise<ScenarioRe
 }
 
 /** 5. All three instances are down when a run is due, and start 2 s later. */
-export async function allDownAtRunTime(base: ScenarioConfig): Promise<ScenarioResult> {
+export async function allDownAtRunTime(
+  base: ScenarioConfig,
+): Promise<ScenarioResult> {
   const interval = 10_000;
   const c = new Cluster({ ...base, intervalMs: interval, jobMs: 1_000 });
   await Promise.all(IDS.map((id) => c.start(id)));
@@ -309,16 +370,23 @@ export async function allDownAtRunTime(base: ScenarioConfig): Promise<ScenarioRe
   await sleep(4_000);
   c.killAll();
   const ofSlot = c.executions().filter((e) => e.slot === slot);
-  const facts = { missedRun: new Date(slot).toISOString(), executions: ofSlot.map(describe) };
+  const facts = {
+    missedRun: new Date(slot).toISOString(),
+    executions: ofSlot.map(describe),
+  };
   return {
     name: 'All 3 down when a run is due',
-    summary: ofSlot.length ? `the missed run ran after the restart: ${facts.executions.join(', ')}` : 'the missed run never ran',
+    summary: ofSlot.length
+      ? `the missed run ran after the restart: ${facts.executions.join(', ')}`
+      : 'the missed run never ran',
     facts,
   };
 }
 
 /** 6. The winner freezes (like a long GC pause) for longer than the lease, then wakes up. */
-export async function winnerFreezes(base: ScenarioConfig): Promise<ScenarioResult> {
+export async function winnerFreezes(
+  base: ScenarioConfig,
+): Promise<ScenarioResult> {
   const c = new Cluster({ ...base, intervalMs: 10_000, jobMs: 5_000 });
   await Promise.all(IDS.map((id) => c.start(id)));
   const first = await c.waitFor(onTimeRun, 25_000);
@@ -329,7 +397,9 @@ export async function winnerFreezes(base: ScenarioConfig): Promise<ScenarioResul
   await sleep(6_000);
   c.killAll();
   const ofSlot = c.executions().filter((e) => e.slot === first.slot);
-  const original = ofSlot.find((e) => e.instance === first.instance && e.attempt === (first.attempt ?? 1));
+  const original = ofSlot.find(
+    (e) => e.instance === first.instance && e.attempt === (first.attempt ?? 1),
+  );
   const backup = ofSlot.find((e) => e.instance !== first.instance);
   const facts = {
     frozen: first.instance,
@@ -348,7 +418,9 @@ export async function winnerFreezes(base: ScenarioConfig): Promise<ScenarioResul
 }
 
 /** 7. Rolling deploy: the winner gets SIGTERM 1 s into a 4 s run and shuts down gracefully. */
-export async function winnerStopsGracefully(base: ScenarioConfig): Promise<ScenarioResult> {
+export async function winnerStopsGracefully(
+  base: ScenarioConfig,
+): Promise<ScenarioResult> {
   const c = new Cluster({ ...base, intervalMs: 10_000, jobMs: 4_000 });
   await Promise.all(IDS.map((id) => c.start(id)));
   const first = await c.waitFor(onTimeRun, 25_000);
@@ -358,7 +430,9 @@ export async function winnerStopsGracefully(base: ScenarioConfig): Promise<Scena
   await sleep(7_000);
   c.killAll();
   const ofSlot = c.executions().filter((e) => e.slot === first.slot);
-  const finisher = ofSlot.find((e) => e.instance !== first.instance && completed(e));
+  const finisher = ofSlot.find(
+    (e) => e.instance !== first.instance && completed(e),
+  );
   const history = (await c.history()).filter((r) => r.slot === first.slot);
   const facts = {
     stopped: first.instance,

@@ -41,31 +41,47 @@ function charge(customer: string, day: number, by: string): boolean {
   return true;
 }
 
+/** Charges every customer for the run's day; the ledger refuses a day charged before. */
+async function chargeCards(ctx: JobContext): Promise<void> {
+  const late =
+    ctx.reason === 'catch-up'
+      ? ` (caught up ${Date.now() - ctx.slot} ms late: nobody ran it when it was due)`
+      : '';
+  const day = ctx.scheduledAt.toISOString().slice(11, 19);
+
+  for (const customer of CUSTOMERS) {
+    ctx.signal.throwIfAborted();
+    const charged = charge(customer, ctx.slot, ctx.instanceId);
+    const outcome = charged ? 'charged' : 'already charged';
+    say(`${ctx.instanceId}: ${customer} for ${day} ${outcome}${late}`);
+  }
+}
+
 function instance(id: string): Scheduler {
-  const scheduler = new Scheduler({ backend: backendFromEnv('billing'), instanceId: id, timezone: 'Europe/Athens' });
+  const scheduler = new Scheduler({
+    backend: backendFromEnv('billing'),
+    instanceId: id,
+    timezone: 'Europe/Athens',
+  });
+
   // Real life: '0 6 * * *'. Here: every 10 s (six fields, seconds first).
-  scheduler.cron(
-    'charge-cards',
-    '*/10 * * * * *',
-    async (ctx: JobContext) => {
-      const late = ctx.reason === 'catch-up' ? ` (caught up ${Date.now() - ctx.slot} ms late: nobody ran it when it was due)` : '';
-      for (const customer of CUSTOMERS) {
-        ctx.signal.throwIfAborted();
-        const charged = charge(customer, ctx.slot, ctx.instanceId);
-        say(
-          `${ctx.instanceId}: ${customer} for ${ctx.scheduledAt.toISOString().slice(11, 19)} ${charged ? 'charged' : 'already charged'}${late}`,
-        );
-      }
-    },
-    { maxAttempts: 1, catchUpMs: 60_000, timeoutMs: 8_000 },
+  scheduler.cron('charge-cards', '*/10 * * * * *', chargeCards, {
+    maxAttempts: 1,
+    catchUpMs: 60_000,
+    timeoutMs: 8_000,
+  });
+  scheduler.on('failure', (run) =>
+    say(`${run.instanceId}: charge run failed, needs a look: ${run.error}`),
   );
-  scheduler.on('failure', (run) => say(`${run.instanceId}: charge run failed, needs a look: ${run.error}`));
+
   return scheduler;
 }
 
 const nextSuccess = (schedulers: Scheduler[]) =>
   new Promise<void>((resolve) => {
-    for (const s of schedulers) s.once('success', () => resolve());
+    for (const s of schedulers) {
+      s.once('success', () => resolve());
+    }
   });
 
 async function main() {
@@ -80,23 +96,31 @@ async function main() {
 
   await Promise.all([a.stop(), b.stop()]);
   const missed = Math.ceil(Date.now() / DAY_MS) * DAY_MS;
-  say(`outage: both instances down while ${new Date(missed).toISOString().slice(11, 19)} is due`);
+  say(
+    `outage: both instances down while ${new Date(missed).toISOString().slice(11, 19)} is due`,
+  );
   await sleep(missed - Date.now() + 3_000);
 
   await Promise.all([a.start(), b.start()]);
   say('back up: the missed day is caught up by one instance');
   await nextSuccess([a, b]);
   await nextSuccess([a, b]);
-  const history = (await a.history('charge-cards', 20)).filter((run) => run.startedAt.getTime() >= startedAt).reverse();
+  const history = (await a.history('charge-cards', 20))
+    .filter((run) => run.startedAt.getTime() >= startedAt)
+    .reverse();
   await Promise.all([a.stop(), b.stop()]);
 
   const days = new Map<number, number>();
-  for (const { day } of ledger.values()) days.set(day, (days.get(day) ?? 0) + 1);
-  say(
-    `ledger: ${ledger.size} charges over ${days.size} days, ${[...days.values()].every((n) => n === CUSTOMERS.length) ? 'each customer once a day' : 'UNEVEN'}`,
-  );
+  for (const { day } of ledger.values()) {
+    days.set(day, (days.get(day) ?? 0) + 1);
+  }
+  const even = [...days.values()].every((n) => n === CUSTOMERS.length);
+  const verdict = even ? 'each customer once a day' : 'UNEVEN';
+  say(`ledger: ${ledger.size} charges over ${days.size} days, ${verdict}`);
   for (const run of history) {
-    say(`  ${run.scheduledAt.toISOString().slice(11, 19)}  ${run.status.padEnd(8)} on ${run.instanceId}  (${run.reason})`);
+    say(
+      `  ${run.scheduledAt.toISOString().slice(11, 19)}  ${run.status.padEnd(8)} on ${run.instanceId}  (${run.reason})`,
+    );
   }
 }
 

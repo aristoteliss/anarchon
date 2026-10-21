@@ -20,18 +20,30 @@ import type {
  * a key T doesn't have, or one of T's keys left out, is a type error, so the list can't drift
  * from the type when an option is added.
  */
-export function keysOf<T>(all: Record<keyof T, true>): ReadonlyArray<keyof T & string> {
+export function keysOf<T>(
+  all: Record<keyof T, true>,
+): ReadonlyArray<keyof T & string> {
   return Object.keys(all) as Array<keyof T & string>;
 }
 
 /** Job options only a backend with leases can honour. */
-export const LEASE_JOB_OPTIONS = keysOf<LeaseJobOptions>({ overlap: true, maxAttempts: true, catchUpMs: true });
+export const LEASE_JOB_OPTIONS = keysOf<LeaseJobOptions>({
+  overlap: true,
+  maxAttempts: true,
+  catchUpMs: true,
+  yieldAfterFailure: true,
+});
 
 /** Scheduler options only a backend with leases can honour. */
-export const LEASE_SCHEDULER_OPTIONS = keysOf<LeaseSchedulerOptions>({ leaseMs: true, heartbeatMs: true });
+export const LEASE_SCHEDULER_OPTIONS = keysOf<LeaseSchedulerOptions>({
+  leaseMs: true,
+  heartbeatMs: true,
+});
 
 /** The settings each Redis/Valkey strategy takes besides its name. Every strategy must be listed. */
-export const STRATEGY_SETTINGS: Readonly<Record<KeyValueStrategyName, ReadonlyArray<string>>> = {
+export const STRATEGY_SETTINGS: Readonly<
+  Record<KeyValueStrategyName, ReadonlyArray<string>>
+> = {
   lease: [],
   'stream-id': [],
   idmp: keysOf<IdmpOptions>({ durationSec: true, maxSize: true }),
@@ -48,12 +60,21 @@ const job: Record<keyof JobOptions, true> = {
   overlap: true,
   maxAttempts: true,
   catchUpMs: true,
+  yieldAfterFailure: true,
 };
 
 /** Options of `every()`, `cron()` and `at()`. */
-export const EVERY_JOB_OPTIONS = keysOf<EveryJobOptions>({ ...job, offsetMs: true });
-export const CRON_JOB_OPTIONS = keysOf<CronJobOptions>({ ...job, timezone: true });
-export const AT_JOB_OPTIONS = keysOf<AtJobOptions>((({ overlap, ...rest }) => rest)(job));
+export const EVERY_JOB_OPTIONS = keysOf<EveryJobOptions>({
+  ...job,
+  offsetMs: true,
+});
+export const CRON_JOB_OPTIONS = keysOf<CronJobOptions>({
+  ...job,
+  timezone: true,
+});
+export const AT_JOB_OPTIONS = keysOf<AtJobOptions>(
+  (({ overlap, ...rest }) => rest)(job),
+);
 
 const scheduler: Record<keyof SchedulerOptions, true> = {
   name: true,
@@ -74,8 +95,15 @@ const scheduler: Record<keyof SchedulerOptions, true> = {
 
 /** Options of `new Scheduler()`, and of `Scheduler.configure()`. */
 export const SCHEDULER_OPTIONS = keysOf<SchedulerOptions>(scheduler);
-export const CONFIGURE_OPTIONS = keysOf<ConfigureOptions>((({ name, ...rest }) => ({ ...rest, autoStart: true }))(scheduler));
+export const CONFIGURE_OPTIONS = keysOf<ConfigureOptions>(
+  (({ name, ...rest }) => ({ ...rest, autoStart: true }))(scheduler),
+);
 
 /** Options of `register()`, and the job options its `defaults` may hold. */
-export const REGISTER_OPTIONS = keysOf<RegisterOptions>({ prefix: true, defaults: true });
-export const REGISTER_DEFAULTS = keysOf<NonNullable<RegisterOptions['defaults']>>({ ...job, timezone: true });
+export const REGISTER_OPTIONS = keysOf<RegisterOptions>({
+  prefix: true,
+  defaults: true,
+});
+export const REGISTER_DEFAULTS = keysOf<
+  NonNullable<RegisterOptions['defaults']>
+>({ ...job, timezone: true });

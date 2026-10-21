@@ -4,8 +4,20 @@ import assert from 'node:assert/strict';
 import { Redis } from 'ioredis';
 import { beforeAll, test } from 'vitest';
 
-import { RedisBackend, type RunRecord, Scheduler, type SkipEvent } from '../../src';
-import { probeRedis, REDIS_URL, type ServerInfo, sleep, supportsIdmp, uniqueId } from '../support';
+import {
+  RedisBackend,
+  type RunRecord,
+  Scheduler,
+  type SkipEvent,
+} from '../../src';
+import {
+  probeRedis,
+  REDIS_URL,
+  type ServerInfo,
+  sleep,
+  supportsIdmp,
+  uniqueId,
+} from '../support';
 
 const uniquePrefix = (label: string) => `test:${uniqueId(label)}:`;
 
@@ -16,8 +28,15 @@ beforeAll(async () => {
 });
 
 test('connects to Redis and reports jobs and next runs', async () => {
-  const scheduler = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix: uniquePrefix('connect') }) });
-  scheduler.every('sync', '10s', () => {}).cron('report', '0 */2 * * *', () => {}, { timezone: 'Europe/Athens' });
+  const scheduler = new Scheduler({
+    backend: new RedisBackend({
+      redis: REDIS_URL,
+      prefix: uniquePrefix('connect'),
+    }),
+  });
+  scheduler
+    .every('sync', '10s', () => {})
+    .cron('report', '0 */2 * * *', () => {}, { timezone: 'Europe/Athens' });
   await scheduler.start();
   try {
     const jobs = scheduler.jobs();
@@ -30,7 +49,9 @@ test('connects to Redis and reports jobs and next runs', async () => {
     );
     const next = scheduler.nextRun('sync')!;
     assert.equal(next.getTime() % 10_000, 0);
-    assert.ok(next.getTime() > Date.now() && next.getTime() <= Date.now() + 10_000);
+    assert.ok(
+      next.getTime() > Date.now() && next.getTime() <= Date.now() + 10_000,
+    );
   } finally {
     await scheduler.stop();
   }
@@ -38,7 +59,10 @@ test('connects to Redis and reports jobs and next runs', async () => {
 
 test('runNow runs on this instance and shows up in history as manual', async () => {
   const prefix = uniquePrefix('manual');
-  const scheduler = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix }), instanceId: 'api-1' });
+  const scheduler = new Scheduler({
+    backend: new RedisBackend({ redis: REDIS_URL, prefix }),
+    instanceId: 'api-1',
+  });
   let ranWith: { manual: boolean; instanceId: string } | undefined;
   scheduler.every('backup', '1h30m', (ctx) => {
     ranWith = { manual: ctx.manual, instanceId: ctx.instanceId };
@@ -59,7 +83,9 @@ test('runNow runs on this instance and shows up in history as manual', async () 
 
 test('a run that is still going shows as running, then success', async () => {
   const prefix = uniquePrefix('running');
-  const scheduler = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix }) });
+  const scheduler = new Scheduler({
+    backend: new RedisBackend({ redis: REDIS_URL, prefix }),
+  });
   scheduler.every('slow', '1h', () => sleep(500));
   await scheduler.start();
   try {
@@ -77,7 +103,10 @@ test('a run that is still going shows as running, then success', async () => {
 
 test('success/failure events carry who ran it and the error', async () => {
   const prefix = uniquePrefix('events');
-  const scheduler = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix }), instanceId: 'X' });
+  const scheduler = new Scheduler({
+    backend: new RedisBackend({ redis: REDIS_URL, prefix }),
+    instanceId: 'X',
+  });
   const seen: RunRecord[] = [];
   let cause: unknown;
   scheduler
@@ -108,11 +137,18 @@ test('success/failure events carry who ran it and the error', async () => {
 });
 
 test('stop() aborts ctx.signal and waits for running jobs', async () => {
-  const scheduler = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix: uniquePrefix('stop') }) });
+  const scheduler = new Scheduler({
+    backend: new RedisBackend({
+      redis: REDIS_URL,
+      prefix: uniquePrefix('stop'),
+    }),
+  });
   let aborted = false;
   let finished = false;
   scheduler.every('long', '1h', async (ctx) => {
-    await new Promise<void>((resolve) => ctx.signal.addEventListener('abort', () => resolve(), { once: true }));
+    await new Promise<void>((resolve) =>
+      ctx.signal.addEventListener('abort', () => resolve(), { once: true }),
+    );
     aborted = ctx.signal.aborted;
     await sleep(100);
     finished = true;
@@ -128,8 +164,14 @@ test('stop() aborts ctx.signal and waits for running jobs', async () => {
 
 test('every second, one process: one run per slot and skip events for late or taken runs', async () => {
   const prefix = uniquePrefix('single');
-  const a = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix }), instanceId: 'A' });
-  const b = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix }), instanceId: 'B' });
+  const a = new Scheduler({
+    backend: new RedisBackend({ redis: REDIS_URL, prefix }),
+    instanceId: 'A',
+  });
+  const b = new Scheduler({
+    backend: new RedisBackend({ redis: REDIS_URL, prefix }),
+    instanceId: 'B',
+  });
   const runs: Array<[string, number]> = [];
   const skips: SkipEvent[] = [];
   for (const [s, id] of [
@@ -150,29 +192,63 @@ test('every second, one process: one run per slot and skip events for late or ta
   await sleep(4_200);
   await Promise.all([a.stop(), b.stop()]);
   const slots = runs.map(([, slot]) => slot);
-  assert.equal(new Set(slots).size, slots.length, `no slot ran twice: ${JSON.stringify(runs)}`);
+  assert.equal(
+    new Set(slots).size,
+    slots.length,
+    `no slot ran twice: ${JSON.stringify(runs)}`,
+  );
   assert.ok(slots.length >= 3, `ran ${slots.length} times`);
   assert.ok(skips.every((s) => s.reason === 'taken'));
   // The loser reports each slot it lost (except possibly the last one, if stop() came first).
-  assert.ok(skips.length >= slots.length - 1 && skips.length <= slots.length, `${skips.length} skips for ${slots.length} runs`);
+  assert.ok(
+    skips.length >= slots.length - 1 && skips.length <= slots.length,
+    `${skips.length} skips for ${slots.length} runs`,
+  );
 });
 
 test('validation errors are clear', () => {
   const s = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL }) });
   assert.throws(() => s.every('x', '500ms', () => {}), /at least 1s/);
-  assert.throws(() => s.every('x', '10s', () => {}, { jitterMs: 6_000 }), /under half the time between runs/);
-  assert.throws(() => s.every('x', '10s', () => {}, { jitterMs: 2_000, maxLateMs: 1_000 }), /bigger than jitterMs/);
+  assert.throws(
+    () => s.every('x', '10s', () => {}, { jitterMs: 6_000 }),
+    /under half the time between runs/,
+  );
+  assert.throws(
+    () => s.every('x', '10s', () => {}, { jitterMs: 2_000, maxLateMs: 1_000 }),
+    /bigger than jitterMs/,
+  );
   assert.throws(() => s.cron('x', 'nope', () => {}), /invalid cron/);
   s.every('dup', '10s', () => {});
   assert.throws(() => s.every('dup', '10s', () => {}), /already registered/);
-  const idmp = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, strategy: { name: 'idmp', durationSec: 30 } }) });
-  assert.throws(() => idmp.every('x', '10m', () => {}), /shorter than how long redis:idmp remembers a run/);
-  assert.throws(() => new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, strategy: 'nope' as never }) }), /Unknown strategy/);
+  const idmp = new Scheduler({
+    backend: new RedisBackend({
+      redis: REDIS_URL,
+      strategy: { name: 'idmp', durationSec: 30 },
+    }),
+  });
+  assert.throws(
+    () => idmp.every('x', '10m', () => {}),
+    /shorter than how long redis:idmp remembers a run/,
+  );
+  assert.throws(
+    () =>
+      new Scheduler({
+        backend: new RedisBackend({
+          redis: REDIS_URL,
+          strategy: 'nope' as never,
+        }),
+      }),
+    /Unknown strategy/,
+  );
 });
 
 test('idmp scheduler refuses to start on Redis < 8.6, and works on 8.6+', async (t) => {
   const scheduler = new Scheduler({
-    backend: new RedisBackend({ redis: REDIS_URL, strategy: 'idmp', prefix: uniquePrefix('idmp-start') }),
+    backend: new RedisBackend({
+      redis: REDIS_URL,
+      strategy: 'idmp',
+      prefix: uniquePrefix('idmp-start'),
+    }),
   });
   scheduler.every('x', '1h', () => {});
   if (!supportsIdmp(main)) {
@@ -187,7 +263,9 @@ test('idmp scheduler refuses to start on Redis < 8.6, and works on 8.6+', async 
 
 test('does not close a client it did not open', async () => {
   const redis = new Redis(REDIS_URL);
-  const scheduler = new Scheduler({ backend: new RedisBackend({ redis, prefix: uniquePrefix('owned') }) });
+  const scheduler = new Scheduler({
+    backend: new RedisBackend({ redis, prefix: uniquePrefix('owned') }),
+  });
   scheduler.every('x', '1h', () => {});
   await scheduler.start();
   await scheduler.stop();
@@ -200,8 +278,18 @@ test('at(): a one-off job runs once, on one instance', async () => {
   const when = Date.now() + 1_200;
   const ran: string[] = [];
   const schedulers = ['A', 'B', 'C'].map((id) => {
-    const s = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix }), instanceId: id, leaseMs: 2_000, heartbeatMs: 300 });
-    s.at('once', new Date(when), (ctx) => void ran.push(`${ctx.instanceId}@${ctx.slot}`), { jitterMs: 200 });
+    const s = new Scheduler({
+      backend: new RedisBackend({ redis: REDIS_URL, prefix }),
+      instanceId: id,
+      leaseMs: 2_000,
+      heartbeatMs: 300,
+    });
+    s.at(
+      'once',
+      new Date(when),
+      (ctx) => void ran.push(`${ctx.instanceId}@${ctx.slot}`),
+      { jitterMs: 200 },
+    );
     return s;
   });
   await Promise.all(schedulers.map((s) => s.start()));
@@ -223,7 +311,14 @@ test('log: true writes one line per start and finish', async () => {
     warn: (m: string) => void lines.push(m),
     error: (m: string) => void lines.push(m),
   };
-  const scheduler = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix: uniquePrefix('log') }), log: true, logger });
+  const scheduler = new Scheduler({
+    backend: new RedisBackend({
+      redis: REDIS_URL,
+      prefix: uniquePrefix('log'),
+    }),
+    log: true,
+    logger,
+  });
   scheduler.every('job', '1h', () => {});
   await scheduler.start();
   try {
@@ -232,7 +327,9 @@ test('log: true writes one line per start and finish', async () => {
     await scheduler.stop();
   }
   assert.ok(
-    lines.some((l) => /^\[anarchon\] job @ .*: started on .* \(attempt 1, manual\)$/.test(l)),
+    lines.some((l) =>
+      /^\[anarchon\] job @ .*: started on .* \(attempt 1, manual\)$/.test(l),
+    ),
     lines.join('\n'),
   );
   assert.ok(
@@ -242,7 +339,13 @@ test('log: true writes one line per start and finish', async () => {
 });
 
 test('historyTtlMs drops history older than the limit', async () => {
-  const scheduler = new Scheduler({ backend: new RedisBackend({ redis: REDIS_URL, prefix: uniquePrefix('ttl') }), historyTtlMs: 1_000 });
+  const scheduler = new Scheduler({
+    backend: new RedisBackend({
+      redis: REDIS_URL,
+      prefix: uniquePrefix('ttl'),
+    }),
+    historyTtlMs: 1_000,
+  });
   scheduler.every('job', '1h', () => {}, { catchUpMs: 0 });
   await scheduler.start();
   try {

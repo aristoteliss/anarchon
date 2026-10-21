@@ -5,8 +5,9 @@ These instructions apply to every agent/LLM making changes in this repository.
 ## What this repository is
 
 anarchon, a published library: leaderless cron for Node.js clusters on Redis/Valkey,
-PostgreSQL, SQLite, RabbitMQ and NATS. `CLAUDE.md` holds the layout, the commands and the test
-setup; `.claude/codebase-map.md` is the orientation map.
+PostgreSQL, SQLite, RabbitMQ and NATS. This file holds the rules, the commands and the working
+procedures. `.claude/codebase-map.md` is the orientation map, and the `readable-code` skill in
+`.claude/skills/readable-code/` holds the readability rules and the test conventions.
 
 ## Source of truth
 
@@ -74,17 +75,123 @@ For multi-step tasks, state a brief plan with a check per step:
 Strong success criteria allow independent iteration; weak ones ("make it work") need
 constant clarification.
 
+## Readable code
+
+Code in `src/` and `examples/` follows the `readable-code` skill. Claude Code loads it as a
+skill; every other agent reads its files directly before writing, refactoring or reviewing
+code there:
+
+- [.claude/skills/readable-code/SKILL.md](.claude/skills/readable-code/SKILL.md): the limits
+  (functions up to 40 lines, nesting up to 3 levels, at most 4 positional parameters), the
+  shape of a function (checks before any write; a decision that takes `now` and returns a
+  `kind`-tagged outcome, apart from the writes it asks for; one input object destructured
+  once; one step per line), the rules against needless interfaces, base classes and layers, the workflow and the
+  self-review checklist.
+- [.claude/skills/readable-code/references/conventions.md](.claude/skills/readable-code/references/conventions.md):
+  naming forms, where code goes, error handling, examples and tests.
+- [.claude/skills/readable-code/references/examples.md](.claude/skills/readable-code/references/examples.md):
+  before and after rewrites of code from this repository.
+
+Apply the limits to new and changed code. Report violations in code you did not change as
+refactoring candidates, and change them only when asked.
+
 ## Repository context files
 
-`CLAUDE.md` (root) holds the durable working instructions for coding agents, and
-`.claude/codebase-map.md` is the compact orientation map: repository shape, stack, entry
-points, directory responsibilities, declared commands, critical modules and gotchas. A
-directory with local rules carries a nested `CLAUDE.md`. Multi-step work is tracked in a
-local task file under `.claude/tasks/`.
+- `AGENTS.md` (this file): the rules, commands and procedures for every agent.
+- `CLAUDE.md`: the short version that Claude Code loads every session. It stays under 40
+  lines; `scripts/validate-claude-context.py` checks that it points to the map and to task
+  files.
+- `.claude/skills/readable-code/`: the readability rules (see Readable code).
+- `.claude/codebase-map.md`: the compact orientation map: repository shape, stack, entry
+  points, directory responsibilities, declared commands, critical modules and gotchas.
+- A directory with local rules carries a nested `CLAUDE.md`. Multi-step work is tracked in a
+  local task file under `.claude/tasks/`.
 
-The map is an index, not an authority: verify any claim against the source before relying
-on it, and prefer the code when they disagree. `CLAUDE.md` describes how to use the map, how
-to regenerate it and how to keep task files.
+Before a large task, and again after compaction or when uncertain, read this file, the map,
+the active task file if the task has one, and the nested `CLAUDE.md` of the directory you are
+editing, if one exists.
+
+### Using the codebase map
+
+- It is a **compact orientation map, not a replacement for reading source**. Use it to find
+  where to look, then open the actual files.
+- **Verify before relying on it.** Confirm any claim that drives a change against the source
+  file it names. When the map, a README or a summary disagrees with the code, the code wins;
+  fix the map afterwards.
+- Sections wrapped in `context:generated-*` markers are machine-written and rewritten on every
+  regeneration. Sections wrapped in `context:manual-*` markers are human-owned and preserved;
+  edit those by hand.
+
+Explore in this order:
+
+1. The map's Repository Shape, Directory Map and Critical Modules.
+2. The nested `CLAUDE.md` files and the documentation of the area in scope.
+3. Only the modules and symbols the task touches, plus their direct callers and tests.
+
+Do not scan the whole repository. A repo-wide sweep needs an explicit reason (a rename, a
+contract audit, a security review); say what it is before doing one.
+
+### Task files
+
+For any task that is large, multi-step, or likely to span sessions, create
+`.claude/tasks/<task-id>.md` from [.claude/tasks/TEMPLATE.md](.claude/tasks/TEMPLATE.md).
+Git ignores everything in `.claude/tasks/` except the template, so task files stay local.
+
+- Use a short, stable, descriptive task id (`lease-renew-retry`, not `fix-1`).
+- Update it after each meaningful milestone: status, decisions, modified files,
+  verification results, next steps.
+- Record what was *verified*, not what was intended. Name commands and their outcome.
+- Never put secrets, credentials, tokens, customer data or personal information in a task
+  id or a task file.
+- A task file is for active work. When the task is done, move anything durable to the place
+  that owns it (source, a documentation page or the README), then delete the file.
+
+### Keeping the map current
+
+Propose a map update, never silently skip it, when a change affects architecture, module
+responsibilities, dependencies, entry points, commands, or repository conventions.
+
+1. Run `python3 scripts/update-claude-snapshot.py` (regenerates the generated sections only).
+2. Hand-edit the manual sections that the change invalidates (Architecture, Critical
+   Modules, Conventions, Testing Strategy, Security and Operational Notes, Gotchas).
+3. Run `python3 scripts/validate-claude-context.py`.
+4. Mention the map change in your summary so the owner can review it.
+
+## Commands
+
+Use these scripts. Use pnpm only, never npm or yarn. The test layout and how the suites run
+are described in the Tests section of
+[.claude/skills/readable-code/references/conventions.md](.claude/skills/readable-code/references/conventions.md).
+
+| Purpose | Command |
+| --- | --- |
+| Install | `pnpm install` |
+| Start every test server (Docker) | `pnpm test:servers` (`COMPOSE_PROFILES=brokers` adds RabbitMQ and NATS) |
+| Stop them and drop their data | `pnpm test:servers:down` |
+| Tests, without the slow `test/e2e` files (about 2 min) | `pnpm test` |
+| The `test/e2e` files only (cluster and failure scenarios) | `pnpm test:slow` |
+| Every test | `pnpm test:all` |
+| One test file | `pnpm test test/leases/rules.test.ts` |
+| Tests in watch mode | `pnpm test:watch` |
+| Coverage summary (text and `coverage/coverage-summary.json`) | `pnpm test:coverage` |
+| Full run with coverage, saved to `test/test-run.log` | `pnpm test:all:full` |
+| Summary of the last full run | `pnpm test:last:review` |
+| Failures of the last full run | `pnpm test:last:fails` |
+| Type checks (src, test, examples) | `pnpm lint` |
+| Format and lint (Biome) | `pnpm check`, `pnpm format` |
+| Build | `pnpm build` |
+| Clean build (also before publishing) | `pnpm rebuild` |
+| Remove build output (`clean:all` also node_modules) | `pnpm clean`, `pnpm clean:all` |
+| Pack, install and load the published tarball; check the API snapshot | `pnpm test:release` |
+| Record an intended change of the public API (`api/anarchon.api.txt`) | `pnpm api:update` |
+| Everything before a release | `pnpm verify:all` |
+| Failure scenarios, side by side | `pnpm scenarios` |
+| Check the NestJS example on NestJS 11 and 12 | `pnpm --filter anarchon-example-nestjs test` |
+| Documentation site (Astro Starlight, in `docs/`) | `pnpm docs:dev`, `pnpm docs:build` |
+| Check that every docs diagram parses | `pnpm docs:check` |
+| Regenerate the codebase map | `python3 scripts/update-claude-snapshot.py` |
+| Check the map is current | `python3 scripts/update-claude-snapshot.py --check` |
+| Validate all context files | `python3 scripts/validate-claude-context.py` |
 
 ## Library scope and review discipline
 
@@ -232,7 +339,8 @@ breaks one of these rules is a breaking change: it waits for a major release and
 4. **Bugs start with a test.** Fix a bug by first writing a test that reproduces it.
 5. **No secrets.** Never place passwords, tokens, private keys or connection strings with
    credentials in code, tests, documentation, context files or task files. Environment
-   variable names are fine; values come from the environment.
+   variable names are fine; values come from the environment. `.env*` files are never read
+   into context files.
 6. **No configuration from the environment in the library.** `src/` takes configuration
    through options and constructor arguments; only tests, examples and scripts read the
    environment.
@@ -244,6 +352,8 @@ breaks one of these rules is a breaking change: it waits for a major release and
 - Run the narrowest relevant test file first, then `pnpm lint`, `pnpm check` and the full
   `pnpm test`. A change that touches only documentation needs the docs checks only.
 - Read the skip count: a backend whose server is not running is skipped, not passed.
+- For a change in `src/` or `examples/`, answer the self-review checklist of the
+  `readable-code` skill for the diff.
 - Update the documentation when a deliberate repository decision changes.
 - Propose a codebase map update when the change affects structure, commands or
-  conventions (see `CLAUDE.md`, Keeping the map current).
+  conventions (see Keeping the map current).

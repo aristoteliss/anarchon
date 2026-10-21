@@ -44,35 +44,66 @@ const delivered = new Set<number>();
 let runs = 0;
 
 function broker() {
-  return process.env.BROKER === 'rabbitmq'
-    ? new RabbitMQBackend({ url: process.env.RABBITMQ_URL ?? 'amqp://localhost:5672', prefix: 'example.notify.', slotTtlMs: 10 * 60_000 })
-    : new NatsBackend({ servers: process.env.NATS_URL ?? 'nats://localhost:4222', stream: 'EXAMPLE_NOTIFY', prefix: 'example.notify.' });
+  if (process.env.BROKER === 'rabbitmq') {
+    return new RabbitMQBackend({
+      url: process.env.RABBITMQ_URL ?? 'amqp://localhost:5672',
+      prefix: 'example.notify.',
+      slotTtlMs: 10 * 60_000,
+    });
+  }
+
+  return new NatsBackend({
+    servers: process.env.NATS_URL ?? 'nats://localhost:4222',
+    stream: 'EXAMPLE_NOTIFY',
+    prefix: 'example.notify.',
+  });
 }
 
 async function sendOutstanding(instanceId: string): Promise<void> {
   const failHalfway = ++runs === 4;
   const pending = outbox.filter((n) => n.sentAt === undefined);
+
   for (const [i, notification] of pending.entries()) {
-    if (failHalfway && i === Math.floor(pending.length / 2)) throw new Error('mail provider: connection reset');
+    if (failHalfway && i === Math.floor(pending.length / 2)) {
+      throw new Error('mail provider: connection reset');
+    }
     delivered.add(notification.id); // the provider keys on the id
     notification.sentAt = Date.now();
   }
+
   say(`${instanceId}: sent ${pending.length} notification(s)`);
 }
 
-async function main() {
-  const instance = (id: string) => {
-    const scheduler = new Scheduler({ backend: broker(), instanceId: id });
-    scheduler.every('send-notifications', '3s', (ctx) => sendOutstanding(ctx.instanceId), {
+/** One instance of the service, sending the outbox every 3 s. */
+function instance(id: string): Scheduler {
+  const scheduler = new Scheduler({ backend: broker(), instanceId: id });
+
+  scheduler.every(
+    'send-notifications',
+    '3s',
+    (ctx) => sendOutstanding(ctx.instanceId),
+    {
       jitterMs: 500,
       maxLateMs: 60_000,
       historySize: 100,
       timeoutMs: 2_500,
-    });
-    scheduler.on('failure', (run) => say(`${run.instanceId}: run failed (${run.error}); the next run sends the rest`));
-    return scheduler;
-  };
-  const [first, ...others] = [instance('api-1'), instance('api-2'), instance('api-3')];
+    },
+  );
+  scheduler.on('failure', (run) =>
+    say(
+      `${run.instanceId}: run failed (${run.error}); the next run sends the rest`,
+    ),
+  );
+
+  return scheduler;
+}
+
+async function main() {
+  const [first, ...others] = [
+    instance('api-1'),
+    instance('api-2'),
+    instance('api-3'),
+  ];
   const instances = [first, ...others];
   const startedAt = Date.now();
   say(`backend: ${first.backend.name}`);
@@ -83,12 +114,18 @@ async function main() {
     await sleep(1_000);
   }
   await sleep(3_500);
-  const history = (await first.history('send-notifications', 50)).filter((run) => run.startedAt.getTime() >= startedAt);
+  const history = (await first.history('send-notifications', 50)).filter(
+    (run) => run.startedAt.getTime() >= startedAt,
+  );
   await Promise.all(instances.map((s) => s.stop()));
 
   const unsent = outbox.filter((n) => n.sentAt === undefined).length;
-  say(`${outbox.length} notifications, ${delivered.size} delivered, ${unsent} not sent yet`);
-  say(`${history.length} runs, on ${new Set(history.map((r) => r.instanceId)).size} instances`);
+  say(
+    `${outbox.length} notifications, ${delivered.size} delivered, ${unsent} not sent yet`,
+  );
+  say(
+    `${history.length} runs, on ${new Set(history.map((r) => r.instanceId)).size} instances`,
+  );
 }
 
 main().catch((error: unknown) => {

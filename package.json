@@ -84,6 +84,7 @@
     "example:api": "tsx examples/http-api.ts",
     "example:walkthrough": "tsx examples/walkthrough.ts",
     "example:failover": "tsx examples/failover.ts",
+    "example:crash": "tsx examples/crash-proof.ts",
     "example:options": "tsx examples/options-and-events.ts",
     "example:clients": "tsx examples/own-clients.ts",
     "example:decorators": "tsx examples/decorators.ts",

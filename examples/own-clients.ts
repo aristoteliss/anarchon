@@ -19,15 +19,31 @@ import { say, sleep } from './shared';
 
 async function main() {
   const usePostgres = process.env.BACKEND === 'postgres';
-  const redis = usePostgres ? undefined : new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
-  const pool = usePostgres ? new Pool({ connectionString: process.env.POSTGRES_URL }) : undefined;
+  const redis = usePostgres
+    ? undefined
+    : new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
+  const pool = usePostgres
+    ? new Pool({ connectionString: process.env.POSTGRES_URL })
+    : undefined;
 
   const scheduler = pool
-    ? new Scheduler({ backend: new PostgresBackend({ connection: pool, table: 'example_own_clients' }) })
-    : new Scheduler({ backend: new RedisBackend({ redis, prefix: 'example:own-clients:' }) });
+    ? new Scheduler({
+        backend: new PostgresBackend({
+          connection: pool,
+          table: 'example_own_clients',
+        }),
+      })
+    : new Scheduler({
+        backend: new RedisBackend({ redis, prefix: 'example:own-clients:' }),
+      });
 
-  scheduler.every('sync', '2s', () => sleep(100), { jitterMs: 100, catchUpMs: 0 });
-  scheduler.on('success', (r) => say(`sync ran on ${r.instanceId} in ${r.durationMs} ms`));
+  scheduler.every('sync', '2s', () => sleep(100), {
+    jitterMs: 100,
+    catchUpMs: 0,
+  });
+  scheduler.on('success', (r) =>
+    say(`sync ran on ${r.instanceId} in ${r.durationMs} ms`),
+  );
 
   await scheduler.start();
   say(`started on ${scheduler.backend.name}`);
@@ -35,8 +51,15 @@ async function main() {
   await scheduler.stop();
 
   // Still usable after stop()
-  if (redis) say(`redis after stop(): ${await redis.ping()}`);
-  if (pool) say(`pg pool after stop(): ${(await pool.query('SELECT 1 AS one')).rows[0].one}`);
+  if (redis) {
+    const pong = await redis.ping();
+    say(`redis after stop(): ${pong}`);
+  }
+  if (pool) {
+    const { rows } = await pool.query('SELECT 1 AS one');
+    const [row] = rows;
+    say(`pg pool after stop(): ${row.one}`);
+  }
   redis?.disconnect();
   await pool?.end();
 }

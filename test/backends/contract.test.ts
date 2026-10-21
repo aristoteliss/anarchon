@@ -15,8 +15,15 @@ import { availableSpecs, makeBackend, uniqueId } from '../support';
 // GLIDE logs every server error (expected here: losers' XADDs are refused) to stdout.
 GlideLogger.setLoggerConfig('off');
 
-const futureSlot = (seconds: number) => Math.ceil(Date.now() / 1000) * 1000 + seconds * 1000;
-const input = (slot: number, instanceId: string, token = randomUUID()) => ({ job: 'job', slot, token, instanceId, historySize: 1000 });
+const futureSlot = (seconds: number) =>
+  Math.ceil(Date.now() / 1000) * 1000 + seconds * 1000;
+const input = (slot: number, instanceId: string, token = randomUUID()) => ({
+  job: 'job',
+  slot,
+  token,
+  instanceId,
+  historySize: 1000,
+});
 
 async function race(backends: Backend[], runs = 40): Promise<void> {
   await Promise.all(backends.map((b) => b.init()));
@@ -24,8 +31,14 @@ async function race(backends: Backend[], runs = 40): Promise<void> {
   const base = futureSlot(60);
   for (let i = 0; i < runs; i++) {
     const slot = base + i * 1000;
-    const wins = await Promise.all(backends.map((b, n) => b.claim(input(slot, `i${n}`))));
-    assert.equal(wins.filter(Boolean).length, 1, `run ${i}: exactly one winner, got ${JSON.stringify(wins)}`);
+    const wins = await Promise.all(
+      backends.map((b, n) => b.claim(input(slot, `i${n}`))),
+    );
+    assert.equal(
+      wins.filter(Boolean).length,
+      1,
+      `run ${i}: exactly one winner, got ${JSON.stringify(wins)}`,
+    );
   }
 }
 
@@ -50,7 +63,11 @@ describe('every backend', async () => {
           const slot = futureSlot(120);
           const mine = input(slot, 'A');
           assert.equal(await backend.claim(mine), true);
-          assert.equal(await backend.claim(mine), true, 'resent with the same token');
+          assert.equal(
+            await backend.claim(mine),
+            true,
+            'resent with the same token',
+          );
           assert.equal(await backend.claim(input(slot, 'B')), false);
         } finally {
           await backend.close();
@@ -74,7 +91,15 @@ describe('every backend', async () => {
           }
           await backend.saveResult(
             'job',
-            { slot: first, by: 'A', status: 'failed', startedAt: first, finishedAt: first + 5, durationMs: 5, error: 'Error: boom' },
+            {
+              slot: first,
+              by: 'A',
+              status: 'failed',
+              startedAt: first,
+              finishedAt: first + 5,
+              durationMs: 5,
+              error: 'Error: boom',
+            },
             1000,
           );
           const history = await backend.history('job', 10);

@@ -1,9 +1,16 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import { buildHistory, parseJson, toResult } from '../../history';
-import type { ClaimOutcome, RunClaim, RunRecord, RunStore, StoredResult } from '../../types';
+import { buildHistory, type ClaimRecord, parseJson } from '../../history';
+import type {
+  ClaimOutcome,
+  RunClaim,
+  RunRecord,
+  RunStatus,
+  RunStore,
+  StoredResult,
+} from '../../types';
 import type { KeyValueClient } from './client';
-import { parseEntries, toStr } from './replies';
+import { parseEntries, type StreamEntry, toResults, toStr } from './replies';
 import { ScriptRunner } from './scripts';
 
 /**
@@ -222,81 +229,111 @@ export class LeaseStore implements RunStore {
   }
 
   /** A key of one job. All of them share the hash tag `{<prefix><job>}`, so Redis Cluster keeps them on one node. */
-  key(job: string, part: 'state' | 'active' | 'slots' | 'runs' | 'results'): string {
+  key(
+    job: string,
+    part: 'state' | 'active' | 'slots' | 'runs' | 'results',
+  ): string {
     return `{${this.prefix}${job}}:${part}`;
   }
 
   /** Runs the CLAIM script: the whole decision is atomic. */
   async claim(input: RunClaim): Promise<ClaimOutcome> {
-    const reply = (await this.scripts.run(
-      CLAIM,
-      [this.key(input.job, 'state'), this.key(input.job, 'active'), this.key(input.job, 'slots'), this.key(input.job, 'runs')],
-      [
-        input.slot,
-        input.token,
-        input.instanceId,
-        input.leaseMs,
-        input.overlap,
-        input.maxAttempts,
-        input.historySize,
-        input.mode,
-        input.reason,
-        input.historyTtlMs ?? 0,
-        input.maxLateMs ?? 0,
-        input.keepMs ?? 0,
-      ],
-    )) as [unknown, unknown];
-    const kind = toStr(reply[0]);
-    const value = Number(toStr(reply[1]));
-    switch (kind) {
-      case 'won':
-        return { kind: 'won', attempt: value };
-      case 'running':
-        return { kind: 'running', attempt: value };
-      case 'overlap':
-        return { kind: 'overlap', slot: value };
-      case 'none':
-        return { kind: 'none' };
-      case 'late':
-        return { kind: 'late', lateMs: value };
-      default:
-        return { kind: 'done' };
-    }
+    const { job } = input;
+    const keys = [
+      this.key(job, 'state'),
+      this.key(job, 'active'),
+      this.key(job, 'slots'),
+      this.key(job, 'runs'),
+    ];
+
+    const reply = await this.scripts.run(CLAIM, keys, claimArgs(input));
+    return toClaimOutcome(reply);
   }
 
   /** Moves the lease end to now + leaseMs, if the run still carries this token. */
-  async heartbeat(job: string, slot: number, token: string, leaseMs: number): Promise<boolean> {
-    return Number(await this.scripts.run(HEARTBEAT, [this.key(job, 'state')], [slot, token, leaseMs])) === 1;
+  async heartbeat(
+    job: string,
+    slot: number,
+    token: string,
+    leaseMs: number,
+  ): Promise<boolean> {
+    const renewed = await this.scripts.run(
+      HEARTBEAT,
+      [this.key(job, 'state')],
+      [slot, token, leaseMs],
+    );
+    return Number(renewed) === 1;
   }
 
   /** Marks the run ended and takes it out of the active set, if it still carries this token. */
-  async finish(job: string, slot: number, token: string, status: 'success' | 'failed' | 'interrupted'): Promise<boolean> {
-    return Number(await this.scripts.run(FINISH, [this.key(job, 'state'), this.key(job, 'active')], [slot, token, status])) === 1;
+  async finish(
+    job: string,
+    slot: number,
+    token: string,
+    status: 'success' | 'failed' | 'interrupted',
+  ): Promise<boolean> {
+    const finished = await this.scripts.run(
+      FINISH,
+      [this.key(job, 'state'), this.key(job, 'active')],
+      [slot, token, status],
+    );
+    return Number(finished) === 1;
   }
 
   /** Ends a live lease now and counts a hand-over, if the run still carries this token. */
   async release(job: string, slot: number, token: string): Promise<boolean> {
-    return Number(await this.scripts.run(RELEASE, [this.key(job, 'state')], [slot, token])) === 1;
+    const released = await this.scripts.run(
+      RELEASE,
+      [this.key(job, 'state')],
+      [slot, token],
+    );
+    return Number(released) === 1;
   }
 
   /** The job's unfinished runs, each with whether its lease is alive on the server's clock. */
-  async active(job: string): Promise<Array<{ slot: number; attempt: number; alive: boolean }>> {
-    const reply = await this.scripts.run(ACTIVE, [this.key(job, 'state'), this.key(job, 'active')], []);
+  async active(
+    job: string,
+  ): Promise<Array<{ slot: number; attempt: number; alive: boolean }>> {
+    const reply = await this.scripts.run(
+      ACTIVE,
+      [this.key(job, 'state'), this.key(job, 'active')],
+      [],
+    );
+
     return (Array.isArray(reply) ? reply : []).map((row) => {
       const [slot, attempt, alive] = row as [unknown, unknown, unknown];
-      return { slot: Number(toStr(slot)), attempt: Number(toStr(attempt)), alive: Number(toStr(alive)) === 1 };
+      return {
+        slot: Number(toStr(slot)),
+        attempt: Number(toStr(attempt)),
+        alive: Number(toStr(alive)) === 1,
+      };
     });
   }
 
   /** Adds the attempt's result to the results sorted set and trims it. */
-  async saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void> {
+  async saveResult(
+    job: string,
+    result: StoredResult,
+    historySize: number,
+    historyTtlMs?: number,
+  ): Promise<void> {
     const redis = await this.redis();
     const key = this.key(job, 'results');
+
     // Scored by when the attempt ended, so historyTtlMs keeps a catch-up of an old slot; the fraction orders attempts that end in the same ms.
-    const score = Math.max(result.slot, result.finishedAt) + Math.min(result.attempt ?? 1, 99) / 100;
+    const score =
+      Math.max(result.slot, result.finishedAt) +
+      Math.min(result.attempt ?? 1, 99) / 100;
     await redis.send('ZADD', [key, score, JSON.stringify(result)]);
+
     await redis.send('ZREMRANGEBYRANK', [key, 0, -(historySize * 2 + 1)]);
-    if (historyTtlMs) await redis.send('ZREMRANGEBYSCORE', [key, '-inf', `(${result.finishedAt - historyTtlMs}`]);
+    if (historyTtlMs) {
+      await redis.send('ZREMRANGEBYSCORE', [
+        key,
+        '-inf',
+        `(${result.finishedAt - historyTtlMs}`,
+      ]);
+    }
   }
 
   /**
@@ -305,42 +342,127 @@ export class LeaseStore implements RunStore {
    */
   async history(job: string, limit: number): Promise<RunRecord[]> {
     const redis = await this.redis();
-    const entries = parseEntries(await redis.send('XREVRANGE', [this.key(job, 'runs'), '+', '-', 'COUNT', limit]));
-    const claims = entries.flatMap((entry) => {
-      const slot = Number(entry.fields.slot);
-      if (!Number.isFinite(slot) || !entry.fields.by) return [];
-      return [
-        {
-          slot,
-          by: entry.fields.by,
-          at: Number(entry.fields.at),
-          attempt: Number(entry.fields.attempt) || 1,
-          reason: entry.fields.reason as RunRecord['reason'],
-          manual: entry.fields.reason === 'manual',
-        },
-      ];
-    });
+    const stream = await redis.send('XREVRANGE', [
+      this.key(job, 'runs'),
+      '+',
+      '-',
+      'COUNT',
+      limit,
+    ]);
+    const claims = parseEntries(stream).flatMap(
+      (entry) => toClaimRecord(entry) ?? [],
+    );
     if (claims.length === 0) return [];
-    let min = Infinity;
-    for (const { slot } of claims) min = Math.min(min, slot);
-    const members = await redis.send('ZRANGEBYSCORE', [this.key(job, 'results'), min, '+inf']);
-    const results = (Array.isArray(members) ? members : []).flatMap((m) => toResult(parseJson(toStr(m))) ?? []);
-    const slots = [...new Set(claims.map((c) => c.slot))];
-    const reply = (await this.scripts.run(STATES, [this.key(job, 'state')], slots)) as unknown[];
-    const now = Number(toStr(reply[0]));
-    const states = new Map(slots.map((slot, i) => [slot, (parseJson(toStr(reply[i + 1]) || 'null') as StoredRun | null) ?? null] as const));
+
+    const oldest = claims.reduce(
+      (min, claim) => Math.min(min, claim.slot),
+      Infinity,
+    );
+    const members = await redis.send('ZRANGEBYSCORE', [
+      this.key(job, 'results'),
+      oldest,
+      '+inf',
+    ]);
+    const results = toResults(members);
+    const { now, states } = await this.readStates(job, claims);
 
     return buildHistory({
       job,
       claims,
       results,
       limit,
-      pendingStatus: (claim) => {
-        const run = states.get(claim.slot);
-        if (!run || run.a !== claim.attempt) return 'interrupted';
-        if (run.s === 'running') return run.l >= now ? 'running' : 'interrupted';
-        return run.s;
-      },
+      pendingStatus: (claim) =>
+        pendingStatusOf(states.get(claim.slot), claim.attempt, now),
     });
   }
+
+  /** The stored state of each claimed slot, read in one script call, with the server's clock. */
+  private async readStates(
+    job: string,
+    claims: ClaimRecord[],
+  ): Promise<{ now: number; states: Map<number, StoredRun | null> }> {
+    const slots = [...new Set(claims.map((claim) => claim.slot))];
+    const [clock, ...runs] = (await this.scripts.run(
+      STATES,
+      [this.key(job, 'state')],
+      slots,
+    )) as unknown[];
+
+    const states = new Map(
+      slots.map((slot, i) => [slot, toStoredRun(runs[i])] as const),
+    );
+    return { now: Number(toStr(clock)), states };
+  }
+}
+
+/** The claim of one stream entry; undefined for an entry without a slot or an instance. */
+function toClaimRecord({ fields }: StreamEntry): ClaimRecord | undefined {
+  const slot = Number(fields.slot);
+  if (!Number.isFinite(slot) || !fields.by) return undefined;
+
+  return {
+    slot,
+    by: fields.by,
+    at: Number(fields.at),
+    attempt: Number(fields.attempt) || 1,
+    reason: fields.reason as RunRecord['reason'],
+    manual: fields.reason === 'manual',
+  };
+}
+
+/** The CLAIM script's ARGV, in the order the script reads it. */
+function claimArgs(input: RunClaim): Array<string | number> {
+  return [
+    input.slot,
+    input.token,
+    input.instanceId,
+    input.leaseMs,
+    input.overlap,
+    input.maxAttempts,
+    input.historySize,
+    input.mode,
+    input.reason,
+    input.historyTtlMs ?? 0,
+    input.maxLateMs ?? 0,
+    input.keepMs ?? 0,
+  ];
+}
+
+/** The CLAIM script's `{kind, value}` reply as an outcome; an unknown kind reads as 'done'. */
+function toClaimOutcome(reply: unknown): ClaimOutcome {
+  const [rawKind, rawValue] = reply as [unknown, unknown];
+  const kind = toStr(rawKind);
+  const value = Number(toStr(rawValue));
+
+  switch (kind) {
+    case 'won':
+      return { kind: 'won', attempt: value };
+    case 'running':
+      return { kind: 'running', attempt: value };
+    case 'overlap':
+      return { kind: 'overlap', slot: value };
+    case 'none':
+      return { kind: 'none' };
+    case 'late':
+      return { kind: 'late', lateMs: value };
+    default:
+      return { kind: 'done' };
+  }
+}
+
+/** One run's state as the STATES script returns it; null when the run has none. */
+function toStoredRun(raw: unknown): StoredRun | null {
+  const text = toStr(raw);
+  return text ? (parseJson(text) as StoredRun | null) : null;
+}
+
+/** An attempt without a result is 'running' only while it is the current attempt with a live lease. */
+function pendingStatusOf(
+  run: StoredRun | null | undefined,
+  attempt: number | undefined,
+  now: number,
+): RunStatus {
+  if (!run || run.a !== attempt) return 'interrupted';
+  if (run.s === 'running') return run.l >= now ? 'running' : 'interrupted';
+  return run.s;
 }

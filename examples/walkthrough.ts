@@ -34,16 +34,25 @@
 import { type JobContext, Scheduler } from '../src';
 import { backendFromEnv, say, sleep } from './shared';
 
-const PATIENT = { leaseMs: 10 * 60_000, heartbeatMs: 60_000, maxLateMs: 10 * 60_000 };
+const PATIENT = {
+  leaseMs: 10 * 60_000,
+  heartbeatMs: 60_000,
+  maxLateMs: 10 * 60_000,
+};
 
 async function main() {
-  const [a, b] = ['A', 'B'].map((id) => new Scheduler({ backend: backendFromEnv('walkthrough'), instanceId: id, ...PATIENT })) as [
-    Scheduler,
-    Scheduler,
-  ];
+  const [a, b] = ['A', 'B'].map(
+    (id) =>
+      new Scheduler({
+        backend: backendFromEnv('walkthrough'),
+        instanceId: id,
+        ...PATIENT,
+      }),
+  ) as [Scheduler, Scheduler];
   let runs = 0;
 
   for (const scheduler of [a, b]) {
+    const jitterMs = scheduler === a ? 0 : 400;
     scheduler.every(
       'job',
       '10s',
@@ -55,11 +64,17 @@ async function main() {
         await sleep(500);
         runs++;
       },
-      { jitterMs: scheduler === a ? 0 : 400, catchUpMs: 0 },
+      { jitterMs, catchUpMs: 0 },
     );
     scheduler.on('start', (e) => say(`${e.instanceId}: event 'start'`));
-    scheduler.on('success', (r) => say(`${r.instanceId}: event 'success' after ${r.durationMs} ms`));
-    scheduler.on('skip', (e) => say(`${e.instanceId}: event 'skip' (${e.reason}): it is now the backup of that run`));
+    scheduler.on('success', (r) =>
+      say(`${r.instanceId}: event 'success' after ${r.durationMs} ms`),
+    );
+    scheduler.on('skip', (e) =>
+      say(
+        `${e.instanceId}: event 'skip' (${e.reason}): it is now the backup of that run`,
+      ),
+    );
     scheduler.on('error', (e) => say(`error: ${String(e.error)}`));
   }
 
@@ -67,11 +82,17 @@ async function main() {
   debugger;
   await a.start(); // F11 here: start() -> ensureReady() -> schedule() -> arm(), recover()
   await b.start();
-  say(`both started on ${a.backend.name}; the next run is at ${a.nextRun('job')?.toISOString().slice(11, 19)}`);
+  say(
+    `both started on ${a.backend.name}; the next run is at ${a.nextRun('job')?.toISOString().slice(11, 19)}`,
+  );
 
-  while (runs < 2) await sleep(100);
+  while (runs < 2) {
+    await sleep(100);
+  }
+
+  const history = await b.history('job', 5);
   console.table(
-    (await b.history('job', 5)).map((r) => ({
+    history.map((r) => ({
       scheduled: r.scheduledAt.toISOString().slice(11, 19),
       by: r.instanceId,
       attempt: r.attempt,

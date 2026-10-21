@@ -11,7 +11,8 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 const tarball = process.argv[2];
-if (!tarball) throw new Error('usage: node scripts/consumer-smoke.mjs <tarball>');
+if (!tarball)
+  throw new Error('usage: node scripts/consumer-smoke.mjs <tarball>');
 
 // A Node without the built-in node:sqlite gets better-sqlite3 12, the last line that supports Node 20.
 const builtin = await import('node:sqlite').then(
@@ -35,9 +36,17 @@ const job = `
 `;
 
 const consumer = mkdtempSync(resolve(tmpdir(), 'anarchon-smoke-'));
-const run = (command, args) => execFileSync(command, args, { cwd: consumer, stdio: 'inherit' });
+const run = (command, args) =>
+  execFileSync(command, args, { cwd: consumer, stdio: 'inherit' });
 try {
-  writeFileSync(resolve(consumer, 'package.json'), JSON.stringify({ name: 'anarchon-smoke-consumer', private: true, version: '1.0.0' }));
+  writeFileSync(
+    resolve(consumer, 'package.json'),
+    JSON.stringify({
+      name: 'anarchon-smoke-consumer',
+      private: true,
+      version: '1.0.0',
+    }),
+  );
   writeFileSync(
     resolve(consumer, 'run.cjs'),
     `const { Scheduler, SqliteBackend } = require('anarchon');
@@ -54,7 +63,9 @@ ${job}console.log('import: ran one job');
   run('npm', ['install', '--no-audit', '--no-fund', ...packages]);
   run(process.execPath, ['run.cjs']);
   run(process.execPath, ['run.mjs']);
-  console.log(`\nanarchon on Node ${process.version} with ${driver}: installs and runs a job.`);
+  console.log(
+    `\nanarchon on Node ${process.version} with ${driver}: installs and runs a job.`,
+  );
 } finally {
   rmSync(consumer, { recursive: true, force: true });
 }

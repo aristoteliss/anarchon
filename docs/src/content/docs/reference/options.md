@@ -38,6 +38,7 @@ The last argument of `every()`, `cron()` and `at()`. Guide: [Job options](../../
 | `overlap` | `'skip' \| 'allow'` | `'skip'` | yes | Skip a run while the previous one is going, or allow both |
 | `maxAttempts` | `number` (1 to 100) | `3` | yes | Times a run may be started when runners die |
 | `catchUpMs` | `number` | `300000` | yes | On start, run the latest slot if missed and due less than this ago. `0` = never |
+| `yieldAfterFailure` | `boolean` | `false` | yes | After a failed run here, wait until `slot + jitterMs + heartbeatMs` before claiming the next one, so a healthy instance claims it first |
 | `historySize` | `number` | scheduler's | | Runs kept for this job |
 | `historyTtlMs` | `number` | scheduler's | | Maximum age of this job's history |
 | `data` | value or function | none | | Data for this job's runs, read as `ctx.data`. On top of the scheduler's |

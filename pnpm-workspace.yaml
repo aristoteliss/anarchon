@@ -8,3 +8,6 @@ allowBuilds:
   esbuild: true
   protobufjs: true
   sharp: true
+
+minimumReleaseAgeExclude:
+  - '@nestjs/locks@0.0.4'

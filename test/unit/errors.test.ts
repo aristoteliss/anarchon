@@ -5,7 +5,15 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, test } from 'vitest';
 
-import { type Backend, type ErrorCode, isAnarchonError, RabbitMQBackend, Scheduler, type SqlClient, SqliteBackend } from '../../src';
+import {
+  type Backend,
+  type ErrorCode,
+  isAnarchonError,
+  RabbitMQBackend,
+  Scheduler,
+  type SqlClient,
+  SqliteBackend,
+} from '../../src';
 
 const memoryBackend = (): Backend => ({
   name: 'memory',
@@ -46,7 +54,9 @@ test('errors carry a stable code, so callers need not match on the message', asy
     'ANARCHON_UNKNOWN_OPTION',
   );
   assert.equal(
-    code(() => rabbit.every('b', '1m', () => {}, { overlap: 'allow' } as never)),
+    code(() =>
+      rabbit.every('b', '1m', () => {}, { overlap: 'allow' } as never),
+    ),
     'ANARCHON_UNSUPPORTED',
   );
   assert.equal(
@@ -62,28 +72,45 @@ test('errors carry a stable code, so callers need not match on the message', asy
     'ANARCHON_UNKNOWN_JOB',
   );
   assert.equal(
-    code(() => new Scheduler({ name: 'x', backend: memoryBackend() }) && new Scheduler({ name: 'x', backend: memoryBackend() })),
+    code(
+      () =>
+        new Scheduler({ name: 'x', backend: memoryBackend() }) &&
+        new Scheduler({ name: 'x', backend: memoryBackend() }),
+    ),
     'ANARCHON_SCHEDULER_EXISTS',
   );
   assert.equal(
     code(() => Scheduler.get('nobody')),
     'ANARCHON_NO_SCHEDULER',
   );
-  await assert.rejects(scheduler.runNow('a'), (error) => isAnarchonError(error, 'ANARCHON_STATE'));
+  await assert.rejects(scheduler.runNow('a'), (error) =>
+    isAnarchonError(error, 'ANARCHON_STATE'),
+  );
 
   const oldClient: SqlClient = {
     all: async () => [{ v: '3.30.0' }],
     transaction: async (fn) => fn({ all: async () => [] }),
     close: async () => {},
   };
-  await assert.rejects(new SqliteBackend({ database: oldClient }).init(), (error) => isAnarchonError(error, 'ANARCHON_SERVER'));
+  await assert.rejects(
+    new SqliteBackend({ database: oldClient }).init(),
+    (error) => isAnarchonError(error, 'ANARCHON_SERVER'),
+  );
 
   const futureClient: SqlClient = {
-    all: async (sql) => (sql.includes('sqlite_version') ? [{ v: '3.35.0' }] : sql.includes('SELECT value FROM') ? [{ value: '999' }] : []),
+    all: async (sql) =>
+      sql.includes('sqlite_version')
+        ? [{ v: '3.35.0' }]
+        : sql.includes('SELECT value FROM')
+          ? [{ value: '999' }]
+          : [],
     transaction: async (fn) => fn({ all: async () => [] }),
     close: async () => {},
   };
-  await assert.rejects(new SqliteBackend({ database: futureClient }).init(), (error) => isAnarchonError(error, 'ANARCHON_STORE_FORMAT'));
+  await assert.rejects(
+    new SqliteBackend({ database: futureClient }).init(),
+    (error) => isAnarchonError(error, 'ANARCHON_STORE_FORMAT'),
+  );
 
   const refusedManual = new Scheduler({
     backend: {
@@ -99,7 +126,9 @@ test('errors carry a stable code, so callers need not match on the message', asy
   });
   refusedManual.every('a', '1h', () => {});
   await refusedManual.start();
-  await assert.rejects(refusedManual.runNow('a'), (error) => isAnarchonError(error, 'ANARCHON_STORE'));
+  await assert.rejects(refusedManual.runNow('a'), (error) =>
+    isAnarchonError(error, 'ANARCHON_STORE'),
+  );
   await refusedManual.stop();
 
   const error = (() => {
@@ -125,7 +154,11 @@ test('every Error constructed and thrown in src/ is wrapped in coded(), and ever
   const files = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
       const path = join(dir, name);
-      return statSync(path).isDirectory() ? files(path) : path.endsWith('.ts') ? [path] : [];
+      return statSync(path).isDirectory()
+        ? files(path)
+        : path.endsWith('.ts')
+          ? [path]
+          : [];
     });
   const allFiles = files(srcDir);
   const stripComments = (source: string): string =>
@@ -136,17 +169,23 @@ test('every Error constructed and thrown in src/ is wrapped in coded(), and ever
       .join('\n');
   const uncoded = allFiles.flatMap((file) => {
     const clean = stripComments(readFileSync(file, 'utf8'));
-    return [...clean.matchAll(/\bthrow\s+new\s+\w*Error\b/g)].map((m) => `${file}:${clean.slice(0, m.index).split('\n').length}`);
+    return [...clean.matchAll(/\bthrow\s+new\s+\w*Error\b/g)].map(
+      (m) => `${file}:${clean.slice(0, m.index).split('\n').length}`,
+    );
   });
   assert.deepEqual(uncoded, []);
 
   const errorsSource = readFileSync(join(srcDir, 'errors.ts'), 'utf8');
-  const declaredCodes = [...errorsSource.matchAll(/\|\s*'(ANARCHON_[A-Z_]+)'/g)].map((m) => m[1]);
+  const declaredCodes = [
+    ...errorsSource.matchAll(/\|\s*'(ANARCHON_[A-Z_]+)'/g),
+  ].map((m) => m[1]);
   assert.ok(declaredCodes.length > 0);
   const nonErrorsSource = allFiles
     .filter((file) => !file.endsWith('/errors.ts'))
     .map((file) => stripComments(readFileSync(file, 'utf8')))
     .join('\n');
-  const unusedCodes = declaredCodes.filter((name) => !nonErrorsSource.includes(`'${name}'`));
+  const unusedCodes = declaredCodes.filter(
+    (name) => !nonErrorsSource.includes(`'${name}'`),
+  );
   assert.deepEqual(unusedCodes, []);
 });

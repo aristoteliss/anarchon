@@ -36,5 +36,8 @@ export interface SchedulerCore {
    * Emits to the user's listeners. Never throws: a listener that throws is logged, and an 'error'
    * nobody listens for goes to the logger.
    */
-  emit<E extends keyof SchedulerEvents>(event: E, payload: SchedulerEvents[E]): void;
+  emit<E extends keyof SchedulerEvents>(
+    event: E,
+    payload: SchedulerEvents[E],
+  ): void;
 }

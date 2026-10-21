@@ -271,11 +271,12 @@ The layers are merged from the most general to the most specific: two plain obje
 | `overlap` | `'skip'` | Skip a run while the previous one is still running, or `'allow'` both |
 | `maxAttempts` | `3` | How many times a run may be started when runners die (hand-overs on `stop()` don't count) |
 | `catchUpMs` | `300000` | On start, run the latest run if it was missed and due less than this ago. `0` turns it off |
+| `yieldAfterFailure` | `false` | After a run failed on this instance, wait until `slot + jitterMs + heartbeatMs` before claiming the next one, so a healthy instance claims it first |
 | `offsetMs` | `0` | `every()` only: shift the grid |
 | `timezone` | scheduler's | `cron()` only |
 | `data` | none | Data for this job's runs, read as `ctx.data`. A value, or a function called when a run starts |
 
-`overlap`, `maxAttempts` and `catchUpMs`, like the scheduler's `leaseMs` and `heartbeatMs`, need a backend with leases (Redis or Valkey `lease`, PostgreSQL, SQLite). On another backend they aren't offered by the types, and a job or scheduler that sets them anyway is refused with an error. `at()` takes no `overlap`.
+`overlap`, `maxAttempts`, `catchUpMs` and `yieldAfterFailure`, like the scheduler's `leaseMs` and `heartbeatMs`, need a backend with leases (Redis or Valkey `lease`, PostgreSQL, SQLite). On another backend they aren't offered by the types, and a job or scheduler that sets them anyway is refused with an error. `at()` takes no `overlap`.
 
 ### Lifecycle
 

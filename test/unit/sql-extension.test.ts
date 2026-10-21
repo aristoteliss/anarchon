@@ -3,7 +3,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
 
-import { fromSqliteDatabase, Scheduler, SqlBackend, type SqlClient, type SqlDialect } from '../../src';
+import {
+  fromSqliteDatabase,
+  Scheduler,
+  SqlBackend,
+  type SqlClient,
+  type SqlDialect,
+} from '../../src';
 
 /** A SQL backend of its own, built only from what the package exports. */
 class EmbeddedSqlBackend extends SqlBackend {
@@ -24,7 +30,10 @@ class EmbeddedSqlBackend extends SqlBackend {
 
   protected async connect(): Promise<{ client: SqlClient; owned: boolean }> {
     const { DatabaseSync } = await import('node:sqlite');
-    return { client: fromSqliteDatabase(new DatabaseSync(':memory:')), owned: true };
+    return {
+      client: fromSqliteDatabase(new DatabaseSync(':memory:')),
+      owned: true,
+    };
   }
 
   protected async checkServer(): Promise<void> {}
@@ -36,7 +45,10 @@ test('a SQL backend for another database can be built on SqlBackend, with leases
   } catch {
     return t.skip('this Node has no node:sqlite');
   }
-  const scheduler = new Scheduler({ backend: new EmbeddedSqlBackend(), instanceId: 'A' });
+  const scheduler = new Scheduler({
+    backend: new EmbeddedSqlBackend(),
+    instanceId: 'A',
+  });
   scheduler.every('job', '1h', () => {}, { maxAttempts: 2 });
   await scheduler.start();
   try {

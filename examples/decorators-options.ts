@@ -50,7 +50,10 @@ class Reports {
   }
 
   // On the scheduler named 'billing', with data of its own: what this job is allowed to do.
-  @Cron('invoices-close', '*/15 * * * * *', { scheduler: 'billing', data: { permission: 'invoices:close' } })
+  @Cron('invoices-close', '*/15 * * * * *', {
+    scheduler: 'billing',
+    data: { permission: 'invoices:close' },
+  })
   close(ctx: JobContext<{ permission: string }>) {
     say(`invoices-close, allowed to ${ctx.data.permission}`);
   }
@@ -78,13 +81,18 @@ async function main() {
     Scheduler.get().register(new Tenant(), {
       prefix: `${tenant}:`,
       // A function is called when each run starts, so the token is the one valid at that moment.
-      defaults: { timeoutMs: 5_000, data: () => ({ tenant, token: `${tenant}-${Date.now() % 10_000}` }) },
+      defaults: {
+        timeoutMs: 5_000,
+        data: () => ({ tenant, token: `${tenant}-${Date.now() % 10_000}` }),
+      },
     });
   }
 
   for (const scheduler of Scheduler.all()) {
     say(`${scheduler.name ?? 'default'} (${scheduler.backend.name}):`);
-    for (const job of scheduler.jobs()) say(`  ${job.name.padEnd(16)} ${job.schedule}`);
+    for (const job of scheduler.jobs()) {
+      say(`  ${job.name.padEnd(16)} ${job.schedule}`);
+    }
   }
 
   const shutdown = async () => {

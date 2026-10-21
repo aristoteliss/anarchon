@@ -3,7 +3,13 @@
 import { coded } from './errors';
 import { parseDuration } from './schedule';
 import type { Scheduler } from './scheduler/scheduler';
-import type { AtJobOptions, CronJobOptions, EveryJobOptions, JobHandler, JobOptions } from './types';
+import type {
+  AtJobOptions,
+  CronJobOptions,
+  EveryJobOptions,
+  JobHandler,
+  JobOptions,
+} from './types';
 
 /**
  * Which scheduler a job declared with a decorator goes to.
@@ -81,7 +87,11 @@ export type DeclaredJob = Declaration & { name: string; handler: JobHandler };
  */
 export interface JobDecorator {
   <Data>(method: JobHandler<Data>, context: ClassMethodDecoratorContext): void;
-  <Method extends JobHandler<never>>(target: object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<Method>): void;
+  <Method extends JobHandler<never>>(
+    target: object,
+    propertyKey: string | symbol,
+    descriptor: TypedPropertyDescriptor<Method>,
+  ): void;
 }
 
 type AnyClass = abstract new (...args: never[]) => object;
@@ -99,7 +109,10 @@ type AnyClass = abstract new (...args: never[]) => object;
  * ```
  */
 export interface ScheduledDecorator {
-  <Class extends AnyClass>(target: Class, context: ClassDecoratorContext<Class>): void;
+  <Class extends AnyClass>(
+    target: Class,
+    context: ClassDecoratorContext<Class>,
+  ): void;
   <Class extends AnyClass>(target: Class): Class;
 }
 
@@ -144,7 +157,10 @@ export interface RegisterOptions {
 
 const declarations = new WeakMap<object, Declaration[]>();
 /** Method to the jobs declared on it that no object has added to a scheduler, for the warning a starting scheduler gives. */
-const unadded = new Map<object, Array<{ label: string; legacy: boolean; scheduled: boolean }>>();
+const unadded = new Map<
+  object,
+  Array<{ label: string; legacy: boolean; scheduled: boolean }>
+>();
 let objectCreated: (target: object) => void = () => {};
 
 /** Sets what happens when an object of a decorated class is created. The scheduler registry sets it. */
@@ -153,14 +169,26 @@ export function onObjectCreated(handler: (target: object) => void): void {
 }
 
 /** The methods an object of a class has, from its prototype up: an overriding method hides the one it overrides. */
-function* methodsFrom(prototype: object | null): Generator<[string | symbol, (...args: never[]) => unknown]> {
+function* methodsFrom(
+  prototype: object | null,
+): Generator<[string | symbol, (...args: never[]) => unknown]> {
   const seen = new Set<string | symbol>();
-  for (let proto = prototype; proto && proto !== Object.prototype; proto = Object.getPrototypeOf(proto)) {
+
+  for (
+    let proto = prototype;
+    proto && proto !== Object.prototype;
+    proto = Object.getPrototypeOf(proto)
+  ) {
     for (const key of Reflect.ownKeys(proto)) {
       if (seen.has(key)) continue;
       seen.add(key);
-      const method: unknown = Object.getOwnPropertyDescriptor(proto, key)?.value;
-      if (typeof method === 'function') yield [key, method as (...args: never[]) => unknown];
+      const method: unknown = Object.getOwnPropertyDescriptor(
+        proto,
+        key,
+      )?.value;
+      if (typeof method === 'function') {
+        yield [key, method as (...args: never[]) => unknown];
+      }
     }
   }
 }
@@ -169,21 +197,26 @@ function* methodsFrom(prototype: object | null): Generator<[string | symbol, (..
 export function declaredJobs(target: object): DeclaredJob[] {
   const jobs: DeclaredJob[] = [];
   const className = target.constructor?.name;
+
   for (const [key, method] of methodsFrom(Object.getPrototypeOf(target))) {
+    const fallback = className ? `${className}-${String(key)}` : String(key);
     for (const declaration of declarations.get(method) ?? []) {
       jobs.push({
         ...declaration,
-        name: declaration.name ?? (className ? `${className}-${String(key)}` : String(key)),
+        name: declaration.name ?? fallback,
         handler: (ctx) => (method as JobHandler).call(target, ctx),
       });
     }
   }
+
   return jobs;
 }
 
 /** An object added its jobs: they are no longer reported as declared but never added. */
 export function markAdded(target: object): void {
-  for (const [, method] of methodsFrom(Object.getPrototypeOf(target))) unadded.delete(method);
+  for (const [, method] of methodsFrom(Object.getPrototypeOf(target))) {
+    unadded.delete(method);
+  }
 }
 
 /** One warning for each declared job that no object has added to a scheduler. Each is given once. */
@@ -195,6 +228,7 @@ export function takeUnaddedWarnings(): string[] {
         ? `${label} is not scheduled: with legacy decorators, add @Scheduled() to the class or call scheduler.register(object)`
         : `${label} is not scheduled: no object of its class has been created`,
     );
+
   unadded.clear();
   return warnings;
 }
@@ -205,21 +239,35 @@ export function forgetUnadded(): void {
 }
 
 function declare(decorator: string, declaration: Declaration): JobDecorator {
-  return (first: object, second: ClassMethodDecoratorContext | string | symbol, descriptor?: PropertyDescriptor): void => {
+  return (
+    first: object,
+    second: ClassMethodDecoratorContext | string | symbol,
+    descriptor?: PropertyDescriptor,
+  ): void => {
     const standard = typeof second === 'object';
     const method: unknown = standard ? first : descriptor?.value;
-    // Jobs are found on the prototype of an object, which static and #private methods are not on.
-    const onPrototype = standard ? second.kind === 'method' && !second.static && !second.private : typeof first !== 'function';
+    const onPrototype = isOnPrototype(first, second);
     if (typeof method !== 'function' || !onPrototype) {
-      throw coded(new TypeError(`@${decorator} can only decorate a public instance method`), 'ANARCHON_INVALID_ARGUMENT');
+      throw coded(
+        new TypeError(
+          `@${decorator} can only decorate a public instance method`,
+        ),
+        'ANARCHON_INVALID_ARGUMENT',
+      );
     }
+
     // Decorators are applied bottom-up; adding at the front keeps the order they are written in.
-    declarations.set(method, [declaration, ...(declarations.get(method) ?? [])]);
-    const schedule =
-      declaration.type === 'cron' ? declaration.expression : declaration.type === 'every' ? declaration.interval : declaration.when;
-    const job = declaration.name ? `@${decorator} "${declaration.name}"` : `@${decorator}(${JSON.stringify(schedule)})`;
-    const where = standard ? `the method "${String(second.name)}"` : `${first.constructor?.name || 'a class'}.${String(second)}`;
-    unadded.set(method, [...(unadded.get(method) ?? []), { label: `${job} on ${where}`, legacy: !standard, scheduled: false }]);
+    declarations.set(method, [
+      declaration,
+      ...(declarations.get(method) ?? []),
+    ]);
+    const job = describeJob(decorator, declaration);
+    const where = describeMethod(first, second);
+    unadded.set(method, [
+      ...(unadded.get(method) ?? []),
+      { label: `${job} on ${where}`, legacy: !standard, scheduled: false },
+    ]);
+
     // Standard decorators can run code when an object is created. Legacy ones can't: @Scheduled() does it for them.
     if (standard) {
       second.addInitializer(function (this: unknown) {
@@ -227,6 +275,40 @@ function declare(decorator: string, declaration: Declaration): JobDecorator {
       });
     }
   };
+}
+
+/** Whether the decorated method is one that objects of the class have. */
+function isOnPrototype(
+  first: object,
+  second: ClassMethodDecoratorContext | string | symbol,
+): boolean {
+  // Jobs are found on the prototype of an object, which static and #private methods are not on.
+  if (typeof second === 'object') {
+    return second.kind === 'method' && !second.static && !second.private;
+  }
+  return typeof first !== 'function';
+}
+
+/** How a warning names a declared job: by its name, else by its decorator and schedule. */
+function describeJob(decorator: string, declaration: Declaration): string {
+  if (declaration.name) return `@${decorator} "${declaration.name}"`;
+
+  const schedule =
+    declaration.type === 'cron'
+      ? declaration.expression
+      : declaration.type === 'every'
+        ? declaration.interval
+        : declaration.when;
+  return `@${decorator}(${JSON.stringify(schedule)})`;
+}
+
+/** How a warning names a decorated method; legacy decorators see the prototype, not the method's name. */
+function describeMethod(
+  first: object,
+  second: ClassMethodDecoratorContext | string | symbol,
+): string {
+  if (typeof second === 'object') return `the method "${String(second.name)}"`;
+  return `${first.constructor?.name || 'a class'}.${String(second)}`;
 }
 
 interface ScheduleKind {
@@ -247,24 +329,31 @@ interface Parsed<Value, Options> {
 }
 
 /** Splits `(name, value, options)` from `(value, options)`, and takes the decorator's own options out of the job's. */
-function parse<Value, Options>(kind: ScheduleKind, args: unknown[]): Parsed<Value, Options> {
+function parse<Value, Options>(
+  kind: ScheduleKind,
+  args: unknown[],
+): Parsed<Value, Options> {
   const [first, second, third] = args;
   const nameFirst = kind.isValue(second);
   // The name and the schedule can both be strings, so swapping them, or passing something else as the
   // second string, would otherwise surface later as an invalid schedule of a job with a strange name.
-  if (nameFirst && (typeof first !== 'string' || (!kind.looksValid(second) && kind.looksValid(first)))) {
+  if (
+    nameFirst &&
+    (typeof first !== 'string' ||
+      (!kind.looksValid(second) && kind.looksValid(first)))
+  ) {
     throw coded(
-      new TypeError(`@${kind.decorator}(${JSON.stringify(first)}, ${JSON.stringify(second)}): ${kind.usage}`),
+      new TypeError(
+        `@${kind.decorator}(${JSON.stringify(first)}, ${JSON.stringify(second)}): ${kind.usage}`,
+      ),
       'ANARCHON_INVALID_ARGUMENT',
     );
   }
-  const { name, scheduler, ...options } = ((nameFirst ? third : second) ?? {}) as DecoratedJobOptions<Options>;
-  if (scheduler !== undefined && (typeof scheduler === 'string' ? scheduler === '' : typeof scheduler !== 'object' || scheduler === null)) {
-    throw coded(
-      new TypeError(`@${kind.decorator}: scheduler must be the name of a scheduler, or a Scheduler`),
-      'ANARCHON_INVALID_ARGUMENT',
-    );
-  }
+
+  const { name, scheduler, ...options } = ((nameFirst ? third : second) ??
+    {}) as DecoratedJobOptions<Options>;
+  refuseScheduler(kind, scheduler);
+
   return {
     name: nameFirst ? (first as string) : name,
     scheduler,
@@ -273,7 +362,26 @@ function parse<Value, Options>(kind: ScheduleKind, args: unknown[]): Parsed<Valu
   };
 }
 
-const isTextOrNumber = (arg: unknown): boolean => typeof arg === 'string' || typeof arg === 'number';
+/** Throws when the `scheduler` option is neither a scheduler's name nor a Scheduler. */
+function refuseScheduler(kind: ScheduleKind, scheduler: unknown): void {
+  if (scheduler === undefined) return;
+
+  const invalid =
+    typeof scheduler === 'string'
+      ? scheduler === ''
+      : typeof scheduler !== 'object' || scheduler === null;
+  if (!invalid) return;
+
+  throw coded(
+    new TypeError(
+      `@${kind.decorator}: scheduler must be the name of a scheduler, or a Scheduler`,
+    ),
+    'ANARCHON_INVALID_ARGUMENT',
+  );
+}
+
+const isTextOrNumber = (arg: unknown): boolean =>
+  typeof arg === 'string' || typeof arg === 'number';
 
 function isDuration(value: unknown): boolean {
   if (!isTextOrNumber(value)) return false;
@@ -289,7 +397,8 @@ const CRON: ScheduleKind = {
   decorator: 'Cron',
   isValue: (arg) => typeof arg === 'string',
   // 5 to 7 fields, or a nickname such as @daily.
-  looksValid: (value) => typeof value === 'string' && /^\s*(@\w+|\S+(\s+\S+){4,6})\s*$/.test(value),
+  looksValid: (value) =>
+    typeof value === 'string' && /^\s*(@\w+|\S+(\s+\S+){4,6})\s*$/.test(value),
   usage:
     "with two strings, the first is the job's name and the second the cron expression: @Cron(name, expression). " +
     'A time zone goes in the options: @Cron(expression, { timezone })',
@@ -299,23 +408,24 @@ const EVERY: ScheduleKind = {
   decorator: 'Every',
   isValue: isTextOrNumber,
   looksValid: isDuration,
-  usage: "the job's name, a string, comes first and the interval second: @Every(name, interval)",
+  usage:
+    "the job's name, a string, comes first and the interval second: @Every(name, interval)",
 };
+
+/** The time an argument of @At stands for, in Unix ms; NaN when it stands for none. */
+function toTime(value: unknown): number {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return Date.parse(value);
+  return Number.NaN;
+}
 
 const AT: ScheduleKind = {
   decorator: 'At',
   isValue: (arg) => isTextOrNumber(arg) || arg instanceof Date,
-  looksValid: (value) =>
-    Number.isFinite(
-      value instanceof Date
-        ? value.getTime()
-        : typeof value === 'number'
-          ? value
-          : typeof value === 'string'
-            ? Date.parse(value)
-            : Number.NaN,
-    ),
-  usage: "the job's name, a string, comes first and the time second: @At(name, when)",
+  looksValid: (value) => Number.isFinite(toTime(value)),
+  usage:
+    "the job's name, a string, comes first and the time second: @At(name, when)",
 };
 
 /**
@@ -339,7 +449,10 @@ const AT: ScheduleKind = {
  * }
  * ```
  */
-export function Cron(expression: string, options?: DecoratedJobOptions<CronJobOptions>): JobDecorator;
+export function Cron(
+  expression: string,
+  options?: DecoratedJobOptions<CronJobOptions>,
+): JobDecorator;
 /**
  * Declares a cron job with this name on a method. See the other form for the details.
  *
@@ -349,10 +462,24 @@ export function Cron(expression: string, options?: DecoratedJobOptions<CronJobOp
  * async digest(ctx: JobContext) {}
  * ```
  */
-export function Cron(name: string, expression: string, options?: CronJobOptions & JobPlacement): JobDecorator;
+export function Cron(
+  name: string,
+  expression: string,
+  options?: CronJobOptions & JobPlacement,
+): JobDecorator;
 export function Cron(...args: unknown[]): JobDecorator {
-  const { name, scheduler, value, options } = parse<string, CronJobOptions>(CRON, args);
-  return declare('Cron', { type: 'cron', expression: value, options, name, scheduler });
+  const { name, scheduler, value, options } = parse<string, CronJobOptions>(
+    CRON,
+    args,
+  );
+
+  return declare('Cron', {
+    type: 'cron',
+    expression: value,
+    options,
+    name,
+    scheduler,
+  });
 }
 
 /**
@@ -370,7 +497,10 @@ export function Cron(...args: unknown[]): JobDecorator {
  * }
  * ```
  */
-export function Every(interval: number | string, options?: DecoratedJobOptions<EveryJobOptions>): JobDecorator;
+export function Every(
+  interval: number | string,
+  options?: DecoratedJobOptions<EveryJobOptions>,
+): JobDecorator;
 /**
  * Declares an interval job with this name on a method. See the other form for the details.
  *
@@ -380,10 +510,24 @@ export function Every(interval: number | string, options?: DecoratedJobOptions<E
  * async sync(ctx: JobContext) {}
  * ```
  */
-export function Every(name: string, interval: number | string, options?: EveryJobOptions & JobPlacement): JobDecorator;
+export function Every(
+  name: string,
+  interval: number | string,
+  options?: EveryJobOptions & JobPlacement,
+): JobDecorator;
 export function Every(...args: unknown[]): JobDecorator {
-  const { name, scheduler, value, options } = parse<number | string, EveryJobOptions>(EVERY, args);
-  return declare('Every', { type: 'every', interval: value, options, name, scheduler });
+  const { name, scheduler, value, options } = parse<
+    number | string,
+    EveryJobOptions
+  >(EVERY, args);
+
+  return declare('Every', {
+    type: 'every',
+    interval: value,
+    options,
+    name,
+    scheduler,
+  });
 }
 
 /**
@@ -399,7 +543,10 @@ export function Every(...args: unknown[]): JobDecorator {
  * }
  * ```
  */
-export function At(when: Date | number | string, options?: DecoratedJobOptions<AtJobOptions>): JobDecorator;
+export function At(
+  when: Date | number | string,
+  options?: DecoratedJobOptions<AtJobOptions>,
+): JobDecorator;
 /**
  * Declares a one-off job with this name on a method. See the other form for the details.
  *
@@ -409,9 +556,17 @@ export function At(when: Date | number | string, options?: DecoratedJobOptions<A
  * async announce() {}
  * ```
  */
-export function At(name: string, when: Date | number | string, options?: AtJobOptions & JobPlacement): JobDecorator;
+export function At(
+  name: string,
+  when: Date | number | string,
+  options?: AtJobOptions & JobPlacement,
+): JobDecorator;
 export function At(...args: unknown[]): JobDecorator {
-  const { name, scheduler, value, options } = parse<Date | number | string, AtJobOptions>(AT, args);
+  const { name, scheduler, value, options } = parse<
+    Date | number | string,
+    AtJobOptions
+  >(AT, args);
+
   return declare('At', { type: 'at', when: value, options, name, scheduler });
 }
 
@@ -430,8 +585,12 @@ export function At(...args: unknown[]): JobDecorator {
  * ```
  */
 export function Scheduled(): ScheduledDecorator {
-  return ((target: new (...args: unknown[]) => object, context?: ClassDecoratorContext) => {
+  return ((
+    target: new (...args: unknown[]) => object,
+    context?: ClassDecoratorContext,
+  ) => {
     if (context) return undefined;
+
     const Wrapped = class extends target {
       constructor(...args: unknown[]) {
         super(...args);
@@ -440,7 +599,12 @@ export function Scheduled(): ScheduledDecorator {
     };
     // Same name as the class it wraps, so the default job names don't change.
     Object.defineProperty(Wrapped, 'name', { value: target.name });
-    for (const [, method] of methodsFrom(target.prototype)) for (const job of unadded.get(method) ?? []) job.scheduled = true;
+
+    for (const [, method] of methodsFrom(target.prototype)) {
+      for (const job of unadded.get(method) ?? []) {
+        job.scheduled = true;
+      }
+    }
     return Wrapped;
   }) as ScheduledDecorator;
 }

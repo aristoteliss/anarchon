@@ -13,18 +13,29 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /** More specific data on top of more general data: two plain objects are merged, anything else replaces. */
 function merge(general: unknown, specific: unknown): unknown {
   if (specific === undefined) return general;
-  return isPlainObject(general) && isPlainObject(specific) ? { ...general, ...specific } : specific;
+  return isPlainObject(general) && isPlainObject(specific)
+    ? { ...general, ...specific }
+    : specific;
 }
 
 /**
  * The data of one run: every source, from the most general to the most specific, on top of the
  * one before. A source that is a function is called for its value, so it is read when the run starts.
  */
-export async function resolveData(sources: readonly unknown[], run: Run): Promise<unknown> {
+export async function resolveData(
+  sources: readonly unknown[],
+  run: Run,
+): Promise<unknown> {
   let data: unknown;
+
   for (const source of sources) {
-    data = merge(data, typeof source === 'function' ? await (source as JobDataProvider)(run) : source);
+    const value =
+      typeof source === 'function'
+        ? await (source as JobDataProvider)(run)
+        : source;
+    data = merge(data, value);
   }
+
   return data;
 }
 

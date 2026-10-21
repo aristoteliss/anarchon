@@ -4,16 +4,29 @@
 // that it is complete, type-checks, and runs a job through require(), import and Bun.
 // Run through `pnpm test:release`, which rebuilds dist first.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'));
-const run = (command, args, cwd) => execFileSync(command, args, { cwd, stdio: 'inherit' });
+const run = (command, args, cwd) =>
+  execFileSync(command, args, { cwd, stdio: 'inherit' });
 const manifest = readJson(resolve(root, 'package.json'));
-const ROOT_FILES = ['package.json', 'README.md', 'LICENSE', 'COMMERCIAL_LICENSE.txt'];
+const ROOT_FILES = [
+  'package.json',
+  'README.md',
+  'LICENSE',
+  'COMMERCIAL_LICENSE.txt',
+];
 
 // What the built dist exports at runtime; the installed tarball must export the same names.
 const exported = (namespace) =>
@@ -21,7 +34,9 @@ const exported = (namespace) =>
     .filter((key) => !['default', '__esModule', 'module.exports'].includes(key))
     .sort()
     .join();
-const expected = exported(createRequire(import.meta.url)(resolve(root, 'dist/index.js')));
+const expected = exported(
+  createRequire(import.meta.url)(resolve(root, 'dist/index.js')),
+);
 
 // Outside the checkout: ancestor node_modules must not satisfy undeclared dependencies.
 const temporary = mkdtempSync(resolve(tmpdir(), 'anarchon-release-'));
@@ -35,17 +50,25 @@ try {
   const [tarball] = readdirSync(packed).filter((name) => name.endsWith('.tgz'));
   if (!tarball) throw new Error('pnpm pack produced no tarball');
 
-  const entries = execFileSync('tar', ['-tf', resolve(packed, tarball)], { encoding: 'utf8' })
+  const entries = execFileSync('tar', ['-tf', resolve(packed, tarball)], {
+    encoding: 'utf8',
+  })
     .trim()
     .split('\n')
     .map((entry) => entry.replace(/^package\//, ''));
   for (const file of [...ROOT_FILES, 'dist/index.js', 'dist/index.d.ts']) {
     if (!entries.includes(file)) throw new Error(`${tarball}: missing ${file}`);
   }
-  const stray = entries.filter((entry) => !ROOT_FILES.includes(entry) && !entry.startsWith('dist/'));
-  if (stray.length) throw new Error(`${tarball}: unexpected files ${stray.join(', ')}`);
-  if (entries.some((entry) => /\.(spec|test)\.[cm]?[jt]s$/.test(entry))) throw new Error(`${tarball}: contains tests`);
-  console.log(`${tarball}: ${entries.length} files, all under dist/ or expected at the root`);
+  const stray = entries.filter(
+    (entry) => !ROOT_FILES.includes(entry) && !entry.startsWith('dist/'),
+  );
+  if (stray.length)
+    throw new Error(`${tarball}: unexpected files ${stray.join(', ')}`);
+  if (entries.some((entry) => /\.(spec|test)\.[cm]?[jt]s$/.test(entry)))
+    throw new Error(`${tarball}: contains tests`);
+  console.log(
+    `${tarball}: ${entries.length} files, all under dist/ or expected at the root`,
+  );
 
   writeFileSync(
     resolve(consumer, 'package.json'),
@@ -55,7 +78,11 @@ try {
         private: true,
         version: '1.0.0',
         dependencies: { anarchon: `file:../packed/${tarball}` },
-        devDependencies: { '@types/node': readJson(resolve(root, 'node_modules/@types/node/package.json')).version },
+        devDependencies: {
+          '@types/node': readJson(
+            resolve(root, 'node_modules/@types/node/package.json'),
+          ).version,
+        },
       },
       null,
       2,
@@ -122,7 +149,11 @@ console.log(\`import: the same \${required.split(',').length} exports as require
   );
 
   run('pnpm', ['install', '--prefer-offline'], consumer);
-  run(resolve(root, 'node_modules/.bin/tsc'), ['-p', 'tsconfig.json'], consumer);
+  run(
+    resolve(root, 'node_modules/.bin/tsc'),
+    ['-p', 'tsconfig.json'],
+    consumer,
+  );
   run(process.execPath, ['dist/run-job.js'], consumer);
   run(process.execPath, ['dist/load.mjs'], consumer);
   try {
@@ -132,7 +163,9 @@ console.log(\`import: the same \${required.split(',').length} exports as require
     if (error.code !== 'ENOENT') throw error;
     console.log('bun: not installed, skipped');
   }
-  console.log(`\n${manifest.name}@${manifest.version}: the packed tarball is complete and loads.`);
+  console.log(
+    `\n${manifest.name}@${manifest.version}: the packed tarball is complete and loads.`,
+  );
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }

@@ -19,10 +19,14 @@ const REPORTS = ['Reports-digest', 'sync', 'Reports-launch'];
 // the other one when it starts.
 const TENANTS = ['a-tenant-sync', 'b-tenant-sync'];
 const expected = {
-  standard: { beforeStart: ['unmarked'], jobs: ['unmarked', ...REPORTS, ...TENANTS] },
+  standard: {
+    beforeStart: ['unmarked'],
+    jobs: ['unmarked', ...REPORTS, ...TENANTS],
+  },
   legacy: { beforeStart: [], jobs: [...REPORTS, ...TENANTS] },
 };
-const NOT_SCHEDULED = /@Every "unmarked" on Unmarked\.run is not scheduled: with legacy decorators, add @Scheduled\(\)/;
+const NOT_SCHEDULED =
+  /@Every "unmarked" on Unmarked\.run is not scheduled: with legacy decorators, add @Scheduled\(\)/;
 
 for (const style of ['standard', 'legacy'] as const) {
   const tsconfig = resolve(__dirname, `tsconfig.${style}.json`);
@@ -32,10 +36,14 @@ for (const style of ['standard', 'legacy'] as const) {
   });
 
   test(`${style} decorators add the jobs of an object to the default scheduler, with no register()`, async () => {
-    const { stdout, stderr } = await run(process.execPath, ['--import', 'tsx', FIXTURE], {
-      cwd: ROOT,
-      env: { ...process.env, TSX_TSCONFIG_PATH: tsconfig },
-    });
+    const { stdout, stderr } = await run(
+      process.execPath,
+      ['--import', 'tsx', FIXTURE],
+      {
+        cwd: ROOT,
+        env: { ...process.env, TSX_TSCONFIG_PATH: tsconfig },
+      },
+    );
     assert.deepEqual(JSON.parse(stdout.trim().split('\n').at(-1) ?? ''), {
       style,
       ...expected[style],

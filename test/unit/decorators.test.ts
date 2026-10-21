@@ -37,13 +37,18 @@ const memoryBackend = (name = 'memory'): Backend => ({
 
 const newScheduler = () => new Scheduler({ backend: memoryBackend() });
 const names = (scheduler: Scheduler) => scheduler.jobs().map((job) => job.name);
-const summary = (scheduler: Scheduler) => scheduler.jobs().map((job) => [job.name, job.type, job.schedule]);
+const summary = (scheduler: Scheduler) =>
+  scheduler.jobs().map((job) => [job.name, job.type, job.schedule]);
 
 type Initializer = (this: object) => void;
 const initializers = new WeakMap<object, Initializer[]>();
 
 /** Applies decorators to a method as standard decorators are applied: the one written last goes first. */
-function decorate(target: { prototype: object }, method: string, ...decorators: JobDecorator[]): void {
+function decorate(
+  target: { prototype: object },
+  method: string,
+  ...decorators: JobDecorator[]
+): void {
   const added = initializers.get(target.prototype) ?? [];
   initializers.set(target.prototype, added);
   const context = {
@@ -53,20 +58,30 @@ function decorate(target: { prototype: object }, method: string, ...decorators: 
     private: false,
     addInitializer: (initializer: Initializer) => added.push(initializer),
   } as unknown as ClassMethodDecoratorContext;
-  for (const decorator of decorators.reverse()) decorator(Reflect.get(target.prototype, method), context);
+  for (const decorator of decorators.reverse())
+    decorator(Reflect.get(target.prototype, method), context);
 }
 
 /** Creates an object as a class with standard decorators does: what the decorators asked to run on a new object runs on it. */
 function create<T extends object>(Class: new () => T): T {
   const object = new Class();
-  for (let proto = Object.getPrototypeOf(object); proto; proto = Object.getPrototypeOf(proto)) {
-    for (const initializer of initializers.get(proto) ?? []) initializer.call(object);
+  for (
+    let proto = Object.getPrototypeOf(object);
+    proto;
+    proto = Object.getPrototypeOf(proto)
+  ) {
+    for (const initializer of initializers.get(proto) ?? [])
+      initializer.call(object);
   }
   return object;
 }
 
 /** Applies a decorator to a method as legacy decorators (experimentalDecorators) are applied. */
-function decorateLegacy(target: { prototype: object }, method: string, decorator: JobDecorator): void {
+function decorateLegacy(
+  target: { prototype: object },
+  method: string,
+  decorator: JobDecorator,
+): void {
   const descriptor = Object.getOwnPropertyDescriptor(target.prototype, method);
   assert.ok(descriptor);
   decorator(target.prototype, method, descriptor);
@@ -83,7 +98,11 @@ test('register() adds the jobs declared on a class, named Class-method', () => {
     launch() {}
     notAJob() {}
   }
-  decorate(Reports, 'digest', Cron('0 8 * * 1-5', { timezone: 'Europe/Athens' }));
+  decorate(
+    Reports,
+    'digest',
+    Cron('0 8 * * 1-5', { timezone: 'Europe/Athens' }),
+  );
   decorate(Reports, 'sync', Every('10s'));
   decorate(Reports, 'launch', At('2030-01-01T00:00:00Z'));
 
@@ -96,8 +115,14 @@ test('register() adds the jobs declared on a class, named Class-method', () => {
       ['Reports-launch', 'once'],
     ],
   );
-  assert.equal(scheduler.jobs()[0]?.schedule, 'cron "0 8 * * 1-5" (Europe/Athens)');
-  assert.equal(scheduler.nextRun('Reports-launch')?.toISOString(), '2030-01-01T00:00:00.000Z');
+  assert.equal(
+    scheduler.jobs()[0]?.schedule,
+    'cron "0 8 * * 1-5" (Europe/Athens)',
+  );
+  assert.equal(
+    scheduler.nextRun('Reports-launch')?.toISOString(),
+    '2030-01-01T00:00:00.000Z',
+  );
 });
 
 test('the default name is accepted by the backends that restrict names', () => {
@@ -107,7 +132,10 @@ test('the default name is accepted by the backends that restrict names', () => {
   decorate(Reports, 'digest', Every('10s'));
 
   for (const backend of [new RabbitMQBackend(), new NatsBackend()]) {
-    assert.deepEqual(names(new Scheduler({ backend }).register(new Reports())), ['Reports-digest']);
+    assert.deepEqual(
+      names(new Scheduler({ backend }).register(new Reports())),
+      ['Reports-digest'],
+    );
   }
 });
 
@@ -166,7 +194,10 @@ test('the name can be the first argument or an option, and one method can carry 
     ['sync-early', 'cron', 'cron "0 4 * * *"'],
   ]);
   assert.deepEqual(names(scheduler).slice(5), ['launch', 'relaunch', 'later']);
-  assert.equal(scheduler.nextRun('relaunch')?.toISOString(), '2031-01-01T00:00:00.000Z');
+  assert.equal(
+    scheduler.nextRun('relaunch')?.toISOString(),
+    '2031-01-01T00:00:00.000Z',
+  );
   assert.equal(scheduler.nextRun('later')?.getTime(), 1_900_000_000_000);
 
   assert.throws(() => Every(5 as unknown as string, '10s'), TypeError);
@@ -175,7 +206,9 @@ test('the name can be the first argument or an option, and one method can carry 
 test('job options reach the job', async () => {
   class Slow {
     async run(ctx: JobContext) {
-      await new Promise((resolve) => ctx.signal.addEventListener('abort', resolve));
+      await new Promise((resolve) =>
+        ctx.signal.addEventListener('abort', resolve),
+      );
       ctx.signal.throwIfAborted();
     }
   }
@@ -250,8 +283,21 @@ test('only a public instance method can be a job', () => {
     static run() {}
     other() {}
   }
-  const context = { kind: 'method', name: 'run', static: true, private: false, addInitializer: () => {} };
-  assert.throws(() => Every('10s')(Statics.run, context as unknown as ClassMethodDecoratorContext), TypeError);
+  const context = {
+    kind: 'method',
+    name: 'run',
+    static: true,
+    private: false,
+    addInitializer: () => {},
+  };
+  assert.throws(
+    () =>
+      Every('10s')(
+        Statics.run,
+        context as unknown as ClassMethodDecoratorContext,
+      ),
+    TypeError,
+  );
 
   const descriptor = Object.getOwnPropertyDescriptor(Statics, 'run');
   assert.ok(descriptor);
@@ -344,7 +390,10 @@ test('a stopped default scheduler hands the role to the next one, and setDefault
   Scheduler.setDefault(b);
   create(Third);
 
-  assert.deepEqual([names(a), names(b), names(c)], [['first'], ['third'], ['second']]);
+  assert.deepEqual(
+    [names(a), names(b), names(c)],
+    [['first'], ['third'], ['second']],
+  );
 });
 
 test('register() moves an object to another scheduler, and repeating it changes nothing', () => {
@@ -392,14 +441,21 @@ test('with standard decorators, @Scheduled() leaves the class as it is', () => {
   class Standard {
     run() {}
   }
-  const decorateClass = Scheduled() as unknown as (target: unknown, context: unknown) => unknown;
-  assert.equal(decorateClass(Standard, { kind: 'class', name: 'Standard' }), undefined);
+  const decorateClass = Scheduled() as unknown as (
+    target: unknown,
+    context: unknown,
+  ) => unknown;
+  assert.equal(
+    decorateClass(Standard, { kind: 'class', name: 'Standard' }),
+    undefined,
+  );
 });
 
 test('two arguments in the wrong order are refused when the class is defined, with the right form in the message', () => {
   assert.throws(
     () => Cron('0 8 * * *', 'Europe/Athens'),
-    (error: Error) => error instanceof TypeError && /timezone/.test(error.message),
+    (error: Error) =>
+      error instanceof TypeError && /timezone/.test(error.message),
   );
   assert.throws(
     () => Cron('0 8 * * *', 'digest'),
@@ -407,12 +463,15 @@ test('two arguments in the wrong order are refused when the class is defined, wi
   );
   assert.throws(
     () => Every('1h', 'sync'),
-    (error: Error) => error instanceof TypeError && /@Every\(name, interval\)/.test(error.message),
+    (error: Error) =>
+      error instanceof TypeError &&
+      /@Every\(name, interval\)/.test(error.message),
   );
   assert.throws(() => Every(60_000 as unknown as string, 'sync'), TypeError);
   assert.throws(
     () => At('2030-01-01T00:00:00Z', 'launch'),
-    (error: Error) => error instanceof TypeError && /@At\(name, when\)/.test(error.message),
+    (error: Error) =>
+      error instanceof TypeError && /@At\(name, when\)/.test(error.message),
   );
 
   Cron('digest', '0 8 * * 1-5');
@@ -426,7 +485,13 @@ test('two arguments in the wrong order are refused when the class is defined, wi
 
 const collectingLogger = () => {
   const warnings: string[] = [];
-  return { warnings, logger: { warn: (message: string) => void warnings.push(message), error: () => {} } };
+  return {
+    warnings,
+    logger: {
+      warn: (message: string) => void warnings.push(message),
+      error: () => {},
+    },
+  };
 };
 
 test('start() warns about a job declared with a legacy decorator that no object added', async () => {
@@ -517,7 +582,9 @@ test('register() with a prefix lets several objects of one class coexist, each j
   const a = new Tenant();
   const b = new Tenant();
 
-  const scheduler = newScheduler().register(a, { prefix: 'tenant-a:' }).register(b, { prefix: 'tenant-b:' });
+  const scheduler = newScheduler()
+    .register(a, { prefix: 'tenant-a:' })
+    .register(b, { prefix: 'tenant-b:' });
   assert.deepEqual(names(scheduler), ['tenant-a:sync', 'tenant-b:sync']);
 
   await scheduler.start();
@@ -542,7 +609,12 @@ test('an object that added its jobs when it was created gets its prefix from reg
   assert.deepEqual(names(scheduler), ['sync', 'Tenant-report']);
   scheduler.register(a, { prefix: 'a:' });
   scheduler.register(create(Tenant), { prefix: 'b:' });
-  assert.deepEqual(names(scheduler), ['a:sync', 'a:Tenant-report', 'b:sync', 'b:Tenant-report']);
+  assert.deepEqual(names(scheduler), [
+    'a:sync',
+    'a:Tenant-report',
+    'b:sync',
+    'b:Tenant-report',
+  ]);
 });
 
 test('a second object without a prefix is refused, and the error says how to have several', () => {
@@ -555,7 +627,8 @@ test('a second object without a prefix is refused, and the error says how to hav
   create(Tenant);
   assert.throws(
     () => create(Tenant),
-    (error: Error) => /already registered/.test(error.message) && /prefix/.test(error.message),
+    (error: Error) =>
+      /already registered/.test(error.message) && /prefix/.test(error.message),
   );
   assert.deepEqual(names(scheduler), ['sync']);
 });
@@ -565,7 +638,9 @@ test("register() defaults apply to every job of the object, and a job's own opti
     nightly() {}
     early() {}
     async slow(ctx: JobContext) {
-      await new Promise((resolve) => ctx.signal.addEventListener('abort', resolve));
+      await new Promise((resolve) =>
+        ctx.signal.addEventListener('abort', resolve),
+      );
       ctx.signal.throwIfAborted();
     }
   }
@@ -573,7 +648,9 @@ test("register() defaults apply to every job of the object, and a job's own opti
   decorate(Reports, 'early', Cron('early', '0 4 * * *', { timezone: 'UTC' }));
   decorate(Reports, 'slow', Every('slow', '1h'));
 
-  const scheduler = newScheduler().register(new Reports(), { defaults: { timezone: 'Europe/Athens', timeoutMs: 20 } });
+  const scheduler = newScheduler().register(new Reports(), {
+    defaults: { timezone: 'Europe/Athens', timeoutMs: 20 },
+  });
   assert.deepEqual(summary(scheduler), [
     ['nightly', 'cron', 'cron "0 3 * * *" (Europe/Athens)'],
     ['early', 'cron', 'cron "0 4 * * *" (UTC)'],
@@ -594,7 +671,9 @@ test('register() defaults with overlap still add a one-off job, which has nothin
     run() {}
   }
   decorate(Launch, 'run', At('launch', new Date(Date.now() + 60_000)));
-  const scheduler = newScheduler().register(new Launch(), { defaults: { overlap: 'allow' } });
+  const scheduler = newScheduler().register(new Launch(), {
+    defaults: { overlap: 'allow' },
+  });
   assert.deepEqual(names(scheduler), ['launch']);
 });
 
@@ -610,13 +689,23 @@ test('registering an object again with other options replaces its jobs, and a re
   assert.deepEqual(names(scheduler), ['y:sync']);
 
   scheduler.register(tenant);
-  assert.deepEqual(names(scheduler), ['y:sync'], 'without options, the registration stays as it is');
+  assert.deepEqual(
+    names(scheduler),
+    ['y:sync'],
+    'without options, the registration stays as it is',
+  );
 
   scheduler.every('z:sync', '1h', () => {});
-  assert.throws(() => scheduler.register(tenant, { prefix: 'z:' }), /already registered/);
+  assert.throws(
+    () => scheduler.register(tenant, { prefix: 'z:' }),
+    /already registered/,
+  );
   assert.deepEqual(names(scheduler).sort(), ['y:sync', 'z:sync']);
 
-  assert.throws(() => scheduler.register(tenant, { prefix: 5 as unknown as string }), TypeError);
+  assert.throws(
+    () => scheduler.register(tenant, { prefix: 5 as unknown as string }),
+    TypeError,
+  );
 });
 
 test('on a running scheduler with leases, the name an object had before its prefix never runs', async () => {
@@ -630,7 +719,10 @@ test('on a running scheduler with leases, the name an object had before its pref
 
   const folder = mkdtempSync(join(tmpdir(), 'anarchon-prefix-'));
   const errors: unknown[] = [];
-  const scheduler = new Scheduler({ backend: new SqliteBackend({ database: join(folder, 'jobs.db') }), jitterMs: 0 });
+  const scheduler = new Scheduler({
+    backend: new SqliteBackend({ database: join(folder, 'jobs.db') }),
+    jitterMs: 0,
+  });
   scheduler.on('error', (event) => errors.push(event.error));
   await scheduler.start();
   try {
@@ -643,7 +735,10 @@ test('on a running scheduler with leases, the name an object had before its pref
 
     await new Promise((resolve) => setTimeout(resolve, 2_500));
     assert.deepEqual(await scheduler.history('sync'), []);
-    assert.ok(a.runs >= 1 && b.runs >= 1, `each object runs its own job (a: ${a.runs}, b: ${b.runs})`);
+    assert.ok(
+      a.runs >= 1 && b.runs >= 1,
+      `each object runs its own job (a: ${a.runs}, b: ${b.runs})`,
+    );
     assert.ok((await scheduler.history('a:sync')).length >= 1);
     assert.deepEqual(errors, []);
   } finally {
@@ -655,10 +750,22 @@ test('on a running scheduler with leases, the name an object had before its pref
 test('Scheduler.configure() refuses settings without a backend', () => {
   assert.throws(
     () => Scheduler.configure({} as ConfigureOptions),
-    (error: Error) => error instanceof TypeError && /backend/.test(error.message),
+    (error: Error) =>
+      error instanceof TypeError && /backend/.test(error.message),
   );
-  assert.throws(() => Scheduler.configure({ timezone: 'UTC', autoStart: true } as ConfigureOptions), TypeError);
-  assert.throws(() => Scheduler.configure('billing', { leaseMs: 10_000 } as ConfigureOptions), TypeError);
+  assert.throws(
+    () =>
+      Scheduler.configure({
+        timezone: 'UTC',
+        autoStart: true,
+      } as ConfigureOptions),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      Scheduler.configure('billing', { leaseMs: 10_000 } as ConfigureOptions),
+    TypeError,
+  );
   assert.throws(() => Scheduler.get(), /no default scheduler/);
   assert.throws(() => Scheduler.get('billing'), /no scheduler named "billing"/);
 
@@ -681,7 +788,9 @@ test('with settings, a decorated class is all it takes: the scheduler is created
   const jobs = create(Jobs);
   const scheduler = Scheduler.get();
   assert.deepEqual(Scheduler.all(), [scheduler]);
-  assert.deepEqual(summary(scheduler), [['job-1', 'cron', 'cron "*/10 * * * * *" (Europe/Athens)']]);
+  assert.deepEqual(summary(scheduler), [
+    ['job-1', 'cron', 'cron "*/10 * * * * *" (Europe/Athens)'],
+  ]);
 
   // Not started: that is the caller's decision unless the settings say autoStart.
   await assert.rejects(scheduler.runNow('job-1'), /start\(\)/);
@@ -706,7 +815,10 @@ test('autoStart starts a scheduler when it is created, and reports a failure to 
   decorate(Jobs, 'two', Every('job-2', '1h', { scheduler: 'broken' }));
 
   const errors: string[] = [];
-  const broken = { ...memoryBackend(), init: () => Promise.reject(new Error('no such server')) };
+  const broken = {
+    ...memoryBackend(),
+    init: () => Promise.reject(new Error('no such server')),
+  };
   Scheduler.configure({ backend: memoryBackend(), autoStart: true });
   Scheduler.configure('broken', {
     backend: broken,
@@ -735,13 +847,24 @@ test('a job chooses its scheduler by name; jobs with one name share a scheduler,
     four() {}
   }
   decorate(Jobs, 'one', Cron('job-1', '*/10 * * * * *'));
-  decorate(Jobs, 'two', Cron('job-2', '*/10 * * * * *', { scheduler: 'billing' }));
+  decorate(
+    Jobs,
+    'two',
+    Cron('job-2', '*/10 * * * * *', { scheduler: 'billing' }),
+  );
   decorate(Jobs, 'three', Every('5s', { name: 'job-3', scheduler: 'billing' }));
-  decorate(Jobs, 'four', At('job-4', '2030-01-01T00:00:00Z', { scheduler: 'reports' }));
+  decorate(
+    Jobs,
+    'four',
+    At('job-4', '2030-01-01T00:00:00Z', { scheduler: 'reports' }),
+  );
 
   // 'reports' has no settings of its own: it is created from the default ones, by the function.
   Scheduler.configure({ backend: (name) => memoryBackend(`memory:${name}`) });
-  Scheduler.configure('billing', { backend: memoryBackend('billing-store'), timezone: 'UTC' });
+  Scheduler.configure('billing', {
+    backend: memoryBackend('billing-store'),
+    timezone: 'UTC',
+  });
   create(Jobs);
 
   assert.deepEqual(names(Scheduler.get()), ['job-1']);
@@ -751,7 +874,10 @@ test('a job chooses its scheduler by name; jobs with one name share a scheduler,
   ]);
   assert.deepEqual(names(Scheduler.get('reports')), ['job-4']);
   assert.deepEqual(
-    Scheduler.all().map((scheduler) => [scheduler.name, scheduler.backend.name]),
+    Scheduler.all().map((scheduler) => [
+      scheduler.name,
+      scheduler.backend.name,
+    ]),
     [
       [undefined, 'memory:default'],
       ['billing', 'billing-store'],
@@ -764,7 +890,9 @@ test('a named scheduler without settings of its own cannot share the default bac
   Scheduler.configure({ backend: memoryBackend() });
   assert.throws(
     () => Scheduler.get('reports'),
-    (error: Error) => /configure\("reports"/.test(error.message) && /function/.test(error.message),
+    (error: Error) =>
+      /configure\("reports"/.test(error.message) &&
+      /function/.test(error.message),
   );
 });
 
@@ -772,8 +900,14 @@ test('a job can name a scheduler object, or a scheduler created by hand with a n
   const billing = new Scheduler({ name: 'billing', backend: memoryBackend() });
   const first = newScheduler();
   const audit = new Scheduler({ backend: memoryBackend() });
-  assert.throws(() => new Scheduler({ name: 'billing', backend: memoryBackend() }), /already exists/);
-  assert.throws(() => new Scheduler({ name: '', backend: memoryBackend() }), TypeError);
+  assert.throws(
+    () => new Scheduler({ name: 'billing', backend: memoryBackend() }),
+    /already exists/,
+  );
+  assert.throws(
+    () => new Scheduler({ name: '', backend: memoryBackend() }),
+    TypeError,
+  );
 
   class Jobs {
     one() {}
@@ -785,8 +919,14 @@ test('a job can name a scheduler object, or a scheduler created by hand with a n
   decorate(Jobs, 'three', Every('job-3', '1h', { scheduler: audit }));
   create(Jobs);
 
-  assert.deepEqual([names(audit), names(billing), names(first)], [['job-3'], ['job-2'], ['job-1']]);
-  assert.throws(() => Every('job-4', '1h', { scheduler: 5 as unknown as string }), TypeError);
+  assert.deepEqual(
+    [names(audit), names(billing), names(first)],
+    [['job-3'], ['job-2'], ['job-1']],
+  );
+  assert.throws(
+    () => Every('job-4', '1h', { scheduler: 5 as unknown as string }),
+    TypeError,
+  );
   assert.throws(() => Every('1h', { scheduler: '' }), TypeError);
 });
 
@@ -822,10 +962,19 @@ test('register() puts every job of an object on one scheduler, whatever schedule
 
   Scheduler.configure({ backend: (name) => memoryBackend(name) });
   const jobs = create(Jobs);
-  assert.deepEqual([names(Scheduler.get()), names(Scheduler.get('billing'))], [['job-1'], ['job-2']]);
+  assert.deepEqual(
+    [names(Scheduler.get()), names(Scheduler.get('billing'))],
+    [['job-1'], ['job-2']],
+  );
 
-  const own = new Scheduler({ name: 'own', backend: memoryBackend() }).register(jobs, { prefix: 'x:' });
-  assert.deepEqual([names(Scheduler.get()), names(Scheduler.get('billing')), names(own)], [[], [], ['x:job-1', 'x:job-2']]);
+  const own = new Scheduler({ name: 'own', backend: memoryBackend() }).register(
+    jobs,
+    { prefix: 'x:' },
+  );
+  assert.deepEqual(
+    [names(Scheduler.get()), names(Scheduler.get('billing')), names(own)],
+    [[], [], ['x:job-1', 'x:job-2']],
+  );
 });
 
 test('startAll() and stopAll() act on the default and the named schedulers; a stopped one gives up its name', async () => {
@@ -846,7 +995,11 @@ test('startAll() and stopAll() act on the default and the named schedulers; a st
 
   await Scheduler.stopAll();
   assert.deepEqual(Scheduler.all(), []);
-  assert.notEqual(Scheduler.get('billing'), billing, 'after a stop, the name goes to a new scheduler');
+  assert.notEqual(
+    Scheduler.get('billing'),
+    billing,
+    'after a stop, the name goes to a new scheduler',
+  );
 
   await Scheduler.stopAll();
   Scheduler.reset();
@@ -856,21 +1009,36 @@ test('startAll() and stopAll() act on the default and the named schedulers; a st
 test('a decorator gives its job data, on top of what register() gives the object and the scheduler has', async () => {
   class Reports {
     seen: unknown[] = [];
-    exportData(ctx: JobContext<{ db: string; tenant: string; permission: string }>) {
+    exportData(
+      ctx: JobContext<{ db: string; tenant: string; permission: string }>,
+    ) {
       this.seen.push(ctx.data);
     }
     cleanup(ctx: JobContext) {
       this.seen.push(ctx.data);
     }
   }
-  decorate(Reports, 'exportData', Every('export', '1h', { data: { permission: 'reports:export' } }));
+  decorate(
+    Reports,
+    'exportData',
+    Every('export', '1h', { data: { permission: 'reports:export' } }),
+  );
   decorate(Reports, 'cleanup', Every('cleanup', '1h'));
 
-  const scheduler = new Scheduler({ backend: memoryBackend(), data: { db: 'main' } });
+  const scheduler = new Scheduler({
+    backend: memoryBackend(),
+    data: { db: 'main' },
+  });
   const acme = new Reports();
   const globex = new Reports();
-  scheduler.register(acme, { prefix: 'acme:', defaults: { data: { tenant: 'acme' } } });
-  scheduler.register(globex, { prefix: 'globex:', defaults: { data: () => ({ tenant: 'globex' }) } });
+  scheduler.register(acme, {
+    prefix: 'acme:',
+    defaults: { data: { tenant: 'acme' } },
+  });
+  scheduler.register(globex, {
+    prefix: 'globex:',
+    defaults: { data: () => ({ tenant: 'globex' }) },
+  });
 
   await scheduler.start();
   try {
@@ -884,7 +1052,9 @@ test('a decorator gives its job data, on top of what register() gives the object
     { db: 'main', tenant: 'acme', permission: 'reports:export' },
     { db: 'main', tenant: 'acme' },
   ]);
-  assert.deepEqual(globex.seen, [{ db: 'main', tenant: 'globex', permission: 'reports:export' }]);
+  assert.deepEqual(globex.seen, [
+    { db: 'main', tenant: 'globex', permission: 'reports:export' },
+  ]);
 });
 
 test('autoStart gives no warning about the jobs of the object that caused the scheduler to be created', async () => {
@@ -896,12 +1066,19 @@ test('autoStart gives no warning about the jobs of the object that caused the sc
   decorate(Jobs, 'two', Every('job-2', '1h', { scheduler: 'reports' }));
 
   const { warnings, logger } = collectingLogger();
-  Scheduler.configure({ backend: (name) => memoryBackend(name), autoStart: true, logger });
+  Scheduler.configure({
+    backend: (name) => memoryBackend(name),
+    autoStart: true,
+    logger,
+  });
   create(Jobs);
   await new Promise((resolve) => setTimeout(resolve, 20));
   try {
     assert.deepEqual(warnings, []);
-    assert.deepEqual([names(Scheduler.get()), names(Scheduler.get('reports'))], [['job-1'], ['job-2']]);
+    assert.deepEqual(
+      [names(Scheduler.get()), names(Scheduler.get('reports'))],
+      [['job-1'], ['job-2']],
+    );
     await Scheduler.get('reports').runNow('job-2');
   } finally {
     await Scheduler.stopAll();

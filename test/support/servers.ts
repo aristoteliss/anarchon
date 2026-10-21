@@ -10,10 +10,13 @@ import { Pool } from 'pg';
 /** Redis 8.6+ (the only server with IDMP). The default ports below are test/docker-compose.test.yml's. */
 export const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6381';
 /** Optional older Redis (e.g. 7.x). */
-export const REDIS_OLD_URL = process.env.REDIS_OLD_URL ?? 'redis://localhost:6380';
+export const REDIS_OLD_URL =
+  process.env.REDIS_OLD_URL ?? 'redis://localhost:6380';
 /** Optional Valkey. */
 export const VALKEY_URL = process.env.VALKEY_URL ?? 'redis://localhost:6390';
-export const POSTGRES_URL = process.env.POSTGRES_URL ?? 'postgres://postgres:postgres@localhost:5433/anarchon_test';
+export const POSTGRES_URL =
+  process.env.POSTGRES_URL ??
+  'postgres://postgres:postgres@localhost:5433/anarchon_test';
 export const RABBITMQ_URL = process.env.RABBITMQ_URL ?? 'amqp://localhost';
 export const NATS_URL = process.env.NATS_URL ?? 'nats://localhost:4222';
 /** Optional libSQL server: sqld, or a Turso database (`libsql://...`). Every test gets its own table. */
@@ -30,7 +33,11 @@ export interface ServerInfo {
 
 /** Server product and version at a Redis-protocol URL, or null if nothing answers. */
 export async function probeRedis(url: string): Promise<ServerInfo | null> {
-  const redis = new Redis(url, { lazyConnect: true, maxRetriesPerRequest: 0, retryStrategy: () => null });
+  const redis = new Redis(url, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 0,
+    retryStrategy: () => null,
+  });
   redis.on('error', () => {});
   try {
     await redis.connect();
@@ -52,11 +59,18 @@ export async function probeRedis(url: string): Promise<ServerInfo | null> {
 }
 
 export function supportsIdmp(server: ServerInfo | null): boolean {
-  return !!server && server.product === 'Redis' && (server.major > 8 || (server.major === 8 && server.minor >= 6));
+  return (
+    !!server &&
+    server.product === 'Redis' &&
+    (server.major > 8 || (server.major === 8 && server.minor >= 6))
+  );
 }
 
 export async function probePostgres(url: string): Promise<string | null> {
-  const pool = new Pool({ connectionString: url, connectionTimeoutMillis: 1_000 });
+  const pool = new Pool({
+    connectionString: url,
+    connectionTimeoutMillis: 1_000,
+  });
   pool.on('error', () => {});
   try {
     const { rows } = await pool.query('SHOW server_version');
@@ -72,7 +86,9 @@ export async function probeSqlite(): Promise<string | null> {
   try {
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(':memory:');
-    const version = String((db.prepare('SELECT sqlite_version() AS v').get() as { v: string }).v);
+    const version = String(
+      (db.prepare('SELECT sqlite_version() AS v').get() as { v: string }).v,
+    );
     db.close();
     return version;
   } catch {
