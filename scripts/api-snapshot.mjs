@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-// The public API as the compiler emits it: every declaration file reachable from dist/index.d.ts,
-// without comments. `--check` fails when it differs from api/anarchon.api.txt, so a change to the
+// The public API as the compiler emits it: every declaration file reachable from the package's entry
+// points (dist/index.d.ts, dist/testing.d.ts), without comments. `--check` fails when it differs from api/anarchon.api.txt, so a change to the
 // API is never accidental; `--update` writes the file after an intended change, and the diff of
 // that file is what a reviewer reads. Run after `pnpm build`.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,10 +15,10 @@ if (mode !== '--check' && mode !== '--update') {
   process.exit(2);
 }
 
-/** Every .d.ts the entry point reaches through its imports and re-exports, in a stable order. */
-function reachable(entry) {
+/** Every .d.ts the entry points reach through their imports and re-exports, in a stable order. */
+function reachable(entries) {
   const seen = new Set();
-  const queue = [entry];
+  const queue = [...entries];
   while (queue.length > 0) {
     const file = queue.shift();
     if (seen.has(file)) continue;
@@ -44,12 +44,16 @@ function strip(source) {
     .join('\n');
 }
 
-const entry = resolve(root, 'dist/index.d.ts');
-if (!existsSync(entry)) {
-  console.error('dist/index.d.ts is missing: run `pnpm build` first');
+const entries = ['dist/index.d.ts', 'dist/testing.d.ts'].map((path) =>
+  resolve(root, path),
+);
+if (!entries.every((entry) => existsSync(entry))) {
+  console.error(
+    'dist/index.d.ts or dist/testing.d.ts is missing: run `pnpm build` first',
+  );
   process.exit(2);
 }
-const snapshot = `${reachable(entry)
+const snapshot = `${reachable(entries)
   .map(
     (file) =>
       `// ${relative(resolve(root, 'dist'), file)}\n${strip(readFileSync(file, 'utf8'))}`,

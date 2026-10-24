@@ -75,6 +75,24 @@ describe('Redis / Valkey specifics', () => {
     if (checked === 0) t.skip('no Valkey or older Redis to check');
   });
 
+  test('a server too old for the strategy is refused before init() writes to it', async (t) => {
+    if (!(await probeRedis(REDIS_OLD_URL))) return t.skip('no older Redis');
+    const prefix = `test:${randomUUID()}:`;
+    const backend = new RedisBackend({
+      redis: REDIS_OLD_URL,
+      strategy: 'idmp',
+      prefix,
+    });
+    const redis = await createClient({ url: REDIS_OLD_URL }).connect();
+    try {
+      await assert.rejects(backend.init(), /needs Redis 8\.6/);
+      assert.equal(await redis.exists(`${prefix}format`), 0);
+    } finally {
+      await backend.close();
+      await redis.quit();
+    }
+  });
+
   test('ValkeyBackend refuses idmp when compiling and when constructed', () => {
     // @ts-expect-error Valkey has no 'idmp'
     const strategy: KeyValueStrategyName<'valkey'> = 'idmp';

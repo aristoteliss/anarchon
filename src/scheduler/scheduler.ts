@@ -638,14 +638,14 @@ export class Scheduler<B extends Backend = Backend> {
    */
   async start(): Promise<void> {
     if (this.state === 'running') return;
-    for (const warning of schedulerStarting(this.host)) {
-      this.logger.warn(`[anarchon] ${warning}`);
-    }
     if (this.state !== 'idle') {
       throw coded(
         new Error(`Cannot start while ${this.state}`),
         'ANARCHON_STATE',
       );
+    }
+    for (const warning of schedulerStarting(this.host)) {
+      this.logger.warn(`[anarchon] ${warning}`);
     }
 
     this.state = 'starting';

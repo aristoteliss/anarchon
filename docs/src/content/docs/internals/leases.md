@@ -137,8 +137,12 @@ When A's heartbeat is refused, A:
 2. emits the `lost` event;
 3. can no longer change the run in any way.
 
+A doesn't need the store's answer to give the run up. When no heartbeat has been confirmed within `leaseMs` of being sent (the store is unreachable from A, or answers too slowly), A does the same two things on its own: by then the lease may have run out on the store, and a backup may be taking the run over. Heartbeats may overlap, so one slow answer doesn't count against the lease while later ones come back.
+
+After the handler ends, A keeps renewing the lease while it stores how the run ended, so a short store outage doesn't make a backup re-run a job that completed. It does so for `leaseMs` at most: if the store never answers that write, A stops renewing, the lease runs out, and the job's next runs go ahead. A backup may then start the run again as the next attempt, as after a crash.
+
 :::caution[What fencing can't do]
-Fencing protects the **store's record** of the run. It can't undo what A's handler did between waking up and its next heartbeat. For up to one heartbeat interval, two attempts can be running at the same time. That is why handlers should check `ctx.signal` before side effects and be [safe to run twice](../../guides/writing-handlers/#make-jobs-safe-to-run-twice).
+Fencing protects the **store's record** of the run. It can't undo what A's handler did between waking up and its next heartbeat. For up to one heartbeat interval, two attempts can be running at the same time. That is why handlers should check `ctx.signal` before side effects and be [safe to run twice](../../guides/writing-handlers/#make-jobs-safe-to-run-twice). A resource the handler writes can also [reject writes from an older attempt](../../guides/writing-handlers/#reject-writes-from-an-older-attempt).
 :::
 
 ## Attempts and `maxAttempts`

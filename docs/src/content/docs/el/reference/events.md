@@ -18,7 +18,7 @@ scheduler.off(event, listener);
 | [`failure`](#failure) | `RunFailureEvent` | Ο handler έριξε σφάλμα, ή πέρασε το `timeoutMs` |
 | [`interrupted`](#interrupted) | `RunInterruptedEvent` | Το `stop()` ή μια ανάληψη ακύρωσε το `ctx.signal`, και στη συνέχεια ο handler έριξε σφάλμα |
 | [`skip`](#skip) | `SkipEvent` | Μια εκτέλεση ήταν προγραμματισμένη και αυτό το instance δεν την εκτέλεσε |
-| [`lost`](#lost) | `LostEvent` | Ένα εφεδρικό instance ανέλαβε μια εκτέλεση που εκτελούσε αυτό το instance |
+| [`lost`](#lost) | `LostEvent` | Ένα εφεδρικό instance ανέλαβε μια εκτέλεση που εκτελούσε αυτό το instance, ή η μίσθωσή της δεν ανανεώθηκε εγκαίρως |
 | [`error`](#error) | `SchedulerErrorEvent` | Πρόβλημα στο backend ή στη ρύθμιση παραμέτρων |
 
 ## `start`

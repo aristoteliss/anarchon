@@ -152,6 +152,24 @@ scheduler.every('hourly-rollup', '1h', async (ctx) => {
 });
 ```
 
+### Απόρριψη εγγραφών από παλαιότερη προσπάθεια
+
+Μια idempotent εγγραφή κάνει μια δεύτερη προσπάθεια αβλαβή όταν οι προσπάθειες τρέχουν η μία μετά την άλλη. Όταν επικαλύπτονται (ένας παγωμένος runner ξυπνά και γράφει πριν μάθει ότι ένα backup ανέλαβε), η παλαιότερη προσπάθεια μπορεί να αντικαταστήσει ό,τι έγραψε η νεότερη. Σε ένα backend μίσθωσης, κάθε προσπάθεια μιας εκτέλεσης έχει μεγαλύτερο `ctx.attempt` από την προηγούμενη, οπότε τα `ctx.slot` και `ctx.attempt` μαζί λειτουργούν ως fencing token: αποθηκεύστε την προσπάθεια μαζί με τη γραμμή, και αφήστε μια εγγραφή να εφαρμοστεί μόνο αν η προσπάθειά της δεν είναι παλαιότερη.
+
+```ts
+scheduler.every('daily-totals', '1d', async (ctx) => {
+  const total = await computeTotal(ctx.slot);
+  await db.query(
+    `INSERT INTO daily_totals (day, total, attempt) VALUES ($1, $2, $3)
+     ON CONFLICT (day) DO UPDATE SET total = EXCLUDED.total, attempt = EXCLUDED.attempt
+     WHERE daily_totals.attempt <= EXCLUDED.attempt`,
+    [ctx.slot, total, ctx.attempt],
+  );
+});
+```
+
+Το ίδιο ζεύγος πηγαίνει σε μια άλλη υπηρεσία ως έκδοση: απορρίψτε ένα αίτημα του οποίου το `(slot, attempt)` είναι μικρότερο από κάποιο που έχει ήδη εμφανιστεί. Σε ένα backend μόνο διεκδίκησης, το `ctx.attempt` είναι πάντα 1 και κανείς δεν αναλαμβάνει μια εκτέλεση, οπότε δεν υπάρχει τίποτα να προστατευτεί με fencing.
+
 ## Αναγνώριση επανάληψης
 
 Τα `ctx.attempt` και `ctx.reason` σας ενημερώνουν ότι μια προηγούμενη προσπάθεια ξεκίνησε και δεν ολοκληρώθηκε:

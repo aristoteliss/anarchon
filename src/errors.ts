@@ -18,6 +18,7 @@
  *   names no scheduler and no settings
  * - `ANARCHON_STORE`: the store refused a write
  * - `ANARCHON_STORE_FORMAT`: the store holds data a newer version of anarchon wrote
+ * - `ANARCHON_CONTRACT`: a backend failed a check of `backendContract()` from `anarchon/testing`
  * - `ANARCHON_INTERNAL`: a bug in anarchon; please report it
  *
  * @example
@@ -44,6 +45,7 @@ export type ErrorCode =
   | 'ANARCHON_NO_SCHEDULER'
   | 'ANARCHON_STORE'
   | 'ANARCHON_STORE_FORMAT'
+  | 'ANARCHON_CONTRACT'
   | 'ANARCHON_INTERNAL';
 
 /** Gives an error its code; returns the same error, to be thrown. */

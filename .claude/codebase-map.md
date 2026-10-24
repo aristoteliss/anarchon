@@ -21,14 +21,14 @@ catch-up of the latest missed run); RabbitMQ and NATS are claim only. `docs/` is
 - **Shape**: monorepo with workspace globs `.`, `docs`, `examples/nestjs` (3 workspace packages).
 - **Publishable packages**: 1; private: `docs`, `examples/nestjs`.
 - **Runnable workspaces**: `docs`, `examples/nestjs`.
-- **Versions**: `0.0.0`, `0.4.1`.
+- **Versions**: `0.0.0`, `0.5.0`.
 - **Packages**: see the Workspace packages table under Directory Map.
 <!-- context:generated-end repository-shape -->
 
 ## Technology Stack
 
 <!-- context:generated-start technology-stack -->
-- **Languages** (file counts, excluded directories omitted): `.md` 98, `.ts` 91, `.mjs` 7, `.py` 2
+- **Languages** (file counts, excluded directories omitted): `.ts` 99, `.md` 98, `.mjs` 7, `.py` 2, `.cjs` 1
 - **Runtime engines** (root `package.json`): `node` >=20
 - **Package manager evidence**: `pnpm-lock.yaml`.
 - **Integrations**: listed with their purpose under Dependencies and Integrations.
@@ -46,6 +46,7 @@ catch-up of the latest missed run); RabbitMQ and NATS are claim only. `docs/` is
 | `examples/billing.ts` | Referenced by a root script | `pnpm example:billing` |
 | `examples/broker-notifications.ts` | Referenced by a root script | `pnpm example:brokers` |
 | `examples/cache-refresh.ts` | Referenced by a root script | `pnpm example:cache` |
+| `examples/crash-proof.ts` | Referenced by a root script | `pnpm example:crash` |
 | `examples/decorators-legacy.ts` | Referenced by a root script | `pnpm example:decorators:legacy` |
 | `examples/decorators-options.ts` | Referenced by a root script | `pnpm example:decorators:options` |
 | `examples/decorators-startup.ts` | Referenced by a root script | `pnpm example:decorators:startup` |
@@ -53,6 +54,7 @@ catch-up of the latest missed run); RabbitMQ and NATS are claim only. `docs/` is
 | `examples/failover.ts` | Referenced by a root script | `pnpm example:failover` |
 | `examples/http-api.ts` | Referenced by a root script | `pnpm example:api` |
 | `examples/nestjs/check.mjs` | Referenced by a package script | `pnpm --filter anarchon-example-nestjs` `start`, `start:nest11`, `test` |
+| `examples/nestjs/locks-stores.cjs` | Referenced by a package script | `pnpm --filter anarchon-example-nestjs` `locks:stores` |
 | `examples/nestjs/src/main.ts` | Process entry point | workspace `anarchon-example-nestjs` |
 | `examples/nightly-export.ts` | Referenced by a root script | `pnpm example:export` |
 | `examples/options-and-events.ts` | Referenced by a root script | `pnpm example:options` |
@@ -88,7 +90,7 @@ editor/tooling directories are excluded (see Snapshot Metadata).
 | `src/` | Library source: scheduler, backends, decorators, registry and public types |
 | `test/` | Unit, scheduler, backend, lease and multi-process e2e test suites |
 
-Root files: `.gitignore`, `AGENTS.md`, `CHANGELOG.md`, `CLAUDE.md`, `COMMERCIAL_LICENSE.txt`, `CONTRIBUTING.md`, `LICENSE`, `README.md`, `biome.json`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `tsconfig.json`, `tsconfig.test.json`
+Root files: `.gitignore`, `AGENTS.md`, `CHANGELOG.md`, `CLAUDE.md`, `COMMERCIAL_LICENSE.txt`, `CONTRIBUTING.md`, `LICENSE`, `README.md`, `biome.json`, `flowchart.mmd`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `tsconfig.json`, … (+1)
 
 ### Workspace packages
 
@@ -107,9 +109,11 @@ Each has a `README.md`.
 *Manual section: the generator never overwrites it. Verify each claim against the source
 path given before relying on it.*
 
-- **Public API**: everything a consumer imports is exported from `src/index.ts`; the
-  release check (`scripts/release-check.mjs`) compares those runtime exports with the packed
-  tarball's.
+- **Public API**: everything a consumer imports is exported from `src/index.ts`, and the
+  backend contract checks for custom backend authors from `src/testing.ts`, published as the
+  package's `./testing` export. The release check (`scripts/release-check.mjs`) compares the
+  runtime exports with the packed tarball's and runs `backendContract()` from the installed
+  package on SQLite.
 - **Scheduler** (`src/scheduler/scheduler.ts`): public API and lifecycle only. It owns the
   state and hands each part the `SchedulerCore` view (`src/scheduler/core.ts`): `job.ts`
   validates jobs, `timers.ts` decides when a run is due, `lease-runner.ts` and
@@ -170,7 +174,7 @@ environment value is read or reproduced here.
 | Integration | Packages | Declared in |
 | --- | --- | --- |
 | Croner: Cron expression parsing and next-run calculation | `croner` | `.` |
-| Redis / Valkey: Lease and claim backend | `redis`, `ioredis`, `iovalkey`, … (+1) | `.` |
+| Redis / Valkey: Lease and claim backend | `redis`, `ioredis`, `iovalkey`, … (+1) | `.`, `examples/nestjs` |
 | PostgreSQL: SQL lease backend | `pg`, `postgres` | `.` |
 | SQLite / libSQL: SQL lease backend, local and server | `better-sqlite3`, `@libsql/client` | `.` |
 | RabbitMQ: Claim-only broker backend | `amqplib` | `.` |
@@ -196,7 +200,7 @@ environment value is read or reproduced here.
 
 Names only; values are never read by the generator.
 
-`AMQP_URL`, `BACKEND`, `BILLING_REDIS_URL`, `BROKER`, `CRON_STRATEGY`, `DATABASE_URL`, `EXIT_AFTER_MS`, `INSTANCE_ID`, `JOB_TIMEOUT`, `LIBSQL_AUTH_TOKEN`, `LIBSQL_URL`, `NATS_URL`, `POD_NAME`, `PORT`, `POSTGRES_URL`, `RABBITMQ_URL`, `REDIS_OLD_URL`, `REDIS_PASSWORD`, `REDIS_URL`, `REQUIRE_SERVERS`, `RUN_MS`, `SCENARIO`, `SPEC`, `SQLITE_DIR`, `SQLITE_FILE`, `STRATEGY`, `VALKEY_URL`
+`AMQP_URL`, `BACKEND`, `BILLING_REDIS_URL`, `BROKER`, `CRON_STRATEGY`, `DATABASE_URL`, `EXIT_AFTER_MS`, `INSTANCE_ID`, `JOB_TIMEOUT`, `LIBSQL_AUTH_TOKEN`, `LIBSQL_URL`, `NATS_URL`, `POD_NAME`, `PORT`, `POSTGRES_URL`, `RABBITMQ_URL`, `REDIS_OLD_URL`, `REDIS_PASSWORD`, `REDIS_URL`, `REQUIRE_SERVERS`, `RUN_MS`, `SCENARIO`, `SPEC`, `SQLITE_DIR`, `SQLITE_FILE`, `STORE_URL`, `STRATEGY`, `VALKEY_URL`
 <!-- context:generated-end dependencies -->
 
 ## Conventions
@@ -241,6 +245,7 @@ row as *declared* unless you have run it yourself in this checkout.
 | `pnpm example:brokers` | `tsx examples/broker-notifications.ts` |
 | `pnpm example:cache` | `tsx examples/cache-refresh.ts` |
 | `pnpm example:clients` | `tsx examples/own-clients.ts` |
+| `pnpm example:crash` | `tsx examples/crash-proof.ts` |
 | `pnpm example:decorators` | `tsx examples/decorators.ts` |
 | `pnpm example:decorators:legacy` | `TSX_TSCONFIG_PATH=examples/tsconfig.legacy.json tsx examples/decorators…` |
 | `pnpm example:decorators:options` | `tsx examples/decorators-options.ts` |
@@ -278,7 +283,7 @@ Workspaces with the same scripts share a row.
 | Workspaces | Scripts |
 | --- | --- |
 | `docs` | `build`, `check`, `check:diagrams`, `dev`, `preview` |
-| `examples/nestjs` | `start`, `start:nest11`, `test` |
+| `examples/nestjs` | `locks:compare`, `locks:stores`, `start`, `start:nest11`, `test` |
 
 ### Context-management commands
 
@@ -343,13 +348,13 @@ secret value.*
 ## Snapshot Metadata
 
 <!-- context:generated-start metadata -->
-- Generated at: 2026-10-21T12:30:43Z
-- Git commit: 514e281c75ffe7e58895b9f2a3e91c4ac3b49499
-- Git branch: docs/readable-code-skill
+- Generated at: 2026-10-24T11:04:49Z
+- Git commit: c56f37d338f72464f82fa9d6f1fc290ed110a8f8
+- Git branch: develop
 - Uncommitted changes when generated: yes
 - Generator: `scripts/update-claude-snapshot.py` version 1.0.0
 - Snapshot status: generated by structural inspection only; no code executed
-- Files inspected: 235
+- Files inspected: 246
 - Included top-level directories: `.claude`, `.github`, `api`, `assets`, `docs`, `examples`, `scripts`, `src`, `test`
 - Excluded directory names: `.cache`, `.git`, `.gradle`, `.idea`, `.mypy_cache`, `.next`, `.nuxt`, `.parcel-cache`, `.pnpm-store`, `.pytest_cache`, `.ruff_cache`, `.svelte-kit`, `.terraform`, `.tmp`, `.tox`, `.turbo`, `.venv`, `.vscode`, `__pycache__`, `bower_components`, `build`, `coverage`, `dist`, `node_modules`, `out`, `target`, `vendor`, `venv`, `virtualenv`
 - Excluded file patterns: `.env`, `.env.*`, `*.env`, `*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.jks`, `*.keystore`, `id_rsa*`, `id_ed25519*`, `*credentials*`, `*.secret`, `secrets.*`

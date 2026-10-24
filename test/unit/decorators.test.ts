@@ -494,6 +494,48 @@ const collectingLogger = () => {
   };
 };
 
+test('a start() refused while the scheduler is starting logs nothing, and the next start() reports', async () => {
+  const { warnings, logger } = collectingLogger();
+  const slow = {
+    ...memoryBackend(),
+    init: () => new Promise<void>((resolve) => setTimeout(resolve, 50)),
+  };
+  const scheduler = new Scheduler({ backend: slow, logger });
+  const starting = scheduler.start();
+  class Forgotten {
+    run() {}
+  }
+  decorateLegacy(Forgotten, 'run', Every('late-forgotten-job', '1h'));
+  new Forgotten();
+
+  await assert.rejects(scheduler.start(), /Cannot start while starting/);
+  assert.deepEqual(warnings, []);
+  await starting;
+  await scheduler.stop();
+
+  await scheduler.start();
+  try {
+    assert.equal(warnings.length, 1, warnings.join('\n'));
+    assert.match(warnings[0] ?? '', /late-forgotten-job/);
+  } finally {
+    await scheduler.stop();
+  }
+});
+
+test('an object waiting for a missing scheduler creates none of the schedulers its other jobs name', () => {
+  class Jobs {
+    one() {}
+    two() {}
+  }
+  decorate(Jobs, 'one', Every('job-1', '1h', { scheduler: 'reports' }));
+  decorate(Jobs, 'two', Every('job-2', '1h', { scheduler: 'billing' }));
+  Scheduler.configure('reports', { backend: memoryBackend() });
+
+  create(Jobs);
+
+  assert.deepEqual(Scheduler.all(), []);
+});
+
 test('start() warns about a job declared with a legacy decorator that no object added', async () => {
   class Forgotten {
     run() {}

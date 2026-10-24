@@ -104,7 +104,7 @@ sequenceDiagram
   Note over B: ολοκληρώνεται: success
 ```
 
-**Lease backend:** ένα backup αναλαμβάνει την εκτέλεση. Όταν το παγωμένο instance ξυπνήσει, το επόμενο heartbeat του απορρίπτεται, το `ctx.signal` του ακυρώνεται και εκπέμπει `lost`.
+**Lease backend:** ένα backup αναλαμβάνει την εκτέλεση. Όταν το παγωμένο instance ξυπνήσει, το επόμενο heartbeat του απορρίπτεται, το `ctx.signal` του ακυρώνεται και εκπέμπει `lost`. Ένα instance που συνεχίζει να τρέχει αλλά δεν φτάνει το store δεν περιμένει απάντηση: μόλις κανένα heartbeat δεν έχει επιβεβαιωθεί για `leaseMs`, ακυρώνει το `ctx.signal` και εκπέμπει `lost`, ως τη στιγμή που ένα backup μπορεί να αναλάβει την εκτέλεση.
 
 **Claim-only backend:** κανένα backup. Η εκτέλεση απλώς συνεχίζεται όταν το instance ξυπνήσει.
 

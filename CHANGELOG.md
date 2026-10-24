@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
+
+A job can let healthy instances claim its runs first after a run failed on one instance
+(`yieldAfterFailure`), and authors of custom backends get the contract checks
+(`anarchon/testing`). No breaking change, and the stored data is unchanged: 0.4 and 0.5
+instances can share a store during a rolling deploy.
 
 ### Added
 
@@ -9,6 +14,27 @@
   claiming the next scheduled run, so a healthy instance claims it first; with no healthy
   instance, it still runs the job. A run that waited starts up to `heartbeatMs` later than
   `slot + jitterMs`.
+- **`anarchon/testing`**, a new entry point with `backendContract()`: the checks every backend must
+  pass (one winner per run, a claim safe to resend, history that joins claims and results), as
+  cases for any test runner, for authors of custom backends. A failed check throws the new error
+  code `ANARCHON_CONTRACT`.
+
+### Fixed
+
+- **A runner cut off from the store gives its run up.** A run counted as lost only when the store
+  refused a heartbeat, so an instance whose heartbeats never got through kept running the job while
+  a backup ran it too. When no heartbeat has been confirmed within `leaseMs` of being sent, the
+  instance now aborts `ctx.signal` and emits `'lost'` on its own.
+- **A result the store never stores no longer blocks the job.** After the handler ended, the
+  instance renewed the lease until the result was stored, so a write the store never answered
+  skipped every later run, on every instance, as an overlap. It now stops renewing after
+  `leaseMs`; the lease runs out, the next runs go ahead, and a backup may start the run again as
+  the next attempt, as after a crash.
+- **Refusals come before any change.** `start()` called while the scheduler is starting or
+  stopping is refused before it logs the unscheduled-job warnings or touches the registry. An
+  object whose jobs name a scheduler that can't be created yet creates none of the schedulers its
+  other jobs name (with `autoStart`, they were also started). `RedisBackend.init()` refuses a server
+  too old for its strategy before it writes the `<prefix>format` key.
 
 ## 0.4.1
 

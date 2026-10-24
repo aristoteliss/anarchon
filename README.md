@@ -1,6 +1,7 @@
 # anarchon
 
 [![npm version](https://img.shields.io/npm/v/anarchon.svg)](https://www.npmjs.com/package/anarchon)
+[![CI](https://github.com/aristoteliss/anarchon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aristoteliss/anarchon/actions/workflows/ci.yml)
 [![npm downloads](https://img.shields.io/npm/dm/anarchon.svg)](https://www.npmjs.com/package/anarchon)
 [![node](https://img.shields.io/node/v/anarchon.svg)](https://www.npmjs.com/package/anarchon)
 [![license](https://img.shields.io/badge/license-AGPL--3.0%20or%20commercial-blue.svg)](https://github.com/aristoteliss/anarchon#license-and-commercial-use)
