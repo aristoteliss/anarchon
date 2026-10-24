@@ -6,6 +6,7 @@
 // Run through `pnpm test:release`, which rebuilds dist first.
 import { execFileSync } from 'node:child_process';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -22,6 +23,8 @@ const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'));
 const run = (command, args, cwd) =>
   execFileSync(command, args, { cwd, stdio: 'inherit' });
 const manifest = readJson(resolve(root, 'package.json'));
+// tar from a fixed system directory, not looked up on PATH.
+const TAR = ['/usr/bin/tar', '/bin/tar'].find((path) => existsSync(path));
 const ROOT_FILES = [
   'package.json',
   'README.md',
@@ -51,7 +54,8 @@ try {
   const [tarball] = readdirSync(packed).filter((name) => name.endsWith('.tgz'));
   if (!tarball) throw new Error('pnpm pack produced no tarball');
 
-  const entries = execFileSync('tar', ['-tf', resolve(packed, tarball)], {
+  if (!TAR) throw new Error('tar is not in /usr/bin or /bin');
+  const entries = execFileSync(TAR, ['-tf', resolve(packed, tarball)], {
     encoding: 'utf8',
   })
     .trim()

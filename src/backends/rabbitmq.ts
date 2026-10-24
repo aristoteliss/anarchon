@@ -380,9 +380,10 @@ export class RabbitMQBackend implements Backend {
 
     return new Promise((resolve, reject) => {
       const onAnswer = (err: unknown) => {
-        if (!err) resolve(true);
-        else if (/nacked/.test(String((err as Error).message))) resolve(false);
-        else reject(err);
+        if (!err) return resolve(true);
+        const error = err instanceof Error ? err : new Error(String(err));
+        if (/nacked/.test(error.message)) resolve(false);
+        else reject(error);
       };
       channel.sendToQueue(queue, content, options, onAnswer);
     });
