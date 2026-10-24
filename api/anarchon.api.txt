@@ -429,7 +429,7 @@ export declare function Scheduled(): ScheduledDecorator;
 export {};
 
 // errors.d.ts
-export type ErrorCode = 'ANARCHON_INVALID_ARGUMENT' | 'ANARCHON_UNKNOWN_OPTION' | 'ANARCHON_UNSUPPORTED' | 'ANARCHON_UNSAFE_JOB' | 'ANARCHON_SERVER' | 'ANARCHON_MISSING_DRIVER' | 'ANARCHON_STATE' | 'ANARCHON_JOB_EXISTS' | 'ANARCHON_UNKNOWN_JOB' | 'ANARCHON_SCHEDULER_EXISTS' | 'ANARCHON_NO_SCHEDULER' | 'ANARCHON_STORE' | 'ANARCHON_STORE_FORMAT' | 'ANARCHON_INTERNAL';
+export type ErrorCode = 'ANARCHON_INVALID_ARGUMENT' | 'ANARCHON_UNKNOWN_OPTION' | 'ANARCHON_UNSUPPORTED' | 'ANARCHON_UNSAFE_JOB' | 'ANARCHON_SERVER' | 'ANARCHON_MISSING_DRIVER' | 'ANARCHON_STATE' | 'ANARCHON_JOB_EXISTS' | 'ANARCHON_UNKNOWN_JOB' | 'ANARCHON_SCHEDULER_EXISTS' | 'ANARCHON_NO_SCHEDULER' | 'ANARCHON_STORE' | 'ANARCHON_STORE_FORMAT' | 'ANARCHON_CONTRACT' | 'ANARCHON_INTERNAL';
 export declare function coded<E extends Error>(error: E, code: ErrorCode): E & {
     readonly code: ErrorCode;
 };
@@ -612,6 +612,15 @@ export declare class Scheduler<B extends Backend = Backend> {
     private getJob;
     private nextRunOf;
 }
+
+// testing.d.ts
+import type { Backend } from './types';
+export interface ContractCase {
+    name: string;
+    run: () => Promise<void>;
+}
+export type BackendFactory = (namespace: string) => Backend | Promise<Backend>;
+export declare function backendContract(create: BackendFactory): ContractCase[];
 
 // types/backend.d.ts
 import type { RunReason } from './jobs';

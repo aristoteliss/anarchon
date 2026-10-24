@@ -204,7 +204,8 @@ export interface LeaseSchedulerOptions {
   /**
    * A running job's lease lasts this long and is renewed every heartbeatMs. A runner
    * that stops renewing (crash, freeze, lost network) loses the run to a backup about leaseMs later
-   * (at most leaseMs + 2 × heartbeatMs). Default 30000.
+   * (at most leaseMs + 2 × heartbeatMs). A runner whose renewals are not confirmed within leaseMs
+   * aborts its run's `ctx.signal` and emits 'lost' by then. Default 30000.
    *
    * Shorter means faster takeover; longer tolerates longer pauses of a healthy runner.
    *

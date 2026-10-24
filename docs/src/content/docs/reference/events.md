@@ -18,7 +18,7 @@ Events describe what happened on **this instance**. Guide: [Events and logging](
 | [`failure`](#failure) | `RunFailureEvent` | The handler threw, or `timeoutMs` passed |
 | [`interrupted`](#interrupted) | `RunInterruptedEvent` | `stop()` or a takeover aborted `ctx.signal`, and the handler then threw |
 | [`skip`](#skip) | `SkipEvent` | A run was due and this instance didn't run it |
-| [`lost`](#lost) | `LostEvent` | A backup took over a run this instance was executing |
+| [`lost`](#lost) | `LostEvent` | A backup took over a run this instance was executing, or its lease couldn't be renewed in time |
 | [`error`](#error) | `SchedulerErrorEvent` | A backend or setup problem |
 
 ## `start`

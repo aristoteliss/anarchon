@@ -91,6 +91,7 @@ export class LeaseRunner {
     const { core } = this;
     if (reason === 'scheduled') await this.yieldIfFailed(job, slot, signal);
     const input = claimInput(core.instanceId, job, slot);
+    const claimedAt = Date.now();
     const outcome = await this.claim(job, input, reason, signal);
     if (!outcome) return;
 
@@ -113,6 +114,7 @@ export class LeaseRunner {
       job,
       slot,
       token: input.token,
+      claimedAt,
       attempt: outcome.attempt,
       reason: startedAs,
       signal,
@@ -248,12 +250,14 @@ export class LeaseRunner {
         );
       }
 
+      const claimedAt = Date.now();
       const outcome = await this.claimManual(job, slot, token);
       if (outcome.kind === 'won') {
         return this.executeLeased({
           job,
           slot,
           token,
+          claimedAt,
           attempt: 1,
           reason: 'manual',
           data,
@@ -362,9 +366,11 @@ export class LeaseRunner {
     }
   }
 
-  /** Aborts a run whose lease another instance holds now, and emits 'lost'. */
+  /** Aborts a run whose lease another instance holds now, or that could not be renewed in time, and emits 'lost'. */
   private loseRun(run: Execution, { job, slot, attempt }: LeasedRun): void {
-    const reason = abortError('This run was taken over by another instance');
+    const reason = abortError(
+      'This run was taken over by another instance, or its lease could not be renewed in time',
+    );
     this.executor.abortRun(run, 'lost', reason);
 
     this.core.emit('lost', {
@@ -383,6 +389,8 @@ interface LeasedRun {
   slot: number;
   /** The token of the winning claim; the store checks it on every heartbeat, finish and release. */
   token: string;
+  /** When the winning claim was sent: its lease lasts until leaseMs after that, at the earliest. */
+  claimedAt: number;
   attempt: number;
   reason: RunReason;
   /** The data given to runNow() for this one run. */
@@ -392,12 +400,18 @@ interface LeasedRun {
 
 /**
  * The lease of one run this instance executes, renewed every heartbeat until the run's end is
- * stored or the run is released. Calls onLost once when the store says another instance has it.
+ * stored or the run is released. Calls onLost once when the store says another instance has it, or
+ * when no renewal was confirmed within leaseMs while the handler runs: by then the lease may have
+ * run out on the store, and a backup may be taking the run over.
  */
 class HeldLease {
   private lost = false;
   private ending = false;
+  /** When the last renewal the store confirmed was sent (the claim, at first). */
+  private confirmedAt: number;
   private readonly heartbeat: NodeJS.Timeout;
+  private deadline: NodeJS.Timeout | undefined;
+  private giveUp: NodeJS.Timeout | undefined;
 
   constructor(
     private readonly core: SchedulerCore,
@@ -405,12 +419,16 @@ class HeldLease {
     private readonly leased: LeasedRun,
     private readonly onLost: () => void,
   ) {
+    this.confirmedAt = leased.claimedAt;
     this.heartbeat = setInterval(() => this.renew(), core.heartbeatMs);
     if (core.unrefTimers) this.heartbeat.unref();
+    this.armDeadline();
   }
 
   stop(): void {
     clearInterval(this.heartbeat);
+    clearTimeout(this.deadline);
+    clearTimeout(this.giveUp);
   }
 
   /** Stores how the run ended. */
@@ -418,9 +436,12 @@ class HeldLease {
     const { core, runs } = this;
     const { job, slot, token, signal } = this.leased;
     this.ending = true;
+    // Keep renewing while the end is stored, also while stop() waits: if the store is briefly
+    // unreachable here, a backup must not re-run a job that already completed. But for leaseMs at
+    // most: a finish() the store never answers must not hold the job's lease for good. A finish()
+    // that lands before a backup takes the run over still counts.
+    this.giveUp = this.timer(() => clearInterval(this.heartbeat), core.leaseMs);
 
-    // Keep renewing the lease until the end is stored, also while stop() waits: if Redis is
-    // briefly unreachable here, a backup must not re-run a job that already completed.
     for (
       let delay = 200;
       !this.lost && !core.isIdle() && signal === core.stopSignal();
@@ -456,20 +477,45 @@ class HeldLease {
 
   private renew(): void {
     const { job, slot, token } = this.leased;
+    const sentAt = Date.now();
 
     this.runs.heartbeat(job.name, slot, token, this.core.leaseMs).then(
       (ok) => {
+        if (ok) this.confirm(sentAt);
         // Once finish() or release() is sent, a refused heartbeat is expected; both check the token themselves.
-        if (!ok && !this.ending) this.markLost();
+        else if (!this.ending) this.markLost();
       },
       (error: unknown) =>
         this.core.emit('error', { error, job: job.name, slot }),
     );
   }
 
+  /** Heartbeats overlap and may be answered out of order: only a later send moves the deadline. */
+  private confirm(sentAt: number): void {
+    if (sentAt <= this.confirmedAt) return;
+    this.confirmedAt = sentAt;
+    this.armDeadline();
+  }
+
+  /** The handler is still running when leaseMs passes with no confirmed renewal: the run is lost here. */
+  private armDeadline(): void {
+    clearTimeout(this.deadline);
+    const remainingMs = this.confirmedAt + this.core.leaseMs - Date.now();
+    this.deadline = this.timer(() => {
+      if (!this.ending) this.markLost();
+    }, remainingMs);
+  }
+
+  private timer(fn: () => void, ms: number): NodeJS.Timeout {
+    const timer = setTimeout(fn, Math.max(0, ms));
+    if (this.core.unrefTimers) timer.unref();
+    return timer;
+  }
+
   private markLost(): void {
     if (this.lost) return;
     this.lost = true;
+    this.stop(); // nothing left to renew
     this.onLost();
   }
 }

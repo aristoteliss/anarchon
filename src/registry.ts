@@ -212,12 +212,25 @@ function resolve(
     return host;
   }
 
-  const existing =
-    reference === undefined ? defaultScheduler : named.get(reference);
+  const existing = existingHost(reference);
   if (existing) return existing;
 
   const from = settingsFor(reference);
   return from ? create(reference, from) : undefined;
+}
+
+/** The default scheduler, or the one with this name, if it exists. Creates nothing. */
+function existingHost(name: string | undefined): SchedulerHost | undefined {
+  return name === undefined ? defaultScheduler : named.get(name);
+}
+
+/** Whether resolve() would find or create the scheduler a job names, without creating it. */
+function isResolvable(reference: string | object | undefined): boolean {
+  if (typeof reference === 'object') return true; // resolve() refuses an unknown object
+  return (
+    existingHost(reference) !== undefined ||
+    settingsFor(reference) !== undefined
+  );
 }
 
 /**
@@ -274,6 +287,13 @@ function planPlacement(
       'ANARCHON_INVALID_ARGUMENT',
     );
   }
+
+  // Every scheduler must be there before any is created: an object that has to wait leaves none
+  // behind (with autoStart, it would also be started).
+  const isPlaceable =
+    forced !== undefined ||
+    declared.every((job) => isResolvable(job.scheduler));
+  if (!isPlaceable) return undefined;
 
   const plan: Array<{ host: SchedulerHost; job: DeclaredJob; name: string }> =
     [];

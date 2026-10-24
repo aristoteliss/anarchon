@@ -307,8 +307,8 @@ anarchon runs in one of two modes, chosen by the backend. A lease backend (Redis
 | Run history and outcomes | Built in, stored in the backend: `history()`, `lastRun()` | Built in: `history()`, `lastRun()`. RabbitMQ and NATS trim by count only | None |
 | General-purpose locks in your code | No: scheduled and manual runs only | No | Yes: `locks.acquire()`, `locks.withLock()`, `await using` |
 | Leader election | No: leaderless by design | No | Yes: `@LeaderElection()`, `onLeadershipAcquired()`, `onLeadershipLost()` |
-| Fencing tokens | No token; `ctx.slot` and `ctx.attempt` identify an attempt of a run | No token; `ctx.slot` identifies the run (`ctx.attempt` is always 1) | Yes: `lock.fencingToken`, from a counter or sequence in the store |
-| Loss detected without the store's answer | No: a run counts as lost when the store refuses a heartbeat | Not applicable: there is no lease to lose | Yes: a lock counts as lost when no renewal is confirmed before its deadline |
+| Fencing tokens | No single token; `ctx.slot` and `ctx.attempt` order the attempts of a run and [fence writes](../../guides/writing-handlers/#reject-writes-from-an-older-attempt) | No token; `ctx.slot` identifies the run (`ctx.attempt` is always 1) | Yes: `lock.fencingToken`, from a counter or sequence in the store |
+| Loss detected without the store's answer | Yes: a run counts as lost when no renewal is confirmed within `leaseMs` | Not applicable: there is no lease to lose | Yes: a lock counts as lost when no renewal is confirmed before its deadline |
 | Timeout on each store call | No | No | Yes: `storeTimeout` (default 10 s), failing with `LockStoreTimeoutError` |
 | Works outside NestJS | Yes: plain Node.js, Express, Fastify; NestJS 11 and 12 | Yes, as anarchon | No: needs `@nestjs/common` and `@nestjs/core` |
 | License | AGPLv3 or commercial | AGPLv3 or commercial | MIT |
@@ -319,7 +319,7 @@ anarchon runs in one of two modes, chosen by the backend. A lease backend (Redis
 | --- | --- | --- | --- |
 | Control: A and B are healthy | 5 of 5 | 5 of 5 | 5 of 5, all on A |
 | A throws in every run | 1 to 3 of 5: B wins some runs, A fails the ones it claims | 5 of 5: after A's first failure, B claims every run | 0 of 5: A keeps the job, B skips every tick |
-| A never ends a run | 2 to 4 of 5: `timeoutMs` fails A's runs after 1 s | 5 of 5: after A's first timeout, B claims every run | 0 of 5: no instance runs the job again |
+| A never ends a run | 2 to 5 of 5: `timeoutMs` fails A's runs after 1 s | 5 of 5: after A's first timeout, B claims every run | 0 of 5: no instance runs the job again |
 
 Choose `@nestjs/locks` when you need locks or leader election beyond scheduled jobs. Choose anarchon when scheduled jobs must keep running while one instance is sick, after a crash, or after a full outage.
 

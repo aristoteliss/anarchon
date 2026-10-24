@@ -214,7 +214,17 @@ Whatever the store, test the contract directly:
 2. **Repeat safety.** The winning claim sent again, with the same token, still answers `true`. A different token answers `false`.
 3. **History.** A claim plus a saved result comes back from `history()` as one record with the right instance and status.
 
-anarchon's own suite runs these against every built-in backend.
+`backendContract()` from `anarchon/testing` runs these three checks against your backend, in any test runner. Give it a function that creates one instance's backend for a namespace: backends created with the same namespace must share one store, as instances of one service do. anarchon's own suite runs the same checks against every built-in backend.
+
+```ts
+import { backendContract } from 'anarchon/testing';
+import { test } from 'vitest';
+
+const cases = backendContract((namespace) => new MyBackend({ url: process.env.STORE_URL, prefix: `${namespace}:` }));
+for (const { name, run } of cases) test(name, run, 30_000);
+```
+
+Run them against the real store, where calls really overlap: a race on a mock proves nothing. A check that fails rejects with an `ANARCHON_CONTRACT` error saying what was expected and what came back. A lease backend's `RunStore` (takeover, heartbeats, hand-over) needs tests of its own.
 
 ## Compatibility
 

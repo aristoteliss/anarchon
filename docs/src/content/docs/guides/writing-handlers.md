@@ -152,6 +152,24 @@ scheduler.every('hourly-rollup', '1h', async (ctx) => {
 });
 ```
 
+### Reject writes from an older attempt
+
+An idempotent write makes a second attempt harmless when the attempts run one after the other. When they overlap (a frozen runner wakes up and writes before it learns that a backup took over), the older attempt can overwrite what the newer one wrote. On a lease backend, every attempt of a run has a higher `ctx.attempt` than the one before, so `ctx.slot` and `ctx.attempt` together work as a fencing token: store the attempt with the row, and let a write apply only if its attempt isn't older.
+
+```ts
+scheduler.every('daily-totals', '1d', async (ctx) => {
+  const total = await computeTotal(ctx.slot);
+  await db.query(
+    `INSERT INTO daily_totals (day, total, attempt) VALUES ($1, $2, $3)
+     ON CONFLICT (day) DO UPDATE SET total = EXCLUDED.total, attempt = EXCLUDED.attempt
+     WHERE daily_totals.attempt <= EXCLUDED.attempt`,
+    [ctx.slot, total, ctx.attempt],
+  );
+});
+```
+
+The same pair goes to another service as a version: reject a request whose `(slot, attempt)` is lower than one already seen. On a claim-only backend, `ctx.attempt` is always 1 and nobody takes a run over, so there is nothing to fence.
+
 ## Knowing it's a retry
 
 `ctx.attempt` and `ctx.reason` tell you that a previous attempt started and didn't finish:

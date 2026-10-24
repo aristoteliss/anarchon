@@ -39,6 +39,7 @@ try {
 | `ANARCHON_SCHEDULER_EXISTS`, `ANARCHON_NO_SCHEDULER` | A scheduler name that is taken, or that names no scheduler and no settings |
 | `ANARCHON_STORE` | The store refused a write |
 | `ANARCHON_STORE_FORMAT` | The store holds data a newer version of anarchon wrote: run one version on every instance |
+| `ANARCHON_CONTRACT` | A backend failed a check of `backendContract()` from `anarchon/testing`: the message says what was expected |
 | `ANARCHON_INTERNAL` | A bug in anarchon: please report it |
 
 New codes may be added in a minor release, so keep a default branch when you switch over them.

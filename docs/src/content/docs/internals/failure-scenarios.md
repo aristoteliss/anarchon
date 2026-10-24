@@ -104,7 +104,7 @@ sequenceDiagram
   Note over B: finishes: success
 ```
 
-**Lease backend:** a backup takes over. When the frozen instance wakes, its next heartbeat is refused, its `ctx.signal` aborts and it emits `lost`.
+**Lease backend:** a backup takes over. When the frozen instance wakes, its next heartbeat is refused, its `ctx.signal` aborts and it emits `lost`. An instance that keeps running but can't reach the store doesn't wait for an answer: once no heartbeat has been confirmed for `leaseMs`, it aborts `ctx.signal` and emits `lost`, by the time a backup can take the run over.
 
 **Claim-only backend:** no backup. The run simply continues when the instance wakes up.
 

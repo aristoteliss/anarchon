@@ -50,7 +50,7 @@ Instance A starts first, so `@nestjs/locks` makes it the owner of the job. A hea
 | --- | --- | --- | --- |
 | Control: A and B are healthy | 5 of 5 succeed | 5 of 5 succeed, all on A | 5 of 5 succeed |
 | A throws in every run | The runs B claims succeed (1 to 3 of 5 in our runs) | 0 of 5: every run fails on A, B skips every run | 5 of 5: after A's first failure, B claims every run |
-| A never ends a run | A's runs fail after a 1 s `timeoutMs`, and the runs B claims succeed (2 to 4 of 5 in our runs) | 0 of 5: no instance runs the job again | 5 of 5: after A's first timeout, B claims every run |
+| A never ends a run | A's runs fail after a 1 s `timeoutMs`, and the runs B claims succeed (2 to 5 of 5 in our runs) | 0 of 5: no instance runs the job again | 5 of 5: after A's first timeout, B claims every run |
 
 Why, in `@nestjs/locks` 0.0.4:
 

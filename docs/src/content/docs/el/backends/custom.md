@@ -214,7 +214,17 @@ class EmbeddedSqlBackend extends SqlBackend {
 2. **Ασφάλεια επανάληψης (Repeat safety).** Το νικητήριο claim όταν αποσταλεί ξανά, με το ίδιο token, απαντά και πάλι `true`. Ένα διαφορετικό token απαντά `false`.
 3. **Ιστορικό.** Ένα claim συν ένα αποθηκευμένο αποτέλεσμα επιστρέφεται από το `history()` ως μία εγγραφή με το σωστό instance και status.
 
-Η σουίτα δοκιμών του ίδιου του anarchon εκτελεί αυτούς τους ελέγχους σε κάθε ενσωματωμένο backend.
+Το `backendContract()` από το `anarchon/testing` εκτελεί αυτούς τους τρεις ελέγχους στο backend σας, σε οποιονδήποτε test runner. Δώστε του μια συνάρτηση που δημιουργεί το backend ενός instance για ένα namespace: τα backends που δημιουργούνται με το ίδιο namespace πρέπει να μοιράζονται ένα store, όπως τα instances μιας υπηρεσίας. Η σουίτα δοκιμών του ίδιου του anarchon εκτελεί τους ίδιους ελέγχους σε κάθε ενσωματωμένο backend.
+
+```ts
+import { backendContract } from 'anarchon/testing';
+import { test } from 'vitest';
+
+const cases = backendContract((namespace) => new MyBackend({ url: process.env.STORE_URL, prefix: `${namespace}:` }));
+for (const { name, run } of cases) test(name, run, 30_000);
+```
+
+Εκτελέστε τους στο πραγματικό store, όπου οι κλήσεις επικαλύπτονται πραγματικά: ένας αγώνας σε mock δεν αποδεικνύει τίποτα. Ένας έλεγχος που αποτυγχάνει απορρίπτεται με σφάλμα `ANARCHON_CONTRACT` που λέει τι αναμενόταν και τι επέστρεψε. Το `RunStore` ενός backend μίσθωσης (ανάληψη, heartbeats, παράδοση) χρειάζεται δικές του δοκιμές.
 
 ## Συμβατότητα
 

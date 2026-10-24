@@ -39,6 +39,7 @@ try {
 | `ANARCHON_SCHEDULER_EXISTS`, `ANARCHON_NO_SCHEDULER` | Ένα όνομα scheduler που είναι πιασμένο, ή που δεν αντιστοιχεί ούτε σε scheduler ούτε σε ρυθμίσεις |
 | `ANARCHON_STORE` | Το store αρνήθηκε μια εγγραφή |
 | `ANARCHON_STORE_FORMAT` | Το store περιέχει δεδομένα που έγραψε μια νεότερη έκδοση του anarchon: τρέξτε μία έκδοση σε όλα τα instances |
+| `ANARCHON_CONTRACT` | Ένα backend απέτυχε σε έναν έλεγχο του `backendContract()` από το `anarchon/testing`: το μήνυμα λέει τι αναμενόταν |
 | `ANARCHON_INTERNAL` | Σφάλμα του anarchon: παρακαλούμε αναφέρετέ το |
 
 Νέοι κωδικοί μπορεί να προστεθούν σε minor έκδοση, οπότε κρατήστε έναν κλάδο default όταν κάνετε switch πάνω τους.

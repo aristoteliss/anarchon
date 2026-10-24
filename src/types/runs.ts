@@ -147,8 +147,9 @@ export interface RunStartEvent extends RunEvent {
 
 /**
  * Payload of 'lost': this instance stopped owning a run it was executing, because a backup took it
- * over (this instance missed its heartbeats: a long pause, or the store was unreachable).
- * `ctx.signal` of that run was aborted. Only on backends with leases.
+ * over, or because no renewal of its lease was confirmed within leaseMs, so a backup may be taking
+ * it over (a long pause, or the store was unreachable or too slow). `ctx.signal` of that run was
+ * aborted. Only on backends with leases.
  *
  * @example
  * ```ts
@@ -247,7 +248,7 @@ export interface SchedulerErrorEvent extends Partial<RunKey> {
  * | `failure` | the handler threw, or `timeoutMs` passed |
  * | `interrupted` | stop() or a takeover aborted `ctx.signal`, and the handler then threw |
  * | `skip` | a run was due and this instance didn't run it: 'taken', 'late' or 'overlap' |
- * | `lost` | a backup took over a run this instance was executing (it stopped renewing its lease) |
+ * | `lost` | a backup took over a run this instance was executing, or its lease could not be renewed within leaseMs |
  * | `error` | a backend or setup problem; job failures are 'failure' |
  *
  * @example

@@ -12,6 +12,7 @@ import {
   RedisBackend,
   type RunClaim,
   type RunRecord,
+  type RunStore,
   Scheduler,
   type SkipEvent,
 } from '../../src';
@@ -188,7 +189,8 @@ describe('scheduler with leases', async () => {
           await failed;
           await b.start();
           ran.length = 0;
-          await sleep(4_200);
+          const until = Date.now() + 4_200;
+          while (ran.length < 3 && Date.now() < until) await sleep(20);
           assert.ok(ran.length >= 3, `ran: ${JSON.stringify(ran)}`);
           assert.deepEqual([...new Set(ran)], ['B']);
         } finally {
@@ -221,6 +223,152 @@ describe('scheduler with leases', async () => {
         } finally {
           await a.stop();
         }
+      });
+
+      /**
+       * A runs a one-off job; once it started, `fault` breaks A's store, then B starts and backs
+       * the run up. Returns when A's signal aborted, when B took over, and A's 'lost' events.
+       */
+      async function breakRunner(
+        id: string,
+        fault: (runs: RunStore) => void,
+      ): Promise<{ abortedAt?: number; takenOverAt?: number; lost: number }> {
+        const [a, b] = pair(uniqueId(id)) as [Scheduler, Scheduler];
+        const seen: { abortedAt?: number; takenOverAt?: number; lost: number } =
+          { lost: 0 };
+        let started = false;
+        const job = async (ctx: JobContext) => {
+          if (ctx.instanceId === 'B') {
+            seen.takenOverAt = Date.now();
+            return;
+          }
+          started = true;
+          ctx.signal.addEventListener('abort', () => {
+            seen.abortedAt = Date.now();
+          });
+          await delay(3_000, undefined, { signal: ctx.signal }).catch(() => {});
+        };
+        const at = Date.now() + 300;
+        for (const s of [a, b]) {
+          s.at('job', at, job, { jitterMs: 0 });
+          s.on('error', () => {});
+        }
+        a.on('lost', () => seen.lost++);
+
+        await a.start();
+        try {
+          while (!started) await sleep(20);
+          fault(a.backend.runs!);
+          await b.start();
+          const until = Date.now() + 3_000;
+          while (!seen.takenOverAt && Date.now() < until) await sleep(20);
+          await sleep(200);
+          return { ...seen }; // before stop() aborts the run
+        } finally {
+          await Promise.all([a.stop({ timeoutMs: 500 }), b.stop()]);
+        }
+      }
+
+      test('an instance whose heartbeats never answer aborts its run by the time a backup takes it over', async () => {
+        const seen = await breakRunner('hang', (runs) => {
+          runs.heartbeat = () => new Promise(() => {});
+        });
+
+        const report = `A aborted ${seen.abortedAt ? `${seen.abortedAt - (seen.takenOverAt ?? 0)} ms after` : 'never, until stop(), after'} B took over; 'lost' events on A: ${seen.lost}`;
+        assert.ok(seen.takenOverAt, 'B took the run over');
+        assert.ok(seen.abortedAt && seen.abortedAt <= seen.takenOverAt, report);
+        assert.equal(seen.lost, 1, report);
+      });
+
+      test('an instance whose heartbeats fail aborts its run by the time a backup takes it over', async () => {
+        const seen = await breakRunner('reject', (runs) => {
+          runs.heartbeat = async () => {
+            throw new Error('the store is unreachable from this instance');
+          };
+        });
+
+        const report = `A aborted ${seen.abortedAt ? `${seen.abortedAt - (seen.takenOverAt ?? 0)} ms after` : 'never, until stop(), after'} B took over; 'lost' events on A: ${seen.lost}`;
+        assert.ok(seen.takenOverAt, 'B took the run over');
+        assert.ok(seen.abortedAt && seen.abortedAt <= seen.takenOverAt, report);
+        assert.equal(seen.lost, 1, report);
+      });
+
+      test('a finish() that never answers neither blocks the next runs nor stop()', async () => {
+        const [a, b] = pair(uniqueId('finish')) as [Scheduler, Scheduler];
+        const starts: string[] = [];
+        const overlaps: string[] = [];
+        for (const s of [a, b]) {
+          s.every(
+            'job',
+            '1s',
+            (ctx: JobContext) => {
+              starts.push(ctx.instanceId);
+            },
+            { catchUpMs: 0 },
+          );
+          s.on('skip', (e: SkipEvent) => {
+            if (e.reason === 'overlap') overlaps.push(e.instanceId);
+          });
+          s.on('error', () => {});
+        }
+        const runs = a.backend.runs!;
+        runs.finish = () => new Promise(() => {});
+
+        await a.start();
+        let stopMs = 0;
+        try {
+          while (starts.length === 0) await sleep(20);
+          await b.start();
+          starts.length = 0;
+          const until = Date.now() + 4_200;
+          while (starts.length < 2 && Date.now() < until) await sleep(20);
+        } finally {
+          const stopAt = Date.now();
+          await a.stop({ timeoutMs: 500 });
+          stopMs = Date.now() - stopAt;
+          await b.stop();
+        }
+
+        const report = `runs started in 4.2 s: ${JSON.stringify(starts)}; overlap skips: ${overlaps.length}; stop({ timeoutMs: 500 }) took ${stopMs} ms`;
+        assert.ok(starts.length >= 2, report);
+        assert.ok(stopMs < 1_500, report);
+      });
+
+      test('a claim that never answers neither holds back the next slots nor stop()', async () => {
+        const [a, b] = pair(uniqueId('claim')) as [Scheduler, Scheduler];
+        const starts: string[] = [];
+        let claims = 0;
+        const runs = a.backend.runs!;
+        runs.claim = () => {
+          claims++;
+          return new Promise(() => {});
+        };
+        for (const s of [a, b]) {
+          s.every(
+            'job',
+            '1s',
+            (ctx: JobContext) => {
+              starts.push(ctx.instanceId);
+            },
+            { catchUpMs: 0 },
+          );
+          s.on('error', () => {});
+        }
+
+        await Promise.all([a.start(), b.start()]);
+        let stopMs = 0;
+        try {
+          await sleep(2_200);
+        } finally {
+          const stopAt = Date.now();
+          await a.stop({ timeoutMs: 500 });
+          stopMs = Date.now() - stopAt;
+          await b.stop();
+        }
+
+        assert.ok(claims >= 2, `A sent ${claims} claims in 2.2 s`);
+        assert.ok(starts.length >= 2, `B ran ${starts.length} runs in 2.2 s`);
+        assert.ok(stopMs < 1_500, `stop({ timeoutMs: 500 }) took ${stopMs} ms`);
       });
     });
   }

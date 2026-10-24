@@ -22,7 +22,7 @@ scheduler.on('failure', (run) => {
 | `failure` | The handler threw, or `timeoutMs` passed | run record + `cause` |
 | `interrupted` | `stop()` or a takeover aborted `ctx.signal`, and the handler then threw | run record + `cause`, `handedOver` |
 | `skip` | A run was due and this instance didn't run it | job, slot, `reason` |
-| `lost` | A backup took over a run this instance was executing | job, slot, attempt |
+| `lost` | A backup took over a run this instance was executing, or its lease couldn't be renewed in time | job, slot, attempt |
 | `error` | A backend or setup problem | `error`, and the job and slot if known |
 
 ```mermaid
@@ -73,7 +73,7 @@ scheduler.on('interrupted', (run) => {
 
 ### `lost`
 
-This instance was running a job and found out, at a heartbeat, that a backup had taken the run over. That happens when the instance couldn't renew its lease for longer than `leaseMs`: it was frozen, or cut off from the store. Its `ctx.signal` aborts at the same moment.
+This instance was running a job and gave it up: a heartbeat found that a backup had taken the run over, or no heartbeat had been confirmed for `leaseMs`, so a backup may be taking it over. That happens when the instance couldn't renew its lease: it was frozen, or cut off from the store. Its `ctx.signal` aborts at the same moment.
 
 A `lost` event now and then after a long pause is expected. Frequent ones mean `leaseMs` is too short for your environment.
 

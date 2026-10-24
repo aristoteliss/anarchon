@@ -264,14 +264,15 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
   /** Connects and checks the server version against the strategy. */
   async init(): Promise<void> {
     const { client } = await this.getConnection();
+    // A server the strategy can't run on is refused before anything is written to it.
+    if (this.lease) await refuseOldRedis(client);
+    else await this.getStrategy();
+
     const marker = `${this.prefix}format`;
     await client.send('SET', [marker, STORE_FORMAT, 'NX']);
     const format = await client.send('GET', [marker]);
     const stored = toStr(format);
     checkStoreFormat(stored, `The keys under "${this.prefix}"`);
-
-    if (this.lease) return refuseOldRedis(client);
-    await this.getStrategy();
   }
 
   /** 'idmp' configures the job's stream here; the other strategies need nothing. */

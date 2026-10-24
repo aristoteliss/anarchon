@@ -1,7 +1,8 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 // Packs anarchon, installs the tarball into a fresh consumer outside the checkout, and checks
-// that it is complete, type-checks, and runs a job through require(), import and Bun.
+// that it is complete, type-checks, runs a job through require(), import and Bun, and passes the
+// backend contract of anarchon/testing on SQLite.
 // Run through `pnpm test:release`, which rebuilds dist first.
 import { execFileSync } from 'node:child_process';
 import {
@@ -56,7 +57,13 @@ try {
     .trim()
     .split('\n')
     .map((entry) => entry.replace(/^package\//, ''));
-  for (const file of [...ROOT_FILES, 'dist/index.js', 'dist/index.d.ts']) {
+  const ENTRY_FILES = [
+    'dist/index.js',
+    'dist/index.d.ts',
+    'dist/testing.js',
+    'dist/testing.d.ts',
+  ];
+  for (const file of [...ROOT_FILES, ...ENTRY_FILES]) {
     if (!entries.includes(file)) throw new Error(`${tarball}: missing ${file}`);
   }
   const stray = entries.filter(
@@ -131,6 +138,23 @@ async function main(): Promise<void> {
 void main();
 `,
   );
+  // The subpath export resolves, type-checks and runs; SQLite on a file, shared by the instances.
+  writeFileSync(
+    resolve(consumer, 'src/contract.ts'),
+    `import { join } from 'node:path';
+import { SqliteBackend } from 'anarchon';
+import { backendContract } from 'anarchon/testing';
+
+async function main(): Promise<void> {
+  const database = join(__dirname, '..', 'contract.db');
+  const cases = backendContract((namespace) => new SqliteBackend({ database, table: namespace }));
+  for (const { run } of cases) await run();
+  console.log(\`anarchon/testing: SQLite passes \${cases.length} contract checks\`);
+}
+
+void main();
+`,
+  );
   writeFileSync(
     resolve(consumer, 'src/load.mts'),
     `import { createRequire } from 'node:module';
@@ -155,6 +179,7 @@ console.log(\`import: the same \${required.split(',').length} exports as require
     consumer,
   );
   run(process.execPath, ['dist/run-job.js'], consumer);
+  run(process.execPath, ['dist/contract.js'], consumer);
   run(process.execPath, ['dist/load.mjs'], consumer);
   try {
     execFileSync('bun', ['--version'], { stdio: 'ignore' });
