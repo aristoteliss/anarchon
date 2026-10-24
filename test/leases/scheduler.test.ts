@@ -199,6 +199,8 @@ describe('scheduler with leases', async () => {
       });
 
       test('with yieldAfterFailure, an instance with no healthy peer still runs, jitterMs + heartbeatMs after the slot', async () => {
+        // jitterMs + heartbeatMs, less a little: a timer can fire a few ms before Date.now() says.
+        const WAITED_MS = 290;
         const [a] = pair(uniqueId('alone')) as [Scheduler];
         const lateMs: number[] = [];
         a.every(
@@ -216,9 +218,9 @@ describe('scheduler with leases', async () => {
         try {
           while (lateMs.length < 3) await sleep(20);
           const [first = 0, ...afterFailure] = lateMs;
-          assert.ok(first < 300, `first run ${first} ms late`);
+          assert.ok(first < WAITED_MS, `first run ${first} ms late`);
           for (const ms of afterFailure) {
-            assert.ok(ms >= 300, `a run after a failure ${ms} ms late`);
+            assert.ok(ms >= WAITED_MS, `a run after a failure ${ms} ms late`);
           }
         } finally {
           await a.stop();
