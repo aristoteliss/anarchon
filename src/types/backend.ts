@@ -189,7 +189,8 @@ export interface JobLimits {
  * The built-in backends get that from one atomic operation of their store; each class explains its
  * own: {@link RedisBackend} (a script or XADD), {@link PostgresBackend} and {@link SqliteBackend}
  * (one transaction on the run's row), {@link RabbitMQBackend} (a queue of length 1 with publisher
- * confirms), {@link NatsBackend} (JetStream message de-duplication).
+ * confirms), {@link NatsBackend} (JetStream message de-duplication, or with 'lease' a key-value
+ * write at the revision that was read).
  *
  * @example The idea, as a backend for tests: one process, so a Map is atomic enough
  * ```ts
@@ -223,7 +224,7 @@ export interface JobLimits {
 export interface Backend {
   /**
    * Which backend and strategy, for logs and error messages: 'redis:lease', 'valkey:script',
-   * 'postgres', 'sqlite', 'rabbitmq', 'nats'.
+   * 'postgres', 'sqlite', 'rabbitmq', 'nats', 'nats:lease'.
    *
    * @example
    * ```ts

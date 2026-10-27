@@ -43,8 +43,9 @@ Install anarchon and the driver for your store. Drivers are optional peer depend
   <TabItem label="NATS">
     ```sh
     pnpm add anarchon @nats-io/transport-node @nats-io/jetstream
+    pnpm add @nats-io/kv   # only for strategy: 'lease'
     ```
-    JetStream must be enabled on the server.
+    JetStream must be enabled on the server; the `lease` strategy needs nats-server 2.10 or newer.
   </TabItem>
 </Tabs>
 
@@ -59,7 +60,8 @@ Use the one your service already has. If you have a choice:
 | Redis or Valkey | The default, `lease` strategy | The full feature set, and the least latency |
 | PostgreSQL, no Redis | `PostgresBackend` | The full feature set, with no new infrastructure |
 | One machine, several processes | `SqliteBackend` on a file | No server at all |
-| Only RabbitMQ or NATS | `RabbitMQBackend` / `NatsBackend` | One winner per run, but no backups, overlap protection or catch-up |
+| Only NATS | `NatsBackend` with `strategy: 'lease'` | The full feature set, on a JetStream key-value bucket |
+| Only RabbitMQ | `RabbitMQBackend` | One winner per run, but no backups, overlap protection or catch-up |
 
 [Backends overview](../../backends/overview/) compares them in detail.
 

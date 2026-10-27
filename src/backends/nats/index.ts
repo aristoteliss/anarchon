@@ -6,7 +6,7 @@ import type {
   JsMsg,
 } from '@nats-io/jetstream';
 import type { NatsConnection } from '@nats-io/transport-node';
-import { coded } from '../errors';
+import { coded } from '../../errors';
 
 import {
   buildHistory,
@@ -15,22 +15,45 @@ import {
   parseJson,
   toClaim,
   toResult,
-} from '../history';
-import { keysOf } from '../option-keys';
+} from '../../history';
+import { keysOf } from '../../option-keys';
 import type {
   Backend,
   ClaimInput,
   JobLimits,
+  RunReason,
   RunRecord,
+  RunStore,
   StoredResult,
-} from '../types';
+} from '../../types';
 import {
   assertSimpleName,
+  claimManualSlot,
   errorMessage,
   positiveInt,
   refuseHistoryTtl,
   refuseUnknown,
-} from '../util';
+} from '../../util';
+import { NatsLeaseStore } from './lease';
+
+/**
+ * How {@link NatsBackend} picks the single runner of each run.
+ * - `msg-id` (default): every instance publishes its claim with the same `Nats-Msg-Id`, and
+ *   JetStream keeps the first one. One winner per run, nothing more.
+ * - `lease`: a JetStream key-value bucket holds each job's runs, and a write succeeds only if
+ *   nobody wrote since it was read. Adds no overlapping runs, backup runners when the winner dies
+ *   or freezes, catch-up of a run missed while every instance was down, and retries. Needs
+ *   nats-server 2.10 or newer and the `@nats-io/kv` package.
+ *
+ * Every instance of a service must use the same strategy: the two don't see each other's claims.
+ *
+ * @example
+ * ```ts
+ * new NatsBackend({ strategy: 'lease' }); // backups, no overlap, catch-up, retries
+ * new NatsBackend();                      // 'msg-id': one winner per run
+ * ```
+ */
+export type NatsStrategyName = 'msg-id' | 'lease';
 
 /**
  * The parts of a NATS connection this backend uses: a connection from `@nats-io/transport-node`
@@ -62,7 +85,21 @@ export interface NatsConnectionLike {
  * });
  * ```
  */
-export interface NatsBackendOptions {
+export interface NatsBackendOptions<
+  S extends NatsStrategyName = NatsStrategyName,
+> {
+  /**
+   * How the single runner of each run is chosen (see {@link NatsStrategyName}). Default 'msg-id':
+   * one winner per run, so a scheduler on it takes no lease options. 'lease' also gives no
+   * overlapping runs, backup runners, catch-up and retries; its runs' state goes to the key-value
+   * bucket `<stream>_RUNS`, so the stream name may then contain only letters, digits, "_" and "-".
+   *
+   * @example
+   * ```ts
+   * new NatsBackend({ servers: process.env.NATS_URL, strategy: 'lease' });
+   * ```
+   */
+  strategy?: S;
   /**
    * Server URL(s). Default 'nats://localhost:4222'.
    *
@@ -104,7 +141,8 @@ export interface NatsBackendOptions {
   prefix?: string;
   /**
    * How long JetStream remembers a claimed run (the stream's duplicate window, ms). Must be longer
-   * than a job's jitterMs + maxLateMs. Default 300000.
+   * than a job's jitterMs + maxLateMs. Default 300000. With 'lease', the bucket remembers runs
+   * instead, and this window only drops a history record the client sends twice.
    *
    * @example
    * ```ts
@@ -126,7 +164,8 @@ export interface NatsBackendOptions {
    * Stream replicas in a NATS cluster. Use 3 so the stream, and its memory of claimed runs,
    * survives the loss of a server. A new stream gets 1 when this is not set. When it is set, an
    * existing stream is updated to it (the server refuses more replicas than it has servers); when it
-   * is not set, an existing stream keeps its replicas.
+   * is not set, an existing stream keeps its replicas. With 'lease', a new bucket of runs gets the
+   * same number; an existing bucket keeps its own.
    *
    * @example
    * ```ts
@@ -137,6 +176,7 @@ export interface NatsBackendOptions {
 }
 
 const NATS_OPTIONS = keysOf<NatsBackendOptions>({
+  strategy: true,
   servers: true,
   connection: true,
   stream: true,
@@ -175,13 +215,19 @@ interface StreamSettings {
  * 3. An instance won if its acknowledgement is not a duplicate. The stream (its leader, in a
  *    cluster) orders the publishes, so exactly one is first.
  *
- * Simple claim only: this decides who runs each time. There are no leases, so no backup runners,
- * no overlap protection and no catch-up; for those use Redis 'lease', Postgres or SQLite.
+ * That is the default 'msg-id' strategy: it decides who runs each time, and holds no lease, so no
+ * backup runners, no overlap protection and no catch-up. The 'lease' strategy adds them, with a
+ * JetStream key-value bucket (see {@link NatsStrategyName}).
  * Job names may contain letters, digits, "_" and "-" only (they become subjects).
  *
  * @example
  * ```ts
  * new Scheduler({ backend: new NatsBackend({ servers: 'nats://nats.internal:4222' }) });
+ * ```
+ *
+ * @example Leases: backup runners, no overlapping runs, catch-up and retries
+ * ```ts
+ * new Scheduler({ backend: new NatsBackend({ servers: process.env.NATS_URL, strategy: 'lease' }), leaseMs: 10_000 });
  * ```
  *
  * @example A NATS cluster: three replicas, and your own connection
@@ -190,24 +236,39 @@ interface StreamSettings {
  * new Scheduler({ backend: new NatsBackend({ connection, stream: 'BILLING_CRON', replicas: 3 }) });
  * ```
  */
-export class NatsBackend implements Backend {
-  readonly name = 'nats';
-  /** duplicateWindowMs: how long the stream recognizes a repeated message ID. */
+export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
+  implements Backend
+{
+  /** 'nats', or 'nats:lease' with the 'lease' strategy. */
+  readonly name: S extends 'lease' ? 'nats:lease' : 'nats';
+  /** The strategy: 'msg-id' (the default) or 'lease'. */
+  readonly strategy: S;
+  /**
+   * 'msg-id': duplicateWindowMs, how long the stream recognizes a repeated message ID. 'lease':
+   * Infinity, since a run is remembered while a late claim could still ask for it.
+   */
   readonly dedupeWindowMs: number;
+  /** Set with the 'lease' strategy only: lets the scheduler use leases, backups and catch-up. */
+  readonly runs: S extends 'lease' ? RunStore : undefined;
+  private readonly lease?: NatsLeaseStore;
 
   private readonly servers: string | string[];
   private readonly userConnection: NatsConnectionLike | undefined;
   private readonly stream: string;
   private readonly prefix: string;
+  private readonly duplicateWindowMs: number;
   private historySize: number;
   private streamHistorySize = 0;
   private readonly replicas: number | undefined;
   private state: Promise<JetStreamState> | undefined;
 
   /** Validates the options. Nothing connects until init(). */
-  constructor(options: NatsBackendOptions = {}) {
+  constructor(options: NatsBackendOptions<S> = {}) {
     refuseUnknown('NatsBackend', options, NATS_OPTIONS);
-    this.dedupeWindowMs = positiveInt(
+    const strategy = readStrategy(options.strategy);
+    const stream = options.stream ?? 'CRON';
+    const bucket = strategy === 'lease' ? leaseBucket(stream) : undefined;
+    this.duplicateWindowMs = positiveInt(
       'duplicateWindowMs',
       options.duplicateWindowMs ?? 300_000,
     );
@@ -217,10 +278,23 @@ export class NatsBackend implements Backend {
         ? undefined
         : positiveInt('replicas', options.replicas);
 
+    this.strategy = strategy as S;
+    this.name = (bucket ? 'nats:lease' : 'nats') as this['name'];
+    this.dedupeWindowMs = bucket ? Infinity : this.duplicateWindowMs;
     this.servers = options.servers ?? 'nats://localhost:4222';
     this.userConnection = options.connection;
-    this.stream = options.stream ?? 'CRON';
+    this.stream = stream;
     this.prefix = options.prefix ?? 'cron.';
+    if (bucket) {
+      const state = () => this.getState();
+      this.lease = new NatsLeaseStore(
+        state,
+        bucket,
+        this.prefix,
+        this.replicas,
+      );
+    }
+    this.runs = this.lease as this['runs'];
   }
 
   /** Job names become subjects: letters, digits, '_' and '-' only. History is kept by count. */
@@ -230,9 +304,13 @@ export class NatsBackend implements Backend {
     this.historySize = Math.max(this.historySize, job.historySize);
   }
 
-  /** Connects, and creates the stream or brings its duplicate window and limits up to date. */
+  /**
+   * Connects, and creates the stream or brings its duplicate window and limits up to date. With
+   * 'lease', also creates the bucket of runs and checks the server reports its clock (2.10+).
+   */
   async init(): Promise<void> {
     await this.getState();
+    await this.lease?.init();
   }
 
   /** All jobs share the stream: makes it keep at least this job's historySize runs per job. */
@@ -243,10 +321,24 @@ export class NatsBackend implements Backend {
   }
 
   /**
-   * Publishes the claim with the message ID `<job>:<slot>`. Won unless the ack says duplicate; a
-   * duplicate carrying our own token is our own retry.
+   * 'msg-id': publishes the claim with the message ID `<job>:<slot>`. Won unless the ack says
+   * duplicate; a duplicate carrying our own token is our own retry. ('lease': the scheduler claims
+   * through `runs` instead.)
    */
   async claim(input: ClaimInput): Promise<boolean> {
+    if (this.lease) {
+      // Used only without the scheduler's lease handling: a long lease, no backups.
+      const outcome = await this.lease.claim({
+        ...input,
+        mode: 'new',
+        reason: 'scheduled',
+        leaseMs: 86_400_000,
+        overlap: 'allow',
+        maxAttempts: 1,
+      });
+      return outcome.kind === 'won';
+    }
+
     const { js, jsm } = await this.getState();
     const payload = JSON.stringify(claimPayload(input, false));
     const ack = await js.publish(this.subject(input.job, 'claims'), payload, {
@@ -267,8 +359,14 @@ export class NatsBackend implements Backend {
     }
   }
 
-  /** Publishes a runNow() run without a message ID, so it is never deduplicated. */
-  async recordManualRun(input: ClaimInput): Promise<undefined> {
+  /**
+   * Records a runNow() run. 'lease': claims a run of its own at the first free millisecond and
+   * returns that slot. 'msg-id': publishes the claim without a message ID, so it is never
+   * deduplicated.
+   */
+  async recordManualRun(input: ClaimInput): Promise<number | undefined> {
+    if (this.lease) return claimManualSlot(this.lease, input);
+
     const { js } = await this.getState();
     const payload = JSON.stringify(claimPayload(input, true));
     await js.publish(this.subject(input.job, 'claims'), payload);
@@ -283,7 +381,10 @@ export class NatsBackend implements Backend {
     );
   }
 
-  /** Reads the job's claims and results from the stream and joins them. */
+  /**
+   * Reads the job's claims and results from the stream and joins them. With 'lease', an attempt
+   * without a result is 'running' only while it is the current attempt with a live lease.
+   */
   async history(job: string, limit: number): Promise<RunRecord[]> {
     const { js, jsm } = await this.getState();
     const filter = `${this.prefix}${job}.*`;
@@ -291,7 +392,8 @@ export class NatsBackend implements Backend {
     if (count === 0) return []; // never ran
 
     const { claims, results } = await this.readRecords(js, filter, count);
-    return buildHistory({ job, claims, results, limit });
+    const pendingStatus = await this.lease?.pendingStatus(job);
+    return buildHistory({ job, claims, results, limit, pendingStatus });
   }
 
   /** How many messages the subjects under the filter hold, so each fetch can ask for exactly what is there. */
@@ -342,6 +444,7 @@ export class NatsBackend implements Backend {
   async close(): Promise<void> {
     const state = this.state;
     this.state = undefined;
+    this.lease?.close();
     if (!state || this.userConnection) return;
 
     try {
@@ -406,7 +509,7 @@ export class NatsBackend implements Backend {
   private async ensureStream(jsm: JetStreamManager): Promise<void> {
     const wanted: StreamSettings = {
       subjects: [`${this.prefix}>`],
-      duplicate_window: this.dedupeWindowMs * 1_000_000, // nanoseconds
+      duplicate_window: this.duplicateWindowMs * 1_000_000, // nanoseconds
       max_msgs_per_subject: this.historySize,
       // Only when asked for: an existing stream's replication is the operator's, not every instance's default.
       ...(this.replicas === undefined ? {} : { num_replicas: this.replicas }),
@@ -522,5 +625,39 @@ function addRecord(
     return;
   }
   const claim = toClaim(raw);
-  if (claim) claims.push(claim);
+  if (claim) claims.push(withAttempt(claim, raw));
+}
+
+/** A 'lease' claim record also says which attempt it is, and why it started. */
+function withAttempt(
+  claim: ClaimRecord,
+  raw: Record<string, unknown>,
+): ClaimRecord {
+  if (typeof raw.attempt !== 'number') return claim;
+  return { ...claim, attempt: raw.attempt, reason: raw.reason as RunReason };
+}
+
+/** The strategy's name; refuses an unknown one. */
+function readStrategy(name: unknown): NatsStrategyName {
+  if (name === undefined || name === 'msg-id') return 'msg-id';
+  if (name === 'lease') return name;
+
+  throw coded(
+    new TypeError(
+      `NatsBackend: unknown strategy "${String(name)}" (use "msg-id" or "lease")`,
+    ),
+    'ANARCHON_INVALID_ARGUMENT',
+  );
+}
+
+/** The key-value bucket of the 'lease' strategy, named after the stream; refuses a stream name a bucket can't take. */
+function leaseBucket(stream: string): string {
+  if (/^[A-Za-z0-9_-]+$/.test(stream)) return `${stream}_RUNS`;
+
+  throw coded(
+    new TypeError(
+      `NatsBackend: with strategy "lease", the stream name "${stream}" may only contain letters, digits, "_" and "-" (it names the bucket "<stream>_RUNS")`,
+    ),
+    'ANARCHON_INVALID_ARGUMENT',
+  );
 }

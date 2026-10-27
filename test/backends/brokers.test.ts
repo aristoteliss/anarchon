@@ -1,16 +1,20 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-/** What is specific to RabbitMQ and NATS (claim only, no leases). */
+/** What is specific to RabbitMQ and NATS: the simple claim, and NATS with the 'lease' strategy. */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { jetstreamManager } from '@nats-io/jetstream';
+import { Kvm } from '@nats-io/kv';
 import { connect } from '@nats-io/transport-node';
 import { describe, test } from 'vitest';
 
 import {
+  isAnarchonError,
   NatsBackend,
   RabbitMQBackend,
   type RabbitMQConnectionLike,
+  type RunClaim,
+  type RunStore,
   Scheduler,
 } from '../../src';
 import {
@@ -339,5 +343,163 @@ describe('RabbitMQ and NATS (simple claim)', () => {
         }
       });
     }
+  });
+});
+
+describe("NATS with the 'lease' strategy", () => {
+  /** A lease backend with its own stream, subjects and bucket. */
+  const fresh = (name: string, id = uniqueId(name)) => {
+    const backend = new NatsBackend({
+      servers: NATS_URL,
+      prefix: `${id}.`,
+      stream: id.toUpperCase(),
+      strategy: 'lease',
+    });
+    return { backend, runs: backend.runs, bucket: `${id.toUpperCase()}_RUNS` };
+  };
+  const claim = (slot: number, token: string, extra: Partial<RunClaim> = {}) =>
+    ({
+      job: 'job',
+      slot,
+      token,
+      instanceId: 'A',
+      historySize: 100,
+      leaseMs: 60_000,
+      overlap: 'allow',
+      maxAttempts: 3,
+      mode: 'new',
+      reason: 'scheduled',
+      ...extra,
+    }) satisfies RunClaim;
+
+  test('the runs of a job are one key in the bucket <stream>_RUNS, and history stays in the stream', async (t) => {
+    if (!(await probeNats(NATS_URL))) return t.skip(`nothing at ${NATS_URL}`);
+    const { backend, runs, bucket } = fresh('bucket');
+    const nc = await connect({ servers: NATS_URL });
+    try {
+      await backend.init();
+      const slot = futureSlot(10);
+      assert.equal((await runs.claim(claim(slot, 'a'))).kind, 'won');
+
+      const kv = await new Kvm(nc).open(bucket);
+      const keys: string[] = [];
+      for await (const key of await kv.keys()) keys.push(key);
+      assert.deepEqual(keys.sort(), ['job', 'meta.format']);
+      const [record] = await backend.history('job', 10);
+      assert.deepEqual(
+        [record?.slot, record?.attempt, record?.reason, record?.status],
+        [slot, 1, 'scheduled', 'running'],
+      );
+    } finally {
+      await backend.close();
+      await nc.close();
+    }
+  });
+
+  test('a takeover keeps the fields it does not know, so an older instance never drops what a newer one wrote', async (t) => {
+    if (!(await probeNats(NATS_URL))) return t.skip(`nothing at ${NATS_URL}`);
+    const { backend, runs, bucket } = fresh('fields');
+    const nc = await connect({ servers: NATS_URL });
+    try {
+      const slot = Date.now();
+      assert.equal(
+        (await runs.claim(claim(slot, 'a', { leaseMs: 50 }))).kind,
+        'won',
+      );
+      const kv = await new Kvm(nc).open(bucket);
+      const entry = await kv.get('job');
+      const stored = entry?.json<{ runs: Record<string, object> }>();
+      const run = { ...stored?.runs[slot], future: 'kept' };
+      const value = { ...stored, runs: { [slot]: run }, later: 'kept' };
+      await kv.update('job', JSON.stringify(value), entry?.revision ?? 0);
+      await sleep(100);
+
+      assert.deepEqual(
+        await runs.claim(
+          claim(slot, 'b', { instanceId: 'B', mode: 'takeover' }),
+        ),
+        { kind: 'won', attempt: 2 },
+      );
+      const after = (await kv.get('job'))?.json<{
+        later: string;
+        runs: Record<string, { future: string; a: number; i: string }>;
+      }>();
+      assert.equal(after?.later, 'kept');
+      assert.deepEqual(
+        [after?.runs[slot]?.future, after?.runs[slot]?.a, after?.runs[slot]?.i],
+        ['kept', 2, 'B'],
+      );
+    } finally {
+      await backend.close();
+      await nc.close();
+    }
+  });
+
+  test('a bucket that records a newer store format is refused', async (t) => {
+    if (!(await probeNats(NATS_URL))) return t.skip(`nothing at ${NATS_URL}`);
+    const id = uniqueId('format');
+    const first = fresh('format', id);
+    const nc = await connect({ servers: NATS_URL });
+    try {
+      await first.backend.init();
+      const kv = await new Kvm(nc).open(first.bucket);
+      await kv.put('meta.format', '2');
+
+      const later = fresh('format', id).backend;
+      await assert.rejects(later.init(), (error) =>
+        isAnarchonError(error, 'ANARCHON_STORE_FORMAT'),
+      );
+      await later.close();
+    } finally {
+      await first.backend.close();
+      await nc.close();
+    }
+  });
+
+  test('writes to one job from many instances at once all land, each decided again after losing a race', async (t) => {
+    if (!(await probeNats(NATS_URL))) return t.skip(`nothing at ${NATS_URL}`);
+    const id = uniqueId('races');
+    const instances = Array.from({ length: 4 }, () => fresh('races', id));
+    const stores: RunStore[] = instances.map(({ runs }) => runs);
+    const first = futureSlot(10);
+    try {
+      const won = await Promise.all(
+        stores.flatMap((runs, n) =>
+          [0, 1, 2].map((k) =>
+            runs.claim(claim(first + n * 10 + k, `t${n}${k}`)),
+          ),
+        ),
+      );
+      assert.deepEqual(
+        new Set(won.map((outcome) => outcome.kind)),
+        new Set(['won']),
+      );
+
+      const renewed = await Promise.all(
+        stores.flatMap((runs, n) =>
+          [0, 1, 2].map((k) =>
+            runs.heartbeat('job', first + n * 10 + k, `t${n}${k}`, 60_000),
+          ),
+        ),
+      );
+      assert.deepEqual(new Set(renewed), new Set([true]));
+      assert.equal((await stores[0]?.active('job'))?.length, 12);
+    } finally {
+      await Promise.all(instances.map(({ backend }) => backend.close()));
+    }
+  });
+
+  test('the stream name must fit a bucket name, and an unknown strategy is refused', () => {
+    assert.throws(
+      () => new NatsBackend({ stream: 'cron.jobs', strategy: 'lease' }),
+      /stream name "cron.jobs" may only contain/,
+    );
+    assert.throws(
+      // @ts-expect-error not a NATS strategy
+      () => new NatsBackend({ strategy: 'stream-id' }),
+      /unknown strategy "stream-id" \(use "msg-id" or "lease"\)/,
+    );
+    assert.equal(new NatsBackend().name, 'nats');
+    assert.equal(new NatsBackend({ strategy: 'lease' }).name, 'nats:lease');
   });
 });

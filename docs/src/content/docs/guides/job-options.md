@@ -31,7 +31,7 @@ scheduler.every('report', '35m', buildReport, {
 
 "Scheduler's" means the option of the same name on `new Scheduler()`. See [Scheduler options](../scheduler-options/).
 
-An option that needs a lease backend isn't offered on another one. On a scheduler whose backend is RabbitMQ, NATS, or Redis/Valkey without the `lease` strategy, `every()`, `cron()` and `at()` don't accept `overlap`, `maxAttempts`, `catchUpMs` or `yieldAfterFailure`: the code doesn't compile. Decorators and plain JavaScript can't be checked that way, so the job is refused when it is added, with an error that names the option and the backend. `at()` never takes `overlap`, since a one-off job has no previous run.
+An option that needs a lease backend isn't offered on another one. On a scheduler whose backend is RabbitMQ, or NATS, Redis or Valkey without the `lease` strategy, `every()`, `cron()` and `at()` don't accept `overlap`, `maxAttempts`, `catchUpMs` or `yieldAfterFailure`: the code doesn't compile. Decorators and plain JavaScript can't be checked that way, so the job is refused when it is added, with an error that names the option and the backend. `at()` never takes `overlap`, since a one-off job has no previous run.
 
 ```ts
 const scheduler = new Scheduler({ backend: new RabbitMQBackend({ url }) });
@@ -84,7 +84,7 @@ scheduler.every('quote-refresh', '30s', refresh, { maxLateMs: 10_000 });
 
 It must be bigger than `jitterMs`.
 
-**Works on** every backend. On RabbitMQ, NATS and Redis/Valkey without `lease`, `jitterMs + maxLateMs` must also be shorter than how long the backend remembers a claimed run, or a late instance could win the same run again; anarchon checks it when the job is added. **Use it when:**
+**Works on** every backend. On RabbitMQ, and NATS, Redis or Valkey without `lease`, `jitterMs + maxLateMs` must also be shorter than how long the backend remembers a claimed run, or a late instance could win the same run again; anarchon checks it when the job is added. **Use it when:**
 
 - **A stale run is worse than none:** quotes, presence, anything whose inputs age in seconds. Keep it short.
 - **A late run is still useful:** a cleanup or a report can run half an hour late. Raise it.

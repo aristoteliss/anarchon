@@ -1,15 +1,15 @@
 ---
 title: Brokers and leases
-description: Why RabbitMQ and NATS are claim-only today, and which broker features could close the gap.
+description: Why RabbitMQ and NATS 'msg-id' are claim-only, how the NATS 'lease' strategy gets leases, and which RabbitMQ features could close the gap.
 ---
 
-The RabbitMQ and NATS backends give one guarantee: one instance wins each run. This page explains why they stop there, and which features of each broker could add backups, overlap protection and catch-up.
+The RabbitMQ backend, and NATS with its default `msg-id` strategy, give one guarantee: one instance wins each run. NATS with the `lease` strategy gives everything Redis, PostgreSQL and SQLite give. This page explains why the claim-only ones stop where they do, how NATS gets leases, and which RabbitMQ features could add backups, overlap protection and catch-up.
 
-:::caution[Not implemented]
-Everything under "What could close the gap" is design notes, not behaviour. Today both backends are claim-only: a run whose runner dies is lost.
+:::caution[Not implemented for RabbitMQ]
+The RabbitMQ part of "Closing the gap" is design notes, not behaviour. Today RabbitMQ is claim-only: a run whose runner dies is lost.
 :::
 
-## Why they are claim-only today
+## Why they are claim-only
 
 Backups, overlap protection and catch-up all depend on a **lease**: a record per run saying who is running it and until when. Other instances must be able to read that record and replace it in one atomic step.
 
@@ -18,13 +18,14 @@ Backups, overlap protection and catch-up all depend on a **lease**: a record per
 | Redis `lease` | A Lua script |
 | PostgreSQL | A transaction on the run's row |
 | SQLite | A `BEGIN IMMEDIATE` transaction |
+| NATS `lease` | A key-value write at the revision that was read (compare-and-swap) |
 
-The broker backends use a primitive that answers one question only: "was I first?"
+RabbitMQ and NATS `msg-id` use a primitive that answers one question only: "was I first?"
 
 | Backend | The primitive | What it leaves behind |
 | --- | --- | --- |
 | RabbitMQ | A queue that holds one message and rejects the rest, with publisher confirms | A message nobody consumes |
-| NATS | JetStream de-duplication by `Nats-Msg-Id` | A message ID remembered for the duplicate window |
+| NATS `msg-id` | JetStream de-duplication by `Nats-Msg-Id` | A message ID remembered for the duplicate window |
 
 Both pick exactly one winner. Neither result can be renewed, expire early or be taken over, so nothing records that a runner stopped:
 
@@ -34,7 +35,7 @@ Both pick exactly one winner. Neither result can be renewed, expire early or be 
 
 The same limits apply to the Redis `stream-id`, `idmp` and `script` strategies. They come from the claim primitive, not from brokers as such.
 
-## What could close the gap
+## Closing the gap
 
 ### RabbitMQ
 
@@ -56,9 +57,9 @@ Three problems remain:
 
 So RabbitMQ could get backups and retries, but overlap `skip` only approximately.
 
-### NATS
+### NATS: the `lease` strategy
 
-NATS doesn't need the queue workaround. The JetStream **key-value store** has `create`, which succeeds only if the key is absent, and `update` with an expected revision, which succeeds only if nobody wrote in between. That is compare-and-swap, and it is enough for a real lease.
+NATS doesn't need the queue workaround. The JetStream **key-value store** has `create`, which succeeds only if the key is absent, and `update` with an expected revision, which succeeds only if nobody wrote in between. That is compare-and-swap, and it is enough for a real lease. The `lease` strategy uses it:
 
 | Lease operation | Key-value operation |
 | --- | --- |
@@ -68,20 +69,20 @@ NATS doesn't need the queue workaround. The JetStream **key-value store** has `c
 | Refuse an old runner | Its revision is out of date, so its heartbeat and "finished" fail |
 | Overlap `skip` | One key per job holds the state of its runs, so the check and the write are one step |
 
-With this, NATS could be a lease backend with the same guarantees as Redis, PostgreSQL and SQLite.
+So NATS with `lease` is a lease backend with the same guarantees as Redis, PostgreSQL and SQLite.
 
-One point is open: **lease expiry on the store's clock**. A compare-and-swap in NATS can't read the server's time. The lease would rely on key TTL, or on the server timestamp of the last revision.
+**Lease expiry on the store's clock.** A compare-and-swap in NATS can't read the server's time. So each decision reads it just before, from the bucket's stream info (`ts`, reported by nats-server 2.10 and newer). If that read is a little old by the time the write lands, the write still holds: it succeeds only if nobody changed the job's runs in between. See [NATS](../nats/#how-one-instance-wins-with-lease).
 
 ## What to use today
 
 | You need | Use |
 | --- | --- |
-| One winner per run, and a lost run now and then is acceptable | RabbitMQ or NATS, as they are |
-| Backups, overlap protection, catch-up or hand-over | Redis `lease`, PostgreSQL or SQLite |
+| One winner per run, and a lost run now and then is acceptable | RabbitMQ, or NATS with `msg-id` |
+| Backups, overlap protection, catch-up or hand-over | Redis `lease`, PostgreSQL, SQLite, or NATS with `lease` |
 
 On a claim-only backend, write each run to work on [everything outstanding](../../reference/guarantees/#that-every-slot-runs). A lost run then costs a delay, not lost work.
 
-The options only leases can honour aren't available on a claim-only backend: `overlap`, `maxAttempts` and `catchUpMs` on jobs, `leaseMs` and `heartbeatMs` on the scheduler. Typed code that sets them doesn't compile, and a decorator or JavaScript that sets them gets an error when the job or scheduler is created. This also covers Redis and Valkey with a strategy other than `lease`.
+The options only leases can honour aren't available on a claim-only backend: `overlap`, `maxAttempts` and `catchUpMs` on jobs, `leaseMs` and `heartbeatMs` on the scheduler. Typed code that sets them doesn't compile, and a decorator or JavaScript that sets them gets an error when the job or scheduler is created. This also covers Redis and Valkey with a strategy other than `lease`, and NATS with `msg-id`.
 
 ## Next
 

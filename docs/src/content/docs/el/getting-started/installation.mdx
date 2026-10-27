@@ -42,8 +42,9 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
   <TabItem label="NATS">
     ```sh
     pnpm add anarchon @nats-io/transport-node @nats-io/jetstream
+    pnpm add @nats-io/kv   # μόνο για strategy: 'lease'
     ```
-    Το JetStream πρέπει να είναι ενεργοποιημένο στον server.
+    Το JetStream πρέπει να είναι ενεργοποιημένο στον server· η στρατηγική `lease` απαιτεί nats-server 2.10 ή νεότερο.
   </TabItem>
 </Tabs>
 
@@ -58,7 +59,8 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 | Redis ή Valkey | Την προεπιλογή, στρατηγική `lease` | Το πλήρες σύνολο δυνατοτήτων και η χαμηλότερη καθυστέρηση (latency) |
 | PostgreSQL, χωρίς Redis | `PostgresBackend` | Το πλήρες σύνολο δυνατοτήτων, χωρίς νέα υποδομή |
 | Ένα μηχάνημα, πολλαπλές διεργασίες | `SqliteBackend` σε αρχείο | Κανένας server απολύτως |
-| Μόνο RabbitMQ ή NATS | `RabbitMQBackend` / `NatsBackend` | Ένας νικητής ανά εκτέλεση, αλλά χωρίς backups, προστασία επικάλυψης ή ανάκτηση (catch-up) |
+| Μόνο NATS | `NatsBackend` με `strategy: 'lease'` | Το πλήρες σύνολο δυνατοτήτων, σε ένα key-value bucket του JetStream |
+| Μόνο RabbitMQ | `RabbitMQBackend` | Ένας νικητής ανά εκτέλεση, αλλά χωρίς backups, προστασία επικάλυψης ή ανάκτηση (catch-up) |
 
 Η [Επισκόπηση backends](../../backends/overview/) τα συγκρίνει αναλυτικά.
 

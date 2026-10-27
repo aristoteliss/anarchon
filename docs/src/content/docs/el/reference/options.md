@@ -137,13 +137,14 @@ description: Κάθε επιλογή του scheduler, των εργασιών �
 
 | Επιλογή | Τύπος | Προεπιλογή | Σημασία |
 | --- | --- | --- | --- |
+| `strategy` | `'msg-id' \| 'lease'` | `'msg-id'` | `'lease'`: εφεδρικοί runners, χωρίς επικάλυψη, catch-up και επαναλήψεις, στο bucket `<stream>_RUNS` |
 | `servers` | `string \| string[]` | `'nats://localhost:4222'` | URL ή URLs διακομιστή |
 | `connection` | σύνδεση NATS | | Δική σας σύνδεση |
 | `stream` | `string` | `'CRON'` | Όνομα stream JetStream |
 | `prefix` | `string` | `'cron.'` | Πρόθεμα subject |
-| `duplicateWindowMs` | `number` | `300000` | Για πόσο θυμάται μια εκτέλεση |
+| `duplicateWindowMs` | `number` | `300000` | `msg-id`: για πόσο θυμάται μια εκτέλεση |
 | `historySize` | `number` | `1000` | Μηνύματα που διατηρούνται ανά subject |
-| `replicas` | `number` | `1` | Αντίγραφα (replicas) stream |
+| `replicas` | `number` | `1` | Αντίγραφα (replicas) stream, και με το `lease` αυτά ενός νέου bucket |
 
 ## Διάρκειες
 

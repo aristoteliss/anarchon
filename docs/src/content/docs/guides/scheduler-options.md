@@ -103,7 +103,7 @@ new Scheduler({ backend, data: async () => ({ dryRun: await flags.isOn('jobs-dry
 
 ## Lease timing
 
-*Lease backends only.* With RabbitMQ, NATS, or Redis/Valkey without the `lease` strategy, `new Scheduler()` doesn't offer `leaseMs` and `heartbeatMs`, and refuses them if they are set anyway.
+*Lease backends only.* With RabbitMQ, or NATS, Redis or Valkey without the `lease` strategy, `new Scheduler()` doesn't offer `leaseMs` and `heartbeatMs`, and refuses them if they are set anyway.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -222,7 +222,18 @@ export const scheduler = new Scheduler({
   instanceId: process.env.POD_NAME,
   maxLateMs: 60_000, // under duplicateWindowMs (5 min by default)
   historySize: 200,  // history is kept by count only
-  // no leaseMs or heartbeatMs: a broker has no leases
+  // no leaseMs or heartbeatMs: the default 'msg-id' strategy has no leases
+});
+```
+
+With NATS, `strategy: 'lease'` gives the full feature set, and takes `leaseMs` and `heartbeatMs`:
+
+```ts
+export const scheduler = new Scheduler({
+  backend: new NatsBackend({ servers: process.env.NATS_URL, replicas: 3, strategy: 'lease' }),
+  instanceId: process.env.POD_NAME,
+  leaseMs: 30_000,
+  historySize: 200, // history is kept by count only
 });
 ```
 

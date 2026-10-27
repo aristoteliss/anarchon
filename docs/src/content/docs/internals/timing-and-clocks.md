@@ -70,12 +70,12 @@ So anarchon requires the store's memory to be longer than the latest possible cl
 
 | Backend | Remembers a claimed run for | Setting |
 | --- | --- | --- |
-| Redis `lease`, PostgreSQL, SQLite | As long as a late claim could ask, whatever `historySize` is | Nothing to set |
+| Redis `lease`, PostgreSQL, SQLite, NATS `lease` | As long as a late claim could ask, whatever `historySize` is | Nothing to set |
 | Redis `stream-id` | Forever | Nothing to set |
 | Redis `idmp` | 5 min, and at most 1000 runs | `strategy.durationSec`, `strategy.maxSize` |
 | Redis `script` | 5 min, and at most `historySize` runs | `strategy.windowMs` |
 | RabbitMQ | 5 min | `slotTtlMs` |
-| NATS | 5 min | `duplicateWindowMs` |
+| NATS `msg-id` | 5 min | `duplicateWindowMs` |
 
 With the defaults (2 s + 60 s) every backend is safe. You only meet this rule if you raise `maxLateMs` a lot or shrink a window.
 

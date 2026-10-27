@@ -6,7 +6,7 @@ import type { Executor } from './executor';
 import { claimInput, type Job } from './job';
 
 /**
- * Runs for backends without leases (Redis 'stream-id', 'idmp', 'script', RabbitMQ, NATS): one
+ * Runs for backends without leases (Redis 'stream-id', 'idmp', 'script', RabbitMQ, NATS 'msg-id'): one
  * atomic claim per run, and the instance that wins runs the job. No backups and no retries.
  */
 export class ClaimOnlyRunner {

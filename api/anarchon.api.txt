@@ -1,9 +1,11 @@
-// backends/nats.d.ts
-import type { Backend, ClaimInput, JobLimits, RunRecord, StoredResult } from '../types';
+// backends/nats/index.d.ts
+import type { Backend, ClaimInput, JobLimits, RunRecord, RunStore, StoredResult } from '../../types';
+export type NatsStrategyName = 'msg-id' | 'lease';
 export interface NatsConnectionLike {
     close(): Promise<void>;
 }
-export interface NatsBackendOptions {
+export interface NatsBackendOptions<S extends NatsStrategyName = NatsStrategyName> {
+    strategy?: S;
     servers?: string | string[];
     connection?: NatsConnectionLike;
     stream?: string;
@@ -12,23 +14,27 @@ export interface NatsBackendOptions {
     historySize?: number;
     replicas?: number;
 }
-export declare class NatsBackend implements Backend {
-    readonly name = "nats";
+export declare class NatsBackend<S extends NatsStrategyName = 'msg-id'> implements Backend {
+    readonly name: S extends 'lease' ? 'nats:lease' : 'nats';
+    readonly strategy: S;
     readonly dedupeWindowMs: number;
+    readonly runs: S extends 'lease' ? RunStore : undefined;
+    private readonly lease?;
     private readonly servers;
     private readonly userConnection;
     private readonly stream;
     private readonly prefix;
+    private readonly duplicateWindowMs;
     private historySize;
     private streamHistorySize;
     private readonly replicas;
     private state;
-    constructor(options?: NatsBackendOptions);
+    constructor(options?: NatsBackendOptions<S>);
     checkJob(job: JobLimits): void;
     init(): Promise<void>;
     prepareJob(_job: string, historySize: number): Promise<void>;
     claim(input: ClaimInput): Promise<boolean>;
-    recordManualRun(input: ClaimInput): Promise<undefined>;
+    recordManualRun(input: ClaimInput): Promise<number | undefined>;
     saveResult(job: string, result: StoredResult): Promise<void>;
     history(job: string, limit: number): Promise<RunRecord[]>;
     private countMessages;
@@ -474,7 +480,7 @@ export interface HistoryInput {
 export declare function buildHistory({ job, claims, results, limit, pendingStatus, }: HistoryInput): RunRecord[];
 
 // index.d.ts
-export type { NatsBackendOptions, NatsConnectionLike } from './backends/nats';
+export type { NatsBackendOptions, NatsConnectionLike, NatsStrategyName, } from './backends/nats';
 export { NatsBackend } from './backends/nats';
 export type { RabbitMQBackendOptions, RabbitMQConnectionLike, } from './backends/rabbitmq';
 export { RabbitMQBackend } from './backends/rabbitmq';

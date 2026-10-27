@@ -1,6 +1,6 @@
 {
   "name": "anarchon",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Leaderless cron and interval scheduling for Node.js services, coordinated through your existing datastore. An atomic claim selects one runner per attempt; on Redis, Valkey, PostgreSQL and SQLite a lease lets another instance retry a run whose runner failed. RabbitMQ and NATS: claim only.",
   "keywords": [
     "cron",
@@ -100,6 +100,7 @@
     "example:export": "tsx examples/nightly-export.ts",
     "example:tenants": "tsx examples/tenants.ts",
     "example:brokers": "tsx examples/broker-notifications.ts",
+    "example:nats": "tsx examples/nats-leases.ts",
     "example:run-data": "tsx examples/run-data.ts",
     "prepublishOnly": "pnpm rebuild"
   },
@@ -108,6 +109,7 @@
   },
   "peerDependencies": {
     "@nats-io/jetstream": ">=3",
+    "@nats-io/kv": ">=3",
     "@nats-io/transport-node": ">=3",
     "amqplib": ">=0.10",
     "better-sqlite3": ">=9",
@@ -116,6 +118,9 @@
   },
   "peerDependenciesMeta": {
     "@nats-io/jetstream": {
+      "optional": true
+    },
+    "@nats-io/kv": {
       "optional": true
     },
     "@nats-io/transport-node": {
@@ -138,6 +143,7 @@
     "@biomejs/biome": "^2.5.15",
     "@libsql/client": "^0.18.0",
     "@nats-io/jetstream": "^3.4.0",
+    "@nats-io/kv": "^3.4.0",
     "@nats-io/transport-node": "^3.4.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",

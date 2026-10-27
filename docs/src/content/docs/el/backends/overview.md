@@ -15,7 +15,7 @@ flowchart TD
   start -- "Μόνο ένα μηχάνημα" --> sqlite["SqliteBackend σε αρχείο"]
   start -- "libSQL server ή Turso" --> libsql["SqliteBackend με libSQL client"]
   start -- "Μόνο RabbitMQ" --> rabbit["RabbitMQBackend<br/>(μόνο claim)"]
-  start -- "Μόνο NATS" --> nats["NatsBackend<br/>(μόνο claim)"]
+  start -- "Μόνο NATS" --> nats["NatsBackend, στρατηγική 'lease'"]
 ```
 
 Χρησιμοποιήστε ό,τι εκτελείτε ήδη. Αν διαθέτετε τόσο Redis όσο και PostgreSQL, το Redis έχει χαμηλότερη καθυστέρηση (latency) ανά claim· η PostgreSQL διατηρεί το ιστορικό των εργασιών δίπλα στα δεδομένα σας.
@@ -24,22 +24,22 @@ flowchart TD
 
 «Άλλες στρατηγικές» σημαίνει Redis ή Valkey με `stream-id` ή `script`, και Redis με `idmp`.
 
-| | Redis / Valkey `lease` | Redis / Valkey άλλες στρατηγικές | PostgreSQL | SQLite / libSQL | RabbitMQ | NATS |
-| --- | --- | --- | --- | --- | --- | --- |
-| Ένας νικητής ανά εκτέλεση | ναι | ναι | ναι | ναι | ναι | ναι |
-| Ένας εφεδρικός αναλαμβάνει έναν ανενεργό runner | ναι | όχι | ναι | ναι | όχι | όχι |
-| Χωρίς επικαλυπτόμενες εκτελέσεις (`overlap: 'skip'`) | ναι | όχι | ναι | ναι | όχι | όχι |
-| Επαναλήψεις μετά από ανενεργό runner (`maxAttempts`) | ναι | όχι | ναι | ναι | όχι | όχι |
-| Catch-up μετά από downtime (`catchUpMs`) | ναι | όχι | ναι | ναι | όχι | όχι |
-| Τα υγιή instances διεκδικούν πρώτα μετά από αποτυχία (`yieldAfterFailure`) | ναι | όχι | ναι | ναι | όχι | όχι |
-| Παράδοση (hand-over) στο `stop()` | ναι | όχι | ναι | ναι | όχι | όχι |
-| Ιστορικό (`history()`, `lastRun()`) | ναι | ναι | ναι | ναι | ναι | ναι |
-| Ιστορικό βάσει ηλικίας (`historyTtlMs`) | ναι | ναι ¹ | ναι | ναι | όχι | όχι |
-| `historySize` ανά εργασία | ναι | ναι | ναι | ναι | ναι | κοινό ² |
-| Για πόσο θυμάται μια διεκδικημένη εκτέλεση | πάντα | `stream-id` πάντα, `idmp` `durationSec`, `script` `windowMs` | πάντα | πάντα | `slotTtlMs` | `duplicateWindowMs` |
-| Ονόματα εργασιών | οποιαδήποτε | οποιαδήποτε | οποιαδήποτε | οποιαδήποτε | γράμματα, ψηφία, `_`, `-` | γράμματα, ψηφία, `_`, `-` |
-| Instances σε πολλά μηχανήματα | ναι | ναι | ναι | με libSQL server | ναι | ναι |
-| Απαιτήσεις | Redis 5+ ή Valkey | Redis 5+ ή Valkey· `idmp` Redis 8.6+ | PostgreSQL 9.5+ | SQLite 3.35+ | RabbitMQ 3.9+ | JetStream |
+| | Redis / Valkey `lease` | Redis / Valkey άλλες στρατηγικές | PostgreSQL | SQLite / libSQL | RabbitMQ | NATS `msg-id` | NATS `lease` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Ένας νικητής ανά εκτέλεση | ναι | ναι | ναι | ναι | ναι | ναι | ναι |
+| Ένας εφεδρικός αναλαμβάνει έναν ανενεργό runner | ναι | όχι | ναι | ναι | όχι | όχι | ναι |
+| Χωρίς επικαλυπτόμενες εκτελέσεις (`overlap: 'skip'`) | ναι | όχι | ναι | ναι | όχι | όχι | ναι |
+| Επαναλήψεις μετά από ανενεργό runner (`maxAttempts`) | ναι | όχι | ναι | ναι | όχι | όχι | ναι |
+| Catch-up μετά από downtime (`catchUpMs`) | ναι | όχι | ναι | ναι | όχι | όχι | ναι |
+| Τα υγιή instances διεκδικούν πρώτα μετά από αποτυχία (`yieldAfterFailure`) | ναι | όχι | ναι | ναι | όχι | όχι | ναι |
+| Παράδοση (hand-over) στο `stop()` | ναι | όχι | ναι | ναι | όχι | όχι | ναι |
+| Ιστορικό (`history()`, `lastRun()`) | ναι | ναι | ναι | ναι | ναι | ναι | ναι |
+| Ιστορικό βάσει ηλικίας (`historyTtlMs`) | ναι | ναι ¹ | ναι | ναι | όχι | όχι | όχι |
+| `historySize` ανά εργασία | ναι | ναι | ναι | ναι | ναι | κοινό ² | κοινό ² |
+| Για πόσο θυμάται μια διεκδικημένη εκτέλεση | πάντα | `stream-id` πάντα, `idmp` `durationSec`, `script` `windowMs` | πάντα | πάντα | `slotTtlMs` | `duplicateWindowMs` | πάντα |
+| Ονόματα εργασιών | οποιαδήποτε | οποιαδήποτε | οποιαδήποτε | οποιαδήποτε | γράμματα, ψηφία, `_`, `-` | γράμματα, ψηφία, `_`, `-` | γράμματα, ψηφία, `_`, `-` |
+| Instances σε πολλά μηχανήματα | ναι | ναι | ναι | με libSQL server | ναι | ναι | ναι |
+| Απαιτήσεις | Redis 5+ ή Valkey | Redis 5+ ή Valkey· `idmp` Redis 8.6+ | PostgreSQL 9.5+ | SQLite 3.35+ | RabbitMQ 3.9+ | JetStream | JetStream σε nats-server 2.10+, `@nats-io/kv` |
 
 ¹ Με το `script`, το `historyTtlMs` πρέπει να είναι μεγαλύτερο από το `windowMs` της στρατηγικής.
 ² Το NATS κρατά ένα μέγεθος ιστορικού για όλες τις εργασίες του: το μεγαλύτερο ανάμεσα στο `historySize` του backend και σε εκείνο κάθε εργασίας.
@@ -53,7 +53,7 @@ flowchart TD
 | `jitterMs`, `timeoutMs`, `data`, `offsetMs`, `timezone` | εργασία, scheduler | ναι | ναι | |
 | `maxLateMs` | εργασία, scheduler | ναι | ναι | Στα backends μόνο για claim το `jitterMs + maxLateMs` πρέπει να είναι μικρότερο από όσο το backend θυμάται μια εκτέλεση· ελέγχεται όταν προστίθεται η εργασία |
 | `historySize` | εργασία, scheduler | ναι | ναι | NATS: κερδίζει το μεγαλύτερο, δείτε ² |
-| `historyTtlMs` | εργασία, scheduler | ναι | μόνο Redis/Valkey | Τα RabbitMQ και NATS το απορρίπτουν |
+| `historyTtlMs` | εργασία, scheduler | ναι, όχι στο NATS | μόνο Redis/Valkey | Τα RabbitMQ και NATS το απορρίπτουν |
 | `overlap`, `maxAttempts`, `catchUpMs`, `yieldAfterFailure` | εργασία | ναι | απορρίπτονται | Το `at()` δεν δέχεται ποτέ `overlap` |
 | `leaseMs`, `heartbeatMs` | scheduler | ναι | απορρίπτονται | |
 
@@ -63,7 +63,10 @@ onPostgres.every('export', '1h', exportAll, { overlap: 'skip', maxAttempts: 2, c
 
 const onNats = new Scheduler({ backend: new NatsBackend() });
 onNats.every('notify', '1m', notify, { timeoutMs: 30_000, maxLateMs: 60_000 }); // εντάξει
-onNats.every('notify', '1m', notify, { maxAttempts: 2 }); // σφάλμα τύπου: το NATS δεν έχει μισθώσεις
+onNats.every('notify', '1m', notify, { maxAttempts: 2 }); // σφάλμα τύπου: το NATS 'msg-id' δεν έχει μισθώσεις
+
+const onNatsLeases = new Scheduler({ backend: new NatsBackend({ strategy: 'lease' }) });
+onNatsLeases.every('notify', '1m', notify, { maxAttempts: 2 }); // εντάξει
 ```
 
 ## Οι επιλογές κάθε backend
@@ -87,8 +90,9 @@ onNats.every('notify', '1m', notify, { maxAttempts: 2 }); // σφάλμα τύπ
 | | `prefix` | `'cron.'` | Ονόματα ουρών |
 | | `slotTtlMs` | `300000` | Για πόσο θυμάται μια διεκδικημένη εκτέλεση |
 | `NatsBackend` | `servers` / `connection` | `nats://localhost:4222` | Πού βρίσκεται το NATS, ή η σύνδεσή σας |
-| | `stream`, `prefix` | `'CRON'`, `'cron.'` | Το JetStream stream και τα subjects του |
-| | `duplicateWindowMs` | `300000` | Για πόσο θυμάται μια διεκδικημένη εκτέλεση |
+| | `strategy` | `'msg-id'` | `'lease'` για εφεδρικούς runners, χωρίς επικάλυψη, catch-up και επαναλήψεις |
+| | `stream`, `prefix` | `'CRON'`, `'cron.'` | Το JetStream stream και τα subjects του· με το `lease`, και το bucket `<stream>_RUNS` |
+| | `duplicateWindowMs` | `300000` | `msg-id`: για πόσο θυμάται μια διεκδικημένη εκτέλεση |
 | | `historySize` | `1000` | Εκτελέσεις που κρατούνται ανά εργασία, τουλάχιστον |
 | | `replicas` | `1` | Αντίγραφα του stream· `3` σε cluster NATS |
 
@@ -117,9 +121,9 @@ new NatsBackend({ servers: ['nats://n1:4222', 'nats://n2:4222'], replicas: 3, du
 
 Ο διαχωρισμός προκύπτει από το τι μπορεί να εκφράσει το store.
 
-Ένα **backend με μίσθωση (lease backend)** αποθηκεύει, για κάθε εκτέλεση, ποιος την εκτελεί και μέχρι πότε. Άλλα instances μπορούν να διαβάσουν αυτή την πληροφορία και να ενεργήσουν αναλόγως. Το Redis (με Lua script), η PostgreSQL και το SQLite (με transaction) μπορούν όλα να εκτελέσουν το «ανάγνωση της εκτέλεσης, απόφαση, εγγραφή» ως ένα ατομικό βήμα.
+Ένα **backend με μίσθωση (lease backend)** αποθηκεύει, για κάθε εκτέλεση, ποιος την εκτελεί και μέχρι πότε. Άλλα instances μπορούν να διαβάσουν αυτή την πληροφορία και να ενεργήσουν αναλόγως. Το Redis (με Lua script), η PostgreSQL και το SQLite (με transaction) μπορούν όλα να εκτελέσουν το «ανάγνωση της εκτέλεσης, απόφαση, εγγραφή» ως ένα ατομικό βήμα. Το NATS με τη στρατηγική `lease` το κάνει με μια εγγραφή key-value που πετυχαίνει μόνο αν κανείς δεν έγραψε μετά την ανάγνωση.
 
-Ένα **backend μόνο για claim (claim-only backend)** μπορεί να απαντήσει ατομικά σε ακριβώς ένα ερώτημα: «ήμουν πρώτος;». Το RabbitMQ και το NATS είναι message brokers. Η δυνατότητα που χρησιμοποιεί κάθε backend μπορεί να ενημερώσει έναν publisher ότι ήταν πρώτος, αλλά δεν αφήνει μια εγγραφή την οποία θα μπορούσε να ελέγξει αργότερα ένας εφεδρικός και να την αντικαταστήσει ατομικά. Η σελίδα [Brokers και μισθώσεις](../brokers-and-leases/) εξηγεί τον λόγο, και τι θα μπορούσε να το αλλάξει.
+Ένα **backend μόνο για claim (claim-only backend)** μπορεί να απαντήσει ατομικά σε ακριβώς ένα ερώτημα: «ήμουν πρώτος;». Το RabbitMQ και το NATS `msg-id` χρησιμοποιούν δυνατότητες των brokers που μπορούν να ενημερώσουν έναν publisher ότι ήταν πρώτος, αλλά δεν αφήνουν μια εγγραφή την οποία θα μπορούσε να ελέγξει αργότερα ένας εφεδρικός και να την αντικαταστήσει ατομικά. Η σελίδα [Brokers και μισθώσεις](../brokers-and-leases/) εξηγεί τον λόγο, και τι θα μπορούσε να το αλλάξει.
 
 ```mermaid
 flowchart LR
@@ -148,7 +152,8 @@ flowchart LR
 | PostgreSQL | Ένα transaction στη γραμμή της εκτέλεσης, σειριοποιημένο ανά εργασία |
 | SQLite | Ένα transaction `BEGIN IMMEDIATE`· το SQLite επιτρέπει έναν writer τη φορά |
 | RabbitMQ | Ουρά που διατηρεί ένα μήνυμα και απορρίπτει τα υπόλοιπα, με publisher confirms |
-| NATS | Αποδιπλασιασμός (de-duplication) JetStream βάσει του message ID |
+| NATS `msg-id` | Αποδιπλασιασμός (de-duplication) JetStream βάσει του message ID |
+| NATS `lease` | Μια εγγραφή key-value στην αναθεώρηση που διαβάστηκε· μια εγγραφή που απορρίπτεται αποφασίζεται ξανά |
 
 ## Χρήση ενός backend
 
@@ -161,10 +166,10 @@ new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) }
 new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
 new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }) });
 new Scheduler({ backend: new RabbitMQBackend({ url: 'amqp://localhost' }) });
-new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222' }) });
+new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222', strategy: 'lease' }) });
 ```
 
-Η ιδιότητα `scheduler.backend.name` σας δείχνει ποιο χρησιμοποιείται: `'redis:lease'`, `'postgres'`, `'sqlite'`, `'rabbitmq'` ή `'nats'`.
+Η ιδιότητα `scheduler.backend.name` σας δείχνει ποιο χρησιμοποιείται: `'redis:lease'`, `'postgres'`, `'sqlite'`, `'rabbitmq'`, `'nats'` ή `'nats:lease'`.
 
 ## Οι δικές σας συνδέσεις
 

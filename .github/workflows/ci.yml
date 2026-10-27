@@ -71,6 +71,8 @@ jobs:
       - name: Start RabbitMQ and NATS
         run: docker compose -f test/docker-compose.test.yml --profile brokers up -d --wait rabbitmq nats
       - run: pnpm test test/backends/brokers.test.ts test/backends/contract.test.ts
+      - name: Lease rules and scheduler on NATS 'lease'
+        run: pnpm test test/leases/rules.test.ts test/leases/scheduler.test.ts -t NATS
 
   e2e:
     name: Cluster and failure scenarios (real processes)

@@ -73,7 +73,7 @@ New codes may be added in a minor release, so keep a default branch when you swi
 | `Job "X": historySize (N) runs × G ms between runs must cover jitterMs + maxLateMs ... for the "script" strategy` | `'script'` finds claimed runs in the stream, which is trimmed to `historySize` | Raise `historySize` or lower `maxLateMs` |
 | `Job "X": historyTtlMs must be longer than the script strategy's windowMs` | Same reason, by age | Raise `historyTtlMs` |
 | `Job "X": overlap must be "skip" or "allow"` | A typo in `overlap` | Use one of the two |
-| `Job "X": overlap needs a backend with leases (...); B has none` (also `maxAttempts`, `catchUpMs`) | A lease option on RabbitMQ, NATS, or Redis/Valkey without the `lease` strategy. Typed code doesn't compile; this error is for decorators and JavaScript | Remove the option, or use a backend with leases |
+| `Job "X": overlap needs a backend with leases (...); B has none` (also `maxAttempts`, `catchUpMs`) | A lease option on RabbitMQ, or NATS, Redis or Valkey without the `lease` strategy. Typed code doesn't compile; this error is for decorators and JavaScript | Remove the option, or use a backend with leases |
 | `leaseMs needs a backend with leases (...); B has none` (also `heartbeatMs`) | The same, on `new Scheduler()` | Remove the option, or use a backend with leases |
 | `Job "X": a one-off job takes no overlap` | `at()` with `overlap` | Remove it: a one-off job has no previous run |
 | `Job "X": historyTtlMs is not supported by B, which keeps history by count (historySize) only` | `historyTtlMs` on RabbitMQ or NATS, on the job or the scheduler | Use `historySize` |
@@ -117,6 +117,12 @@ A job declared with a decorator is added when its object is created, or when the
 | `The RabbitMQ backend needs RabbitMQ 3.9 or newer for stream queues` | An old RabbitMQ | Upgrade |
 | `The RabbitMQ backend needs "amqplib"...` | The driver isn't installed | `pnpm add amqplib` |
 | `The NATS backend needs JetStream enabled on the server (nats-server -js)` | JetStream is off | Enable it |
+| `The NATS "lease" strategy needs nats-server 2.10 or newer, which reports its clock` | An older NATS server | Upgrade, or use `strategy: 'msg-id'` |
+| `The NATS "lease" strategy needs "@nats-io/kv"...` | The key-value client isn't installed | `pnpm add @nats-io/kv` |
+| `NatsBackend: with strategy "lease", the stream name "S" may only contain letters, digits, "_" and "-"...` | The stream name can't name the bucket `<stream>_RUNS` | Rename the stream |
+| `NatsBackend: unknown strategy "X" (use "msg-id" or "lease")` | A typo in `strategy` | Use one of the two |
+| `Job "X": other instances wrote its state N times in a row while this one tried to; try again` | NATS `lease`: every write lost its race to another instance's | Nothing, usually: the next claim or heartbeat tries again |
+| `The NATS key "X" holds a value that is not the state of anarchon runs` | Something other than anarchon wrote to the bucket `<stream>_RUNS` | Give anarchon a stream (and so a bucket) of its own |
 | `Cannot start while stopping` | `start()` called while a `stop()` is in progress | Await `stop()` first |
 | `Invalid table name "X"` | `table` isn't a plain identifier (optionally `schema.table`) | Use letters, digits and `_` |
 | `A custom SQL client needs both all() and transaction()` | An incomplete adapter | Provide both functions |

@@ -26,6 +26,28 @@ import {
 
 const T = 1_000_000;
 
+/**
+ * A lease short enough to wait out, and long enough to outlive the claims a test sends while it
+ * must stay live: 400 ms, or 6 claims' time on a slower store (a libSQL server answers a claim in
+ * 100 to 150 ms).
+ */
+async function leaseOverClaims(runs: RunStore): Promise<number> {
+  const started = Date.now();
+  await runs.claim({
+    job: 'warm-up',
+    slot: T,
+    token: 'w',
+    instanceId: 'W',
+    historySize: 100,
+    leaseMs: 1,
+    overlap: 'allow',
+    maxAttempts: 1,
+    mode: 'new',
+    reason: 'scheduled',
+  });
+  return Math.max(400, (Date.now() - started) * 6);
+}
+
 describe('lease rules', async () => {
   for (const { label, spec, skip } of await leaseSpecs()) {
     /** A fresh backend (own keys / table) for one test, and its RunStore. */
@@ -41,6 +63,8 @@ describe('lease rules', async () => {
     describe.skipIf(skip)(label, () => {
       test('state machine: claim, resend, backup, takeover, fencing, give up', async () => {
         const { backend, runs } = fresh('lease');
+        await backend.init();
+        const leaseMs = await leaseOverClaims(runs);
         const claim = (
           slot: number,
           token: string,
@@ -53,7 +77,7 @@ describe('lease rules', async () => {
             token,
             instanceId,
             historySize: 100,
-            leaseMs: 400,
+            leaseMs,
             overlap: 'skip',
             maxAttempts: 2,
             mode: 'new',
@@ -61,7 +85,6 @@ describe('lease rules', async () => {
             ...extra,
           });
         try {
-          await backend.init();
           assert.deepEqual(
             await claim(T, 'a1', 'A'),
             { kind: 'won', attempt: 1 },
@@ -83,12 +106,12 @@ describe('lease rules', async () => {
             'the next run waits for this one',
           );
           assert.equal(
-            await runs.heartbeat('j', T, 'a1', 400),
+            await runs.heartbeat('j', T, 'a1', leaseMs),
             true,
             'the runner renews its lease',
           );
 
-          await sleep(500); // A stops renewing: it "died"
+          await sleep(leaseMs + 100); // A stops renewing: it "died"
           assert.deepEqual(await runs.active('j'), [
             { slot: T, attempt: 1, alive: false },
           ]);
@@ -103,7 +126,7 @@ describe('lease rules', async () => {
             'only one backup',
           );
           assert.equal(
-            await runs.heartbeat('j', T, 'a1', 400),
+            await runs.heartbeat('j', T, 'a1', leaseMs),
             false,
             'the old runner learns it lost the run',
           );
@@ -113,7 +136,7 @@ describe('lease rules', async () => {
             'and cannot finish it',
           );
 
-          await sleep(500); // B dies too; maxAttempts is 2
+          await sleep(leaseMs + 100); // B dies too; maxAttempts is 2
           assert.deepEqual(
             await claim(T, 'c1', 'C', { mode: 'takeover', reason: 'takeover' }),
             { kind: 'done' },

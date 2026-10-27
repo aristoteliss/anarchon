@@ -152,6 +152,7 @@ Other examples in the repository:
 | Example | Shows |
 | --- | --- |
 | [`examples/failover.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/failover.ts) | Three instances: a graceful hand-over, then a crash and takeover |
+| [`examples/nats-leases.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/nats-leases.ts) | [NATS](../../backends/nats/) with `strategy: 'lease'`, in three processes: a hand-over on `SIGTERM`, a takeover after `kill -9`, and catch-up after every process was down |
 | [`examples/options-and-events.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/options-and-events.ts) | Every job option and every event |
 | [`examples/http-api.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/http-api.ts) | The [Express API](../express/) |
 | [`examples/own-clients.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/own-clients.ts) | Passing in your own Redis client or Postgres pool |
@@ -171,7 +172,7 @@ Real-life setups: each is a situation solved with a different set of options, an
 | [`examples/cache-refresh.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/cache-refresh.ts) | A cheap refresh every few seconds on three instances | `jitterMs` to spread it, a short `maxLateMs`, `catchUpMs: 0`, a small `historySize` |
 | [`examples/nightly-export.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/nightly-export.ts) | A long export interrupted by a deploy | `ctx.signal` between pages, a checkpoint per run, `ctx.attempt`, `stop({ timeoutMs })` |
 | [`examples/tenants.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/tenants.ts) | The same jobs per tenant, each in its own time zone | one job per tenant, `timezone` and `data` per job, a data function, `remove()`, `runNow()` with data |
-| [`examples/broker-notifications.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/broker-notifications.ts) | Only RabbitMQ or NATS: no leases | every run sends everything outstanding, `maxLateMs` under the broker's memory, no lease options |
+| [`examples/broker-notifications.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/broker-notifications.ts) | Only RabbitMQ, or NATS with `msg-id`: no leases | every run sends everything outstanding, `maxLateMs` under the broker's memory, no lease options |
 
 ## Seeing what an instance does
 

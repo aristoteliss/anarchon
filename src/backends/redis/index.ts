@@ -16,6 +16,7 @@ import type {
   StoredResult,
 } from '../../types';
 import {
+  claimManualSlot,
   intInRange,
   positiveInt,
   refuseUnknown,
@@ -507,30 +508,6 @@ async function refuseOldRedis(client: KeyValueClient): Promise<void> {
       'ANARCHON_SERVER',
     );
   }
-}
-
-/** Claims a runNow() run at the first free millisecond from its slot, and returns that slot. */
-async function claimManualSlot(
-  lease: LeaseStore,
-  input: ClaimInput,
-): Promise<number> {
-  for (let slot = input.slot; slot < input.slot + 10; slot++) {
-    const outcome = await lease.claim({
-      ...input,
-      slot,
-      mode: 'new',
-      reason: 'manual',
-      leaseMs: 86_400_000,
-      overlap: 'allow',
-      maxAttempts: 1,
-    });
-    if (outcome.kind === 'won') return slot;
-  }
-
-  throw coded(
-    new Error(`Could not record a manual run of "${input.job}"`),
-    'ANARCHON_STORE',
-  );
 }
 
 /**

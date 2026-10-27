@@ -15,7 +15,7 @@ flowchart TD
   start -- "Only one machine" --> sqlite["SqliteBackend on a file"]
   start -- "A libSQL server or Turso" --> libsql["SqliteBackend with a libSQL client"]
   start -- "Only RabbitMQ" --> rabbit["RabbitMQBackend<br/>(claim only)"]
-  start -- "Only NATS" --> nats["NatsBackend<br/>(claim only)"]
+  start -- "Only NATS" --> nats["NatsBackend, 'lease' strategy"]
 ```
 
 Use what you already run. If you have both Redis and PostgreSQL, Redis has the lower latency per claim; PostgreSQL keeps the job history next to your data.
@@ -24,22 +24,22 @@ Use what you already run. If you have both Redis and PostgreSQL, Redis has the l
 
 "Other strategies" means Redis or Valkey with `stream-id` or `script`, and Redis with `idmp`.
 
-| | Redis / Valkey `lease` | Redis / Valkey other strategies | PostgreSQL | SQLite / libSQL | RabbitMQ | NATS |
-| --- | --- | --- | --- | --- | --- | --- |
-| One winner per run | yes | yes | yes | yes | yes | yes |
-| A backup takes over a dead runner | yes | no | yes | yes | no | no |
-| No overlapping runs (`overlap: 'skip'`) | yes | no | yes | yes | no | no |
-| Retries after a dead runner (`maxAttempts`) | yes | no | yes | yes | no | no |
-| Catch-up after downtime (`catchUpMs`) | yes | no | yes | yes | no | no |
-| Healthy instances claim first after a failure (`yieldAfterFailure`) | yes | no | yes | yes | no | no |
-| Hand-over on `stop()` | yes | no | yes | yes | no | no |
-| History (`history()`, `lastRun()`) | yes | yes | yes | yes | yes | yes |
-| History by age (`historyTtlMs`) | yes | yes ¹ | yes | yes | no | no |
-| `historySize` per job | yes | yes | yes | yes | yes | shared ² |
-| How long a claimed run is remembered | always | `stream-id` always, `idmp` `durationSec`, `script` `windowMs` | always | always | `slotTtlMs` | `duplicateWindowMs` |
-| Job names | any | any | any | any | letters, digits, `_`, `-` | letters, digits, `_`, `-` |
-| Instances on several machines | yes | yes | yes | with a libSQL server | yes | yes |
-| Needs | Redis 5+ or Valkey | Redis 5+ or Valkey; `idmp` Redis 8.6+ | PostgreSQL 9.5+ | SQLite 3.35+ | RabbitMQ 3.9+ | JetStream |
+| | Redis / Valkey `lease` | Redis / Valkey other strategies | PostgreSQL | SQLite / libSQL | RabbitMQ | NATS `msg-id` | NATS `lease` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| One winner per run | yes | yes | yes | yes | yes | yes | yes |
+| A backup takes over a dead runner | yes | no | yes | yes | no | no | yes |
+| No overlapping runs (`overlap: 'skip'`) | yes | no | yes | yes | no | no | yes |
+| Retries after a dead runner (`maxAttempts`) | yes | no | yes | yes | no | no | yes |
+| Catch-up after downtime (`catchUpMs`) | yes | no | yes | yes | no | no | yes |
+| Healthy instances claim first after a failure (`yieldAfterFailure`) | yes | no | yes | yes | no | no | yes |
+| Hand-over on `stop()` | yes | no | yes | yes | no | no | yes |
+| History (`history()`, `lastRun()`) | yes | yes | yes | yes | yes | yes | yes |
+| History by age (`historyTtlMs`) | yes | yes ¹ | yes | yes | no | no | no |
+| `historySize` per job | yes | yes | yes | yes | yes | shared ² | shared ² |
+| How long a claimed run is remembered | always | `stream-id` always, `idmp` `durationSec`, `script` `windowMs` | always | always | `slotTtlMs` | `duplicateWindowMs` | always |
+| Job names | any | any | any | any | letters, digits, `_`, `-` | letters, digits, `_`, `-` | letters, digits, `_`, `-` |
+| Instances on several machines | yes | yes | yes | with a libSQL server | yes | yes | yes |
+| Needs | Redis 5+ or Valkey | Redis 5+ or Valkey; `idmp` Redis 8.6+ | PostgreSQL 9.5+ | SQLite 3.35+ | RabbitMQ 3.9+ | JetStream | JetStream on nats-server 2.10+, `@nats-io/kv` |
 
 ¹ With `script`, `historyTtlMs` must be longer than the strategy's `windowMs`.
 ² NATS keeps one history size for all its jobs: the largest of the backend's `historySize` and every job's.
@@ -53,7 +53,7 @@ Most options work everywhere. The ones that need a lease are refused elsewhere, 
 | `jitterMs`, `timeoutMs`, `data`, `offsetMs`, `timezone` | job, scheduler | yes | yes | |
 | `maxLateMs` | job, scheduler | yes | yes | On claim-only backends `jitterMs + maxLateMs` must be shorter than how long the backend remembers a run; checked when the job is added |
 | `historySize` | job, scheduler | yes | yes | NATS: the largest wins, see ² |
-| `historyTtlMs` | job, scheduler | yes | Redis/Valkey only | RabbitMQ and NATS refuse it |
+| `historyTtlMs` | job, scheduler | yes, but not NATS | Redis/Valkey only | RabbitMQ and NATS refuse it |
 | `overlap`, `maxAttempts`, `catchUpMs`, `yieldAfterFailure` | job | yes | refused | `at()` never takes `overlap` |
 | `leaseMs`, `heartbeatMs` | scheduler | yes | refused | |
 
@@ -63,7 +63,10 @@ onPostgres.every('export', '1h', exportAll, { overlap: 'skip', maxAttempts: 2, c
 
 const onNats = new Scheduler({ backend: new NatsBackend() });
 onNats.every('notify', '1m', notify, { timeoutMs: 30_000, maxLateMs: 60_000 }); // fine
-onNats.every('notify', '1m', notify, { maxAttempts: 2 }); // type error: NATS has no leases
+onNats.every('notify', '1m', notify, { maxAttempts: 2 }); // type error: NATS 'msg-id' has no leases
+
+const onNatsLeases = new Scheduler({ backend: new NatsBackend({ strategy: 'lease' }) });
+onNatsLeases.every('notify', '1m', notify, { maxAttempts: 2 }); // fine
 ```
 
 ## Each backend's own options
@@ -87,8 +90,9 @@ The options of the backend objects themselves. Every backend also accepts a clie
 | | `prefix` | `'cron.'` | Queue names |
 | | `slotTtlMs` | `300000` | How long a claimed run is remembered |
 | `NatsBackend` | `servers` / `connection` | `nats://localhost:4222` | Where NATS is, or your connection |
-| | `stream`, `prefix` | `'CRON'`, `'cron.'` | The JetStream stream and its subjects |
-| | `duplicateWindowMs` | `300000` | How long a claimed run is remembered |
+| | `strategy` | `'msg-id'` | `'lease'` for backups, no overlap, catch-up and retries |
+| | `stream`, `prefix` | `'CRON'`, `'cron.'` | The JetStream stream and its subjects; with `lease`, also the bucket `<stream>_RUNS` |
+| | `duplicateWindowMs` | `300000` | `msg-id`: how long a claimed run is remembered |
 | | `historySize` | `1000` | Runs kept per job, at least |
 | | `replicas` | `1` | Stream replicas; `3` in a NATS cluster |
 
@@ -117,9 +121,9 @@ The [examples folder](https://github.com/aristoteliss/anarchon/tree/main/example
 
 The split comes from what the store can express.
 
-A **lease backend** stores, for each run, who is running it and until when. Other instances can read that and act on it. Redis (with a Lua script), PostgreSQL and SQLite (with a transaction) can all do "read the run, decide, write" as one atomic step.
+A **lease backend** stores, for each run, who is running it and until when. Other instances can read that and act on it. Redis (with a Lua script), PostgreSQL and SQLite (with a transaction) can all do "read the run, decide, write" as one atomic step. NATS with the `lease` strategy does it with a key-value write that succeeds only if nobody wrote since the read.
 
-A **claim-only backend** can answer exactly one question atomically: "was I first?" RabbitMQ and NATS are message brokers, and the feature each backend uses can tell a publisher it was first, but leaves no record that a backup could check later and atomically replace. [Brokers and leases](../brokers-and-leases/) explains why, and what could change it.
+A **claim-only backend** can answer exactly one question atomically: "was I first?" RabbitMQ and NATS `msg-id` use broker features that can tell a publisher it was first, but leave no record that a backup could check later and atomically replace. [Brokers and leases](../brokers-and-leases/) explains why, and what could change it.
 
 ```mermaid
 flowchart LR
@@ -148,7 +152,8 @@ Each store has a different primitive that lets exactly one writer succeed. The d
 | PostgreSQL | One transaction on the run's row, serialized per job |
 | SQLite | One `BEGIN IMMEDIATE` transaction; SQLite has one writer at a time |
 | RabbitMQ | A queue that holds one message and rejects the rest, with publisher confirms |
-| NATS | JetStream de-duplication by message ID |
+| NATS `msg-id` | JetStream de-duplication by message ID |
+| NATS `lease` | A key-value write at the revision that was read; a refused write is decided again |
 
 ## Using a backend
 
@@ -161,10 +166,10 @@ new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) }
 new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
 new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }) });
 new Scheduler({ backend: new RabbitMQBackend({ url: 'amqp://localhost' }) });
-new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222' }) });
+new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222', strategy: 'lease' }) });
 ```
 
-`scheduler.backend.name` tells you which one is in use: `'redis:lease'`, `'postgres'`, `'sqlite'`, `'rabbitmq'` or `'nats'`.
+`scheduler.backend.name` tells you which one is in use: `'redis:lease'`, `'postgres'`, `'sqlite'`, `'rabbitmq'`, `'nats'` or `'nats:lease'`.
 
 ## Your own connections
 

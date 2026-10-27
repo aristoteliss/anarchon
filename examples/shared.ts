@@ -7,6 +7,7 @@
  *   BACKEND=redis      REDIS_URL (default redis://localhost:6379), STRATEGY (default lease)
  *   BACKEND=postgres   POSTGRES_URL
  *   BACKEND=sqlite     SQLITE_FILE
+ *   BACKEND=nats       NATS_URL (default nats://localhost:4222), STRATEGY (default lease)
  */
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +15,8 @@ import { join } from 'node:path';
 import {
   type Backend,
   type KeyValueStrategyName,
+  NatsBackend,
+  type NatsStrategyName,
   PostgresBackend,
   RedisBackend,
   SqliteBackend,
@@ -46,9 +49,18 @@ export function backendFromEnv(name: string): Backend {
         table: `example_${name}`,
       });
 
+    case 'nats':
+      return new NatsBackend({
+        servers: process.env.NATS_URL ?? 'nats://localhost:4222',
+        strategy:
+          (process.env.STRATEGY as NatsStrategyName | undefined) ?? 'lease',
+        stream: `example-${name}`,
+        prefix: `example.${name}.`,
+      });
+
     default:
       throw new Error(
-        `BACKEND must be redis, postgres or sqlite (got "${process.env.BACKEND}")`,
+        `BACKEND must be redis, postgres, sqlite or nats (got "${process.env.BACKEND}")`,
       );
   }
 }

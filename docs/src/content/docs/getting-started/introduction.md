@@ -77,7 +77,7 @@ Deciding who runs is the easy half. The harder half is what happens after:
 - The job takes **longer than its interval**, so the next run is due before this one ends.
 - **Every instance is down** when a run is due.
 
-On Redis, Valkey, PostgreSQL and SQLite, anarchon handles these with a **lease**. The winner keeps telling the store "I'm still alive" every few seconds. The other instances become its *backups* and watch that lease. If it stops being renewed, one backup takes the run over.
+On Redis, Valkey, PostgreSQL, SQLite and NATS (with `strategy: 'lease'`), anarchon handles these with a **lease**. The winner keeps telling the store "I'm still alive" every few seconds. The other instances become its *backups* and watch that lease. If it stops being renewed, one backup takes the run over.
 
 | Situation | What anarchon does |
 | --- | --- |
@@ -88,14 +88,14 @@ On Redis, Valkey, PostgreSQL and SQLite, anarchon handles these with a **lease**
 | Every instance restarts mid-run | After the restart, one instance re-runs it |
 | Every instance is down when a run is due | The first one to start runs it, if it was due recently |
 
-A takeover starts the handler again from the beginning, as a new attempt; it doesn't resume where the previous runner stopped. RabbitMQ and NATS have no lease: they only select the winner, and a run whose runner dies is lost.
+A takeover starts the handler again from the beginning, as a new attempt; it doesn't resume where the previous runner stopped. RabbitMQ, and NATS with its default strategy, have no lease: they only select the winner, and a run whose runner dies is lost.
 
 [Failure scenarios](../../internals/failure-scenarios/) walks through each of these with a diagram.
 
 ## What you need
 
 - **Node.js 20 or newer.**
-- **One shared store** that all instances can reach: Redis, Valkey, PostgreSQL, SQLite (same machine), or a libSQL server. RabbitMQ and NATS work too, with fewer guarantees (see [Backends](../../backends/overview/)).
+- **One shared store** that all instances can reach: Redis, Valkey, PostgreSQL, SQLite (same machine), or a libSQL server. NATS works too, with all of them on its `lease` strategy; RabbitMQ works with fewer guarantees (see [Backends](../../backends/overview/)).
 
 ## What anarchon is not
 

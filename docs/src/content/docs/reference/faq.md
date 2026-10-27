@@ -117,7 +117,7 @@ A small difference only changes which instance tends to win. Leases use the stor
 
 ### Which backend should I use?
 
-The store you already have. Redis, PostgreSQL and SQLite give the full feature set. RabbitMQ and NATS only guarantee one winner per run. See [Backends overview](../../backends/overview/).
+The store you already have. Redis, PostgreSQL, SQLite and NATS with `strategy: 'lease'` give the full feature set. RabbitMQ, and NATS with its default strategy, only guarantee one winner per run. See [Backends overview](../../backends/overview/).
 
 ### Can two services share one Redis or database?
 

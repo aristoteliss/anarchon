@@ -61,8 +61,8 @@ flowchart TB
 ```mermaid
 flowchart LR
   backend{"παρέχει το backend<br/>μισθώσεις (leases);"}
-  backend -- "ναι: Redis 'lease',<br/>PostgreSQL, SQLite" --> lr["LeaseRunner"]
-  backend -- "όχι: Redis 'stream-id', 'idmp', 'script',<br/>RabbitMQ, NATS" --> cr["ClaimOnlyRunner"]
+  backend -- "ναι: Redis 'lease',<br/>PostgreSQL, SQLite, NATS 'lease'" --> lr["LeaseRunner"]
+  backend -- "όχι: Redis 'stream-id', 'idmp', 'script',<br/>RabbitMQ, NATS 'msg-id'" --> cr["ClaimOnlyRunner"]
 ```
 
 Και οι δύο καταλήγουν να παραδίδουν την εκτέλεση στον ίδιο `Executor`. Αυτό που διαφέρει είναι όλα όσα συμβαίνουν γύρω από αυτόν:

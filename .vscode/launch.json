@@ -4,8 +4,8 @@
     {
       "id": "backend",
       "type": "pickString",
-      "description": "Backend (redis and postgres read REDIS_URL / POSTGRES_URL from your environment)",
-      "options": ["sqlite", "redis", "postgres"],
+      "description": "Backend (redis, postgres and nats read REDIS_URL / POSTGRES_URL / NATS_URL from your environment)",
+      "options": ["sqlite", "redis", "postgres", "nats"],
       "default": "sqlite"
     }
   ],

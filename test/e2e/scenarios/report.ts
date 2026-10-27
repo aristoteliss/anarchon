@@ -5,7 +5,7 @@
  *
  *   pnpm exec tsx test/scenarios/report.ts stream-id lease postgres sqlite libsql
  *
- * Each argument is a Redis strategy, or 'postgres' / 'sqlite' / 'libsql'.
+ * Each argument is a Redis strategy, or 'postgres' / 'sqlite' / 'libsql' / 'nats-lease'.
  */
 import { REDIS_URL } from '../../support';
 import { SCENARIOS, type ScenarioConfig } from './harness';

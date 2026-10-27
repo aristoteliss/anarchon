@@ -31,7 +31,7 @@ scheduler.every('report', '35m', buildReport, {
 
 «Του scheduler» σημαίνει την επιλογή με το ίδιο όνομα στο `new Scheduler()`. Δείτε τις [Επιλογές scheduler](../scheduler-options/).
 
-Μια επιλογή που απαιτεί lease backend δεν προσφέρεται σε άλλο backend. Σε scheduler με backend RabbitMQ, NATS, ή Redis/Valkey χωρίς τη στρατηγική `lease`, τα `every()`, `cron()` και `at()` δεν δέχονται `overlap`, `maxAttempts`, `catchUpMs` ή `yieldAfterFailure`: ο κώδικας δεν μεταγλωττίζεται. Οι decorators και η απλή JavaScript δεν ελέγχονται έτσι, οπότε η εργασία απορρίπτεται όταν προστίθεται, με σφάλμα που ονομάζει την επιλογή και το backend. Το `at()` δεν δέχεται ποτέ `overlap`, αφού μια εφάπαξ εργασία δεν έχει προηγούμενη εκτέλεση.
+Μια επιλογή που απαιτεί lease backend δεν προσφέρεται σε άλλο backend. Σε scheduler με backend RabbitMQ, ή NATS, Redis ή Valkey χωρίς τη στρατηγική `lease`, τα `every()`, `cron()` και `at()` δεν δέχονται `overlap`, `maxAttempts`, `catchUpMs` ή `yieldAfterFailure`: ο κώδικας δεν μεταγλωττίζεται. Οι decorators και η απλή JavaScript δεν ελέγχονται έτσι, οπότε η εργασία απορρίπτεται όταν προστίθεται, με σφάλμα που ονομάζει την επιλογή και το backend. Το `at()` δεν δέχεται ποτέ `overlap`, αφού μια εφάπαξ εργασία δεν έχει προηγούμενη εκτέλεση.
 
 ```ts
 const scheduler = new Scheduler({ backend: new RabbitMQBackend({ url }) });
@@ -84,7 +84,7 @@ scheduler.every('quote-refresh', '30s', refresh, { maxLateMs: 10_000 });
 
 Πρέπει να είναι μεγαλύτερο από το `jitterMs`.
 
-**Λειτουργεί** σε κάθε backend. Σε RabbitMQ, NATS και Redis/Valkey χωρίς `lease`, το `jitterMs + maxLateMs` πρέπει επίσης να είναι μικρότερο από όσο το backend θυμάται μια διεκδικημένη εκτέλεση, αλλιώς ένα καθυστερημένο instance θα μπορούσε να κερδίσει ξανά την ίδια εκτέλεση· το anarchon το ελέγχει όταν προστίθεται η εργασία. **Χρησιμοποιήστε το όταν:**
+**Λειτουργεί** σε κάθε backend. Σε RabbitMQ, και σε NATS, Redis ή Valkey χωρίς `lease`, το `jitterMs + maxLateMs` πρέπει επίσης να είναι μικρότερο από όσο το backend θυμάται μια διεκδικημένη εκτέλεση, αλλιώς ένα καθυστερημένο instance θα μπορούσε να κερδίσει ξανά την ίδια εκτέλεση· το anarchon το ελέγχει όταν προστίθεται η εργασία. **Χρησιμοποιήστε το όταν:**
 
 - **Μια μπαγιάτικη εκτέλεση είναι χειρότερη από καμία:** τιμές, παρουσία, ό,τι παλιώνει σε δευτερόλεπτα. Κρατήστε το μικρό.
 - **Μια καθυστερημένη εκτέλεση είναι ακόμα χρήσιμη:** ένας καθαρισμός ή μια αναφορά μπορεί να τρέξει μισή ώρα αργότερα. Αυξήστε το.

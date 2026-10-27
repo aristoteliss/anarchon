@@ -10,6 +10,7 @@ import {
   type Backend,
   type KeyValueStrategyName,
   NatsBackend,
+  type NatsStrategyName,
   PostgresBackend,
   RabbitMQBackend,
   RedisBackend,
@@ -40,8 +41,8 @@ export interface Spec {
   /** Default 'redis'. */
   kind?: 'redis' | 'valkey' | 'postgres' | 'sqlite' | 'rabbitmq' | 'nats';
   url: string;
-  /** Redis / Valkey only. */
-  strategy?: KeyValueStrategyName;
+  /** Redis / Valkey and NATS. */
+  strategy?: KeyValueStrategyName | NatsStrategyName;
   /** SQLite driver: the built-in node:sqlite (default), better-sqlite3, the libSQL client on a file, or on a libSQL server (url). */
   driver?: 'node:sqlite' | 'better-sqlite3' | 'libsql' | 'libsql-server';
   /** Unique per test so tests never share keys, tables, queues or subjects. */
@@ -53,7 +54,7 @@ export function makeBackend(spec: Spec): Backend {
     case 'redis':
       return new RedisBackend({
         redis: spec.url,
-        strategy: spec.strategy,
+        strategy: spec.strategy as KeyValueStrategyName,
         prefix: `test:${spec.id}:`,
       });
     case 'valkey':
@@ -91,6 +92,7 @@ export function makeBackend(spec: Spec): Backend {
         servers: spec.url,
         prefix: `${spec.id}.`,
         stream: spec.id.toUpperCase(),
+        strategy: spec.strategy as NatsStrategyName,
       });
   }
 }
@@ -184,19 +186,33 @@ export async function queueSpecs(): Promise<SpecEntry[]> {
   ];
 }
 
+/** NATS with the 'lease' strategy: leases on a JetStream key-value bucket. */
+export async function natsLeaseSpecs(): Promise<SpecEntry[]> {
+  const nats = await probeNats(NATS_URL);
+  return [
+    {
+      label: `NATS ${nats ?? ''} · lease`.replace('  ', ' '),
+      spec: { kind: 'nats', url: NATS_URL, strategy: 'lease' },
+      ...(nats ? {} : { skip: `nothing at ${NATS_URL}` }),
+    },
+  ];
+}
+
 /** Every backend to test. */
 export async function availableSpecs(): Promise<SpecEntry[]> {
   return [
     ...(await redisSpecs()),
     ...(await sqlSpecs()),
     ...(await queueSpecs()),
+    ...(await natsLeaseSpecs()),
   ];
 }
 
-/** The backends with leases: Redis 'lease' on each server, Postgres and SQLite. */
+/** The backends with leases: Redis 'lease' on each server, Postgres, SQLite and NATS 'lease'. */
 export async function leaseSpecs(): Promise<SpecEntry[]> {
   return [
     ...(await redisSpecs()).filter((s) => s.spec.strategy === 'lease'),
     ...(await sqlSpecs()),
+    ...(await natsLeaseSpecs()),
   ];
 }

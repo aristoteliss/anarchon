@@ -216,7 +216,7 @@ type KeyValueStrategy<Name = KeyValueStrategyName> =
   | { name: 'lease' | 'stream-id' };
 ```
 
-The strategies of the key-value backends, by server. `KeyValueStrategy` is the `strategy` option of `RedisBackend`; `ValkeyBackend` takes `KeyValueStrategy<KeyValueStrategyName<'valkey'>>`, with no `idmp` because Valkey can't run it. A strategy's settings go inside it, so they can't be given to another strategy. `lease` (the default) also gives no overlapping runs, backup runners, catch-up and retries. `stream-id`, `script` and `idmp` (Redis 8.6+) only decide who runs each time. [Redis and Valkey](../../backends/redis/) explains each one. The database and broker backends have no strategy option: PostgreSQL and SQLite always follow the `lease` rules, and RabbitMQ and NATS always make a simple claim.
+The strategies of the key-value backends, by server. `KeyValueStrategy` is the `strategy` option of `RedisBackend`; `ValkeyBackend` takes `KeyValueStrategy<KeyValueStrategyName<'valkey'>>`, with no `idmp` because Valkey can't run it. A strategy's settings go inside it, so they can't be given to another strategy. `lease` (the default) also gives no overlapping runs, backup runners, catch-up and retries. `stream-id`, `script` and `idmp` (Redis 8.6+) only decide who runs each time. [Redis and Valkey](../../backends/redis/) explains each one. PostgreSQL and SQLite have no strategy option: they always follow the `lease` rules. RabbitMQ always makes a simple claim. `NatsBackend` takes `NatsStrategyName`: `'msg-id'` (the default) makes a simple claim, `'lease'` follows the `lease` rules; see [NATS](../../backends/nats/).
 
 ### `IdmpOptions`, `ScriptOptions`
 

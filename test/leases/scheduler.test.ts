@@ -29,14 +29,14 @@ describe('scheduler with leases', async () => {
   for (const { label, spec, skip } of await leaseSpecs()) {
     describe.skipIf(skip)(label, () => {
       /** Two instances of one service, in this process. */
-      const pair = (id: string) =>
+      const pair = (id: string, heartbeatMs = 200) =>
         ['A', 'B'].map(
           (name) =>
             new Scheduler({
               backend: makeBackend({ ...spec, id }),
               instanceId: name,
-              leaseMs: 1_000,
-              heartbeatMs: 200,
+              leaseMs: heartbeatMs * 5,
+              heartbeatMs,
             }),
         );
 
@@ -168,15 +168,17 @@ describe('scheduler with leases', async () => {
       });
 
       test('with yieldAfterFailure, a healthy instance runs every run after another instance failed one', async () => {
-        const [a, b] = pair(uniqueId('yield')) as [Scheduler, Scheduler];
-        const ran: string[] = [];
+        // A waits jitterMs + heartbeatMs after the slot; B must claim within that, even on a store
+        // that takes 100 to 150 ms per claim (a libSQL server).
+        const [a, b] = pair(uniqueId('yield'), 600) as [Scheduler, Scheduler];
+        const ran: Array<{ by: string; slot: number }> = [];
         const failed = new Promise((resolve) => a.once('failure', resolve));
         for (const s of [a, b]) {
           s.every(
             'job',
             '1s',
             (ctx: JobContext) => {
-              ran.push(ctx.instanceId);
+              ran.push({ by: ctx.instanceId, slot: ctx.slot });
               if (ctx.instanceId === 'A') throw new Error('A is sick');
             },
             { jitterMs: 100, catchUpMs: 0, yieldAfterFailure: true },
@@ -188,11 +190,14 @@ describe('scheduler with leases', async () => {
         try {
           await failed;
           await b.start();
-          ran.length = 0;
+          // A slot that was due while B was starting has no healthy peer: A may still run it.
+          const from = Date.now();
+          const since = () => ran.filter(({ slot }) => slot >= from);
           const until = Date.now() + 4_200;
-          while (ran.length < 3 && Date.now() < until) await sleep(20);
-          assert.ok(ran.length >= 3, `ran: ${JSON.stringify(ran)}`);
-          assert.deepEqual([...new Set(ran)], ['B']);
+          while (since().length < 3 && Date.now() < until) await sleep(20);
+          const runners = since().map(({ by }) => by);
+          assert.ok(runners.length >= 3, `ran: ${JSON.stringify(ran)}`);
+          assert.deepEqual([...new Set(runners)], ['B']);
         } finally {
           await Promise.all([a.stop(), b.stop()]);
         }

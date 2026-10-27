@@ -2,7 +2,7 @@
 
 /**
  * Failure scenarios with real processes (kill -9, freeze, SIGTERM, restart everything) on every
- * backend with leases: Redis 'lease', Postgres and SQLite. `pnpm scenarios` prints the same
+ * backend with leases: Redis 'lease', Postgres, SQLite and NATS 'lease'. `pnpm scenarios` prints the same
  * scenarios side by side with the simpler 'stream-id' strategy, which has none of these protections.
  */
 import assert from 'node:assert/strict';
@@ -10,8 +10,10 @@ import { describe, test } from 'vitest';
 
 import {
   LIBSQL_URL,
+  NATS_URL,
   POSTGRES_URL,
   probeLibsql,
+  probeNats,
   probePostgres,
   probeRedis,
   probeSqlite,
@@ -55,6 +57,12 @@ const BACKENDS = [
     // One server, one writer, transactions over HTTP: several scenarios at once queue their writes
     // behind each other longer than the 1.5 s lease, and healthy runners lose their runs.
     sequential: true,
+  },
+  {
+    strategy: 'nats-lease',
+    label: 'NATS, lease strategy',
+    probe: () => probeNats(NATS_URL),
+    missing: `nothing at ${NATS_URL}`,
   },
 ];
 

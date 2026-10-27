@@ -152,6 +152,7 @@ npx tsx examples/walkthrough.ts
 | Παράδειγμα | Τι δείχνει |
 | --- | --- |
 | [`examples/failover.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/failover.ts) | Τρία instances: ομαλή παράδοση (hand-over), και στη συνέχεια κατάρρευση και ανάληψη (takeover) |
+| [`examples/nats-leases.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/nats-leases.ts) | [NATS](../../backends/nats/) με `strategy: 'lease'`, σε τρεις διεργασίες: παράδοση στο `SIGTERM`, ανάληψη μετά από `kill -9`, και ανάκτηση (catch-up) αφού όλες οι διεργασίες ήταν εκτός λειτουργίας |
 | [`examples/options-and-events.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/options-and-events.ts) | Κάθε επιλογή εργασίας και κάθε συμβάν |
 | [`examples/http-api.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/http-api.ts) | Το [Express API](../express/) |
 | [`examples/own-clients.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/own-clients.ts) | Χρήση του δικού σας Redis client ή Postgres pool |
@@ -171,7 +172,7 @@ npx tsx examples/walkthrough.ts
 | [`examples/cache-refresh.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/cache-refresh.ts) | Μια φθηνή ανανέωση κάθε λίγα δευτερόλεπτα σε τρία instances | `jitterMs` για να μοιράζεται, μικρό `maxLateMs`, `catchUpMs: 0`, μικρό `historySize` |
 | [`examples/nightly-export.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/nightly-export.ts) | Μια μεγάλη εξαγωγή που διακόπτεται από ένα deploy | `ctx.signal` ανάμεσα στις σελίδες, checkpoint ανά εκτέλεση, `ctx.attempt`, `stop({ timeoutMs })` |
 | [`examples/tenants.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/tenants.ts) | Οι ίδιες εργασίες ανά tenant, ο καθένας στη ζώνη ώρας του | μία εργασία ανά tenant, `timezone` και `data` ανά εργασία, συνάρτηση δεδομένων, `remove()`, `runNow()` με δεδομένα |
-| [`examples/broker-notifications.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/broker-notifications.ts) | Μόνο RabbitMQ ή NATS: χωρίς μισθώσεις | κάθε εκτέλεση στέλνει ό,τι εκκρεμεί, `maxLateMs` κάτω από τη μνήμη του broker, χωρίς επιλογές μίσθωσης |
+| [`examples/broker-notifications.ts`](https://github.com/aristoteliss/anarchon/blob/main/examples/broker-notifications.ts) | Μόνο RabbitMQ, ή NATS με `msg-id`: χωρίς μισθώσεις | κάθε εκτέλεση στέλνει ό,τι εκκρεμεί, `maxLateMs` κάτω από τη μνήμη του broker, χωρίς επιλογές μίσθωσης |
 
 ## Παρακολούθηση της λειτουργίας ενός instance
 

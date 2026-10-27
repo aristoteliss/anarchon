@@ -190,14 +190,15 @@ interface CommonSchedulerOptions<B extends Backend> {
 }
 
 /**
- * The scheduler options that need a backend with leases: Redis or Valkey with the 'lease' strategy,
- * PostgreSQL or SQLite. `new Scheduler()` doesn't offer them with another backend, and refuses them
+ * The scheduler options that need a backend with leases: Redis, Valkey or NATS with the 'lease'
+ * strategy, PostgreSQL or SQLite. `new Scheduler()` doesn't offer them with another backend, and refuses them
  * when they are set anyway.
  *
  * @example
  * ```ts
  * new Scheduler({ backend: new SqliteBackend({ database: './jobs.db' }), leaseMs: 10_000, heartbeatMs: 2_000 });
- * new Scheduler({ backend: new NatsBackend(), leaseMs: 10_000 }); // type error: NATS has no leases
+ * new Scheduler({ backend: new NatsBackend(), leaseMs: 10_000 }); // type error: NATS 'msg-id' has no leases
+ * new Scheduler({ backend: new NatsBackend({ strategy: 'lease' }), leaseMs: 10_000 });
  * ```
  */
 export interface LeaseSchedulerOptions {
@@ -229,7 +230,7 @@ export interface LeaseSchedulerOptions {
 }
 
 /**
- * True when backend type B has no leases (no `runs`): RabbitMQ, NATS, and Redis or Valkey with a
+ * True when backend type B has no leases (no `runs`): RabbitMQ, and NATS, Redis or Valkey with a
  * strategy other than 'lease'. A backend typed only as `Backend` may have them.
  */
 type HasNoLeases<B> = 'runs' extends keyof B

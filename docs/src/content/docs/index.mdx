@@ -58,7 +58,8 @@ flowchart LR
   <Card title="Recovery after a runner fails" icon="warning">
     On Redis, Valkey, PostgreSQL and SQLite the winner renews a lease while the job runs. If it dies
     or freezes, another instance starts the run again as a new attempt, so handlers must tolerate
-    retries. RabbitMQ and NATS only select the winner.
+    retries. NATS does too with its `lease` strategy. RabbitMQ, and NATS by default, only select
+    the winner.
   </Card>
   <Card title="Long jobs don't pile up" icon="seti:clock">
     On lease backends, the next run of a job is skipped while the current one holds a live lease. A

@@ -1,10 +1,11 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-/** The backend a scenario runs on: a Redis strategy ('lease', 'stream-id'...), 'postgres', 'sqlite' or 'libsql' (a server). */
+/** The backend a scenario runs on: a Redis strategy ('lease', 'stream-id'...), 'postgres', 'sqlite', 'libsql' (a server) or 'nats-lease'. */
 import { type Backend, RedisBackend } from '../../../src';
 import {
   LIBSQL_URL,
   makeBackend,
+  NATS_URL,
   POSTGRES_URL,
   SQLITE_DIR,
 } from '../../support';
@@ -26,6 +27,8 @@ export function scenarioBackend(cfg: {
       driver: 'libsql-server',
       id,
     });
+  if (cfg.strategy === 'nats-lease')
+    return makeBackend({ kind: 'nats', url: NATS_URL, strategy: 'lease', id });
   return new RedisBackend({
     redis: cfg.redisUrl,
     strategy: cfg.strategy as never,

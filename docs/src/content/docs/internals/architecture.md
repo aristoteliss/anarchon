@@ -61,8 +61,8 @@ The scheduler picks a runner once, when it is created, based on the backend:
 ```mermaid
 flowchart LR
   backend{"does the backend<br/>provide leases?"}
-  backend -- "yes: Redis 'lease',<br/>PostgreSQL, SQLite" --> lr["LeaseRunner"]
-  backend -- "no: Redis 'stream-id', 'idmp', 'script',<br/>RabbitMQ, NATS" --> cr["ClaimOnlyRunner"]
+  backend -- "yes: Redis 'lease',<br/>PostgreSQL, SQLite, NATS 'lease'" --> lr["LeaseRunner"]
+  backend -- "no: Redis 'stream-id', 'idmp', 'script',<br/>RabbitMQ, NATS 'msg-id'" --> cr["ClaimOnlyRunner"]
 ```
 
 Both end by handing the run to the same `Executor`. What differs is everything around it:

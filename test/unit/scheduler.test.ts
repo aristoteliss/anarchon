@@ -131,6 +131,10 @@ test('lease options stay available on a lease backend, and wherever the backend 
     backend: new ValkeyBackend({ strategy: 'lease' }),
     leaseMs: 10_000,
   }).every('b', '1m', () => {}, { overlap: 'allow' });
+  new Scheduler({
+    backend: new NatsBackend({ strategy: 'lease' }),
+    leaseMs: 10_000,
+  }).every('g', '1m', () => {}, { maxAttempts: 2, catchUpMs: 0 });
 
   const any: Backend = new RedisBackend();
   new Scheduler({ backend: any, leaseMs: 10_000 }).every('c', '1m', () => {}, {

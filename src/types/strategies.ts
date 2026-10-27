@@ -13,9 +13,9 @@
  * - `script` (Redis 5+, Valkey): a small Lua script does what IDMP does, on any version: it appends
  *   the run only if that run time isn't already in the stream.
  *
- * Only `lease` adds the extras; the other three only decide who runs each time. The database and
- * broker backends have no strategy to choose: PostgreSQL and SQLite always follow the `lease` rules,
- * and RabbitMQ and NATS always make a simple claim.
+ * Only `lease` adds the extras; the other three only decide who runs each time. PostgreSQL and
+ * SQLite have no strategy to choose: they always follow the `lease` rules. RabbitMQ always makes a
+ * simple claim. NATS has a strategy of its own: see `NatsStrategyName`.
  *
  * @example Pick a strategy from configuration (ValkeyBackend refuses an unsupported one when created)
  * ```ts

@@ -114,7 +114,7 @@ Not every store can hold a lease that others can check.
 
 | | Lease backends | Claim-only backends |
 | --- | --- | --- |
-| Which | Redis and Valkey (`lease` strategy), PostgreSQL, SQLite | Redis `stream-id`, `idmp` and `script` strategies, RabbitMQ, NATS |
+| Which | Redis and Valkey (`lease` strategy), PostgreSQL, SQLite, NATS (`lease` strategy) | Redis `stream-id`, `idmp` and `script` strategies, RabbitMQ, NATS (`msg-id`, the default) |
 | One winner per run | Yes | Yes |
 | Backups and takeover | Yes | No |
 | No overlapping runs | Yes | No |

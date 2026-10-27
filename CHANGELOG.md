@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.6.0
+
+NATS gets leases: with `strategy: 'lease'`, `NatsBackend` has backup runners, no overlapping runs,
+catch-up and retries, like Redis, PostgreSQL and SQLite. No breaking change: `NatsBackend` keeps its
+claim-only behaviour unless you ask for the new strategy, and the stored data of every backend is
+unchanged, so 0.5 and 0.6 instances can share a store during a rolling deploy. Moving a NATS service
+to `'lease'` is a change of strategy: every instance must switch together.
+
+### Added
+
+- **`strategy: 'lease'` on `NatsBackend`.** Backup runners when the winner dies or freezes, no
+  overlapping runs, catch-up, retries, hand-over on `stop()` and the lease options, as on Redis,
+  PostgreSQL and SQLite. Each job's runs live under one key of the JetStream key-value bucket
+  `<stream>_RUNS`, and every decision is a write at the revision that was read; leases run on the
+  NATS server's clock. Needs nats-server 2.10 or newer and the `@nats-io/kv` package (a new
+  optional peer dependency). The default strategy, `'msg-id'`, is the claim-only behaviour of 0.5.
+  Every instance of a service must use the same strategy.
+- **`NatsStrategyName`**, the type of the new option.
+- **`examples/nats-leases.ts`** (`pnpm example:nats`): three processes on NATS with leases, through
+  a hand-over on `SIGTERM`, a takeover after `kill -9` and a catch-up after every process was down.
+  The other examples run on NATS with `BACKEND=nats`.
+
+### Changed
+
+- **`NatsBackend` is generic in its strategy**, as `RedisBackend` is: `NatsBackend<'lease'>` has
+  `runs` and takes the lease options, `NatsBackend` (the default, `'msg-id'`) doesn't. `name` is
+  `'nats'` or `'nats:lease'`, and `recordManualRun()` returns the slot it used with `'lease'`.
+- **Documentation**: the pages that said NATS has no leases now name the strategy each statement
+  is about, in English and Greek.
+
 ## 0.5.0
 
 A job can let healthy instances claim its runs first after a run failed on one instance

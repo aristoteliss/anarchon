@@ -1,6 +1,7 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { coded } from './errors';
+import type { ClaimInput, RunStore } from './types';
 
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -173,4 +174,31 @@ export function versionAtLeast(
     }
   }
   return false;
+}
+
+/**
+ * Claims a runNow() run on a lease store, at the first free millisecond from its slot, and returns
+ * that slot. The run is never retried and may overlap other runs of its job.
+ */
+export async function claimManualSlot(
+  runs: RunStore,
+  input: ClaimInput,
+): Promise<number> {
+  for (let slot = input.slot; slot < input.slot + 10; slot++) {
+    const outcome = await runs.claim({
+      ...input,
+      slot,
+      mode: 'new',
+      reason: 'manual',
+      leaseMs: 86_400_000,
+      overlap: 'allow',
+      maxAttempts: 1,
+    });
+    if (outcome.kind === 'won') return slot;
+  }
+
+  throw coded(
+    new Error(`Could not record a manual run of "${input.job}"`),
+    'ANARCHON_STORE',
+  );
 }

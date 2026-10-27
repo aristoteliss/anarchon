@@ -114,7 +114,7 @@ stateDiagram-v2
 
 | | Backends με μίσθωση (Lease) | Backends μόνο για claim |
 | --- | --- | --- |
-| Ποια | Redis και Valkey (στρατηγική `lease`), PostgreSQL, SQLite | Στρατηγικές Redis `stream-id`, `idmp` και `script`, RabbitMQ, NATS |
+| Ποια | Redis και Valkey (στρατηγική `lease`), PostgreSQL, SQLite, NATS (στρατηγική `lease`) | Στρατηγικές Redis `stream-id`, `idmp` και `script`, RabbitMQ, NATS (`msg-id`, η προεπιλογή) |
 | Ένας νικητής ανά εκτέλεση | Ναι | Ναι |
 | Εφεδρικοί (backups) και ανάληψη (takeover) | Ναι | Όχι |
 | Χωρίς αλληλεπικαλυπτόμενες εκτελέσεις (overlap) | Ναι | Όχι |

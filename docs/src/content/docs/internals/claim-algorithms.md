@@ -195,7 +195,9 @@ flowchart TD
   chk -- "another token" --> lost["lost"]
 ```
 
-Every instance publishes with the same message ID, because the ID is built from the job and the slot. The stream stores the first and marks the rest as duplicates, within its duplicate window.
+Every instance publishes with the same message ID, because the ID is built from the job and the slot. The stream stores the first and marks the rest as duplicates, within its duplicate window. That is the default strategy, `msg-id`.
+
+With the `lease` strategy, the **store feature** is a key-value write at an expected revision. Each instance reads the job's key in the bucket `<stream>_RUNS` and its revision, decides by the [lease rules](../leases/), and writes at that revision. JetStream refuses the write if anyone wrote in between, and the instance reads and decides again. See [NATS](../../backends/nats/#how-one-instance-wins-with-lease).
 
 ## Side by side
 
@@ -208,7 +210,8 @@ Every instance publishes with the same message ID, because the ID is built from 
 | PostgreSQL | Transaction + row lock per job | The row lock | as long as a late claim could ask |
 | SQLite | `BEGIN IMMEDIATE` transaction | The database write lock | as long as a late claim could ask |
 | RabbitMQ | Publish to a full-or-empty queue | The queue | `slotTtlMs` |
-| NATS | De-duplicated publish | The stream leader | `duplicateWindowMs` |
+| NATS `msg-id` | De-duplicated publish | The stream leader | `duplicateWindowMs` |
+| NATS `lease` | Key-value write at the revision read | The bucket's stream leader | as long as a late claim could ask |
 
 "Remembers a run for" matters because of late instances. [Timing and clocks](../timing-and-clocks/#how-long-the-store-must-remember) explains why.
 

@@ -103,7 +103,7 @@ new Scheduler({ backend, data: async () => ({ dryRun: await flags.isOn('jobs-dry
 
 ## Χρονισμός μίσθωσης
 
-*Μόνο για backends μίσθωσης.* Με RabbitMQ, NATS, ή Redis/Valkey χωρίς τη στρατηγική `lease`, το `new Scheduler()` δεν προσφέρει τα `leaseMs` και `heartbeatMs`, και τα απορρίπτει αν οριστούν παρ' όλα αυτά.
+*Μόνο για backends μίσθωσης.* Με RabbitMQ, ή NATS, Redis ή Valkey χωρίς τη στρατηγική `lease`, το `new Scheduler()` δεν προσφέρει τα `leaseMs` και `heartbeatMs`, και τα απορρίπτει αν οριστούν παρ' όλα αυτά.
 
 | Επιλογή | Προεπιλογή | Σημασία |
 | --- | --- | --- |
@@ -222,7 +222,18 @@ export const scheduler = new Scheduler({
   instanceId: process.env.POD_NAME,
   maxLateMs: 60_000, // κάτω από το duplicateWindowMs (5 λεπτά από προεπιλογή)
   historySize: 200,  // το ιστορικό κρατιέται μόνο βάσει πλήθους
-  // χωρίς leaseMs ή heartbeatMs: ένας broker δεν έχει μισθώσεις
+  // χωρίς leaseMs ή heartbeatMs: η προεπιλεγμένη στρατηγική 'msg-id' δεν έχει μισθώσεις
+});
+```
+
+Με το NATS, το `strategy: 'lease'` δίνει το πλήρες σύνολο δυνατοτήτων, και δέχεται `leaseMs` και `heartbeatMs`:
+
+```ts
+export const scheduler = new Scheduler({
+  backend: new NatsBackend({ servers: process.env.NATS_URL, replicas: 3, strategy: 'lease' }),
+  instanceId: process.env.POD_NAME,
+  leaseMs: 30_000,
+  historySize: 200, // το ιστορικό κρατιέται μόνο βάσει πλήθους
 });
 ```
 

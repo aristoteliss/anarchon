@@ -73,7 +73,7 @@ try {
 | `Job "X": historySize (N) runs × G ms between runs must cover jitterMs + maxLateMs ... for the "script" strategy` | Το `'script'` βρίσκει τις διεκδικημένες εκτελέσεις στο stream, το οποίο περικόπτεται στο `historySize` | Αυξήστε το `historySize` ή μειώστε το `maxLateMs` |
 | `Job "X": historyTtlMs must be longer than the script strategy's windowMs` | Ίδιος λόγος, βάσει ηλικίας | Αυξήστε το `historyTtlMs` |
 | `Job "X": overlap must be "skip" or "allow"` | Τυπογραφικό λάθος στο `overlap` | Χρησιμοποιήστε ένα από τα δύο |
-| `Job "X": overlap needs a backend with leases (...); B has none` (επίσης `maxAttempts`, `catchUpMs`) | Μια επιλογή μίσθωσης σε RabbitMQ, NATS, ή Redis/Valkey χωρίς τη στρατηγική `lease`. Ο κώδικας με τύπους δεν μεταγλωττίζεται· το σφάλμα αφορά decorators και JavaScript | Αφαιρέστε την επιλογή, ή χρησιμοποιήστε backend με μισθώσεις |
+| `Job "X": overlap needs a backend with leases (...); B has none` (επίσης `maxAttempts`, `catchUpMs`) | Μια επιλογή μίσθωσης σε RabbitMQ, ή NATS, Redis ή Valkey χωρίς τη στρατηγική `lease`. Ο κώδικας με τύπους δεν μεταγλωττίζεται· το σφάλμα αφορά decorators και JavaScript | Αφαιρέστε την επιλογή, ή χρησιμοποιήστε backend με μισθώσεις |
 | `leaseMs needs a backend with leases (...); B has none` (επίσης `heartbeatMs`) | Το ίδιο, στο `new Scheduler()` | Αφαιρέστε την επιλογή, ή χρησιμοποιήστε backend με μισθώσεις |
 | `Job "X": a one-off job takes no overlap` | `at()` με `overlap` | Αφαιρέστε το: μια εφάπαξ εργασία δεν έχει προηγούμενη εκτέλεση |
 | `Job "X": historyTtlMs is not supported by B, which keeps history by count (historySize) only` | `historyTtlMs` σε RabbitMQ ή NATS, στην εργασία ή στον scheduler | Χρησιμοποιήστε το `historySize` |
@@ -117,6 +117,12 @@ try {
 | `The RabbitMQ backend needs RabbitMQ 3.9 or newer for stream queues` | Παλιό RabbitMQ | Αναβαθμίστε |
 | `The RabbitMQ backend needs "amqplib"...` | Ο driver δεν είναι εγκατεστημένος | `pnpm add amqplib` |
 | `The NATS backend needs JetStream enabled on the server (nats-server -js)` | Το JetStream είναι ανενεργό | Ενεργοποιήστε το |
+| `The NATS "lease" strategy needs nats-server 2.10 or newer, which reports its clock` | Παλαιότερος NATS server | Αναβαθμίστε, ή χρησιμοποιήστε `strategy: 'msg-id'` |
+| `The NATS "lease" strategy needs "@nats-io/kv"...` | Ο client του key-value δεν είναι εγκατεστημένος | `pnpm add @nats-io/kv` |
+| `NatsBackend: with strategy "lease", the stream name "S" may only contain letters, digits, "_" and "-"...` | Το όνομα του stream δεν μπορεί να δώσει όνομα στο bucket `<stream>_RUNS` | Μετονομάστε το stream |
+| `NatsBackend: unknown strategy "X" (use "msg-id" or "lease")` | Τυπογραφικό λάθος στο `strategy` | Χρησιμοποιήστε ένα από τα δύο |
+| `Job "X": other instances wrote its state N times in a row while this one tried to; try again` | NATS `lease`: κάθε εγγραφή έχασε από την εγγραφή ενός άλλου instance | Συνήθως τίποτα: το επόμενο claim ή heartbeat προσπαθεί ξανά |
+| `The NATS key "X" holds a value that is not the state of anarchon runs` | Κάτι άλλο εκτός του anarchon έγραψε στο bucket `<stream>_RUNS` | Δώστε στο anarchon δικό του stream (και άρα δικό του bucket) |
 | `Cannot start while stopping` | Το `start()` κλήθηκε ενώ βρίσκεται σε εξέλιξη ένα `stop()` | Κάντε await πρώτα το `stop()` |
 | `Invalid table name "X"` | Το `table` δεν είναι απλό αναγνωριστικό (προαιρετικά `schema.table`) | Χρησιμοποιήστε γράμματα, ψηφία και `_` |
 | `A custom SQL client needs both all() and transaction()` | Ελλιπής προσαρμογέας | Παρέχετε και τις δύο συναρτήσεις |

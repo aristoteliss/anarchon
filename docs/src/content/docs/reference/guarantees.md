@@ -81,7 +81,7 @@ Different jobs are independent. Two jobs due at the same time may run on differe
 
 ### Anything on claim-only backends beyond the claim
 
-With RabbitMQ, NATS and the Redis `stream-id`, `idmp` and `script` strategies, a run whose runner dies is **lost**. There are no backups, no overlap protection and no catch-up.
+With RabbitMQ, NATS with its default `msg-id` strategy, and the Redis `stream-id`, `idmp` and `script` strategies, a run whose runner dies is **lost**. There are no backups, no overlap protection and no catch-up.
 
 ## What the store must provide
 

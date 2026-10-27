@@ -85,7 +85,7 @@ export interface RunRecord extends RunEvent {
   manual: boolean;
   /** 1 for the first try, 2+ when a backup took over. Each attempt is its own record. */
   attempt: number;
-  /** Why this attempt started. Missing on backends that don't record it (RabbitMQ, NATS). */
+  /** Why this attempt started. Missing on backends that don't record it (RabbitMQ, NATS 'msg-id'). */
   reason?: RunReason;
   /**
    * 'running': in progress. 'interrupted': its runner stopped before finishing (lease backends;

@@ -70,12 +70,12 @@ sequenceDiagram
 
 | Backend | Θυμάται μια δεσμευμένη εκτέλεση για | Ρύθμιση |
 | --- | --- | --- |
-| Redis `lease`, PostgreSQL, SQLite | Όσο μια καθυστερημένη διεκδίκηση θα μπορούσε να ρωτήσει, ανεξαρτήτως του `historySize` | Τίποτα προς ρύθμιση |
+| Redis `lease`, PostgreSQL, SQLite, NATS `lease` | Όσο μια καθυστερημένη διεκδίκηση θα μπορούσε να ρωτήσει, ανεξαρτήτως του `historySize` | Τίποτα προς ρύθμιση |
 | Redis `stream-id` | Για πάντα | Τίποτα προς ρύθμιση |
 | Redis `idmp` | 5 min, και το πολύ 1000 εκτελέσεις | `strategy.durationSec`, `strategy.maxSize` |
 | Redis `script` | 5 min, και το πολύ `historySize` εκτελέσεις | `strategy.windowMs` |
 | RabbitMQ | 5 λεπτά | `slotTtlMs` |
-| NATS | 5 λεπτά | `duplicateWindowMs` |
+| NATS `msg-id` | 5 λεπτά | `duplicateWindowMs` |
 
 Με τις προεπιλογές (2 s + 60 s) κάθε backend είναι ασφαλές. Αντιμετωπίζετε αυτόν τον κανόνα μόνο αν αυξήσετε σημαντικά το `maxLateMs` ή συρρικνώσετε κάποιο παράθυρο.
 

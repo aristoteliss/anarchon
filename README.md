@@ -71,6 +71,7 @@ pnpm add anarchon pg                    # PostgreSQL (or bring your own pg / pos
 pnpm add anarchon                       # SQLite with node:sqlite (Node 22.13+), or add better-sqlite3 / @libsql/client
 pnpm add anarchon amqplib               # RabbitMQ
 pnpm add anarchon @nats-io/transport-node @nats-io/jetstream   # NATS JetStream
+pnpm add @nats-io/kv                    # also, for NATS with strategy: 'lease'
 ```
 
 ## How it works
@@ -104,7 +105,7 @@ These are real runs with three processes on Redis 8.6, broken on purpose with `k
 
 A takeover starts the handler again from the beginning, as a new attempt. It doesn't resume where the previous runner stopped.
 
-RabbitMQ and NATS hold no lease either. Like the simple claim, they pick one winner per run, and a run whose runner dies is lost: no takeover, no catch-up. See [Backends](#backends).
+RabbitMQ, and NATS with its default strategy, hold no lease either. Like the simple claim, they pick one winner per run, and a run whose runner dies is lost: no takeover, no catch-up. NATS with `strategy: 'lease'` does everything in the right column. See [Backends](#backends).
 
 ### How the lease works
 
@@ -359,7 +360,7 @@ With `lease`, each job has these keys, all with one hash tag so Redis Cluster ke
 
 ## Backends
 
-Redis, Valkey, PostgreSQL and SQLite get everything described above: leases, backups, no overlap, catch-up and hand-over on `stop()`. RabbitMQ and NATS only make sure one instance wins each run (like the simple `stream-id` claim): they can't hold a lease that a backup could check.
+Redis, Valkey, PostgreSQL, SQLite and NATS with `strategy: 'lease'` get everything described above: leases, backups, no overlap, catch-up and hand-over on `stop()`. RabbitMQ, and NATS with its default `msg-id` strategy, only make sure one instance wins each run (like the simple `stream-id` claim): they can't hold a lease that a backup could check.
 
 ```ts
 import { NatsBackend, PostgresBackend, RabbitMQBackend, RedisBackend, Scheduler, SqliteBackend, ValkeyBackend } from 'anarchon';
@@ -370,6 +371,7 @@ new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_
 new Scheduler({ backend: new SqliteBackend({ database: './anarchon.db' }) });
 new Scheduler({ backend: new RabbitMQBackend({ url: 'amqp://localhost' }) });
 new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222' }) });
+new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222', strategy: 'lease' }) });
 ```
 
 | Backend | How one instance wins | Leases, backups, catch-up | Needs |
@@ -378,7 +380,8 @@ new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222' }) }
 | PostgreSQL | One short transaction per claim. Its first statement writes the job's row in `<table>_jobs`, so claims of one job take turns | Yes | PostgreSQL 9.5+; `pg` or your own `pg` Pool / Client or postgres.js |
 | SQLite | One `BEGIN IMMEDIATE` transaction per claim; SQLite has one writer at a time | Yes | SQLite 3.35+; node:sqlite, better-sqlite3 or `@libsql/client` |
 | RabbitMQ | A gate queue per run that holds one message (`x-max-length: 1`, `reject-publish`); publisher confirms say who was first | No | RabbitMQ 3.9+, `amqplib` |
-| NATS | JetStream publish with `Nats-Msg-Id: <job>:<slot>`; repeats come back as duplicates | No | JetStream enabled, `@nats-io/transport-node` + `@nats-io/jetstream` |
+| NATS (`msg-id`, the default) | JetStream publish with `Nats-Msg-Id: <job>:<slot>`; repeats come back as duplicates | No | JetStream enabled, `@nats-io/transport-node` + `@nats-io/jetstream` |
+| NATS (`lease`) | A write to the job's key in the JetStream key-value bucket `<stream>_RUNS`, only at the revision that was read; a refused write is decided again | Yes | nats-server 2.10+ with JetStream; also `@nats-io/kv` |
 
 `new RedisBackend(options)`:
 
@@ -393,7 +396,8 @@ new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222' }) }
 Notes:
 - **Postgres and SQLite** create two tables on start: `anarchon_runs` (one row per run: attempt, token, status, lease end) and `anarchon_runs_attempts` (one row per attempt: the history). Postgres adds `anarchon_runs_jobs`, and both keep the store format in `anarchon_runs_meta`. Pick another name with `table` (Postgres may include a schema). Leases use the database's clock.
 - **SQLite** only coordinates processes that open the same file: one machine, or a volume with working file locks (not NFS). For several machines, use Postgres or a libSQL server (`@libsql/client` with a remote URL).
-- **RabbitMQ and NATS** remember a run for `slotTtlMs` / `duplicateWindowMs` (default 5 min), so `jitterMs + maxLateMs` must be shorter. Job names may only use letters, digits, `_` and `-`. History is kept by count only, so `historyTtlMs` is refused; NATS keeps the largest `historySize` of the backend and its jobs for every job. A claim whose answer is lost (connection dropped mid-publish) is skipped by that instance rather than risk running twice.
+- **RabbitMQ and NATS `msg-id`** remember a run for `slotTtlMs` / `duplicateWindowMs` (default 5 min), so `jitterMs + maxLateMs` must be shorter. NATS `lease` remembers a run while a late claim could still ask for it, like the other lease backends; its stream name may only use letters, digits, `_` and `-`, since it names the bucket.
+- **RabbitMQ and NATS**: job names may only use letters, digits, `_` and `-`. History is kept by count only, so `historyTtlMs` is refused; NATS keeps the largest `historySize` of the backend and its jobs for every job. A claim whose answer is lost (connection dropped mid-publish) is skipped by that instance rather than risk running twice.
 
 ## Guarantees and limits
 
@@ -424,6 +428,7 @@ npx tsx examples/http-api.ts            # Express: GET /jobs, /jobs/:name/runs, 
                                         # examples/http-api.http has every request, for the VS Code REST Client
 npx tsx examples/walkthrough.ts         # one run from the timer to history, made for stepping through in a debugger
 npx tsx examples/failover.ts            # 3 instances in one process: a graceful hand-over, then a crash and takeover
+npx tsx examples/nats-leases.ts         # NATS with strategy 'lease', 3 processes: SIGTERM hand-over, kill -9 takeover, catch-up
 npx tsx examples/options-and-events.ts  # every job option and every event
 npx tsx examples/own-clients.ts         # pass in your own ioredis client or pg Pool
 npx tsx examples/decorators.ts          # jobs declared with @Cron, @Every and @At on a class (standard decorators)
@@ -444,11 +449,12 @@ npx tsx examples/billing.ts               # charge once a day: never twice (maxA
 npx tsx examples/cache-refresh.ts         # a cheap refresh every 3 s on 3 instances: jitter, a short maxLateMs, no catch-up
 npx tsx examples/nightly-export.ts        # a long export interrupted by a deploy, resumed from a checkpoint by another instance
 npx tsx examples/tenants.ts               # per-tenant jobs and time zones, a fresh token per run, tenants added and removed live
-npx tsx examples/broker-notifications.ts  # RabbitMQ or NATS only, no leases: each run sends everything outstanding
+npx tsx examples/broker-notifications.ts  # RabbitMQ or NATS 'msg-id' only, no leases: each run sends everything outstanding
 ```
 
-All but `basic.ts` need no server (`quick-start.ts` always uses a SQLite file): they use a SQLite file in the temp folder unless `BACKEND=redis` or
-`BACKEND=postgres` is set (`own-clients.ts` always needs Redis or Postgres). `.vscode/launch.json`
+All but `basic.ts` need no server (`quick-start.ts` always uses a SQLite file): they use a SQLite file in the temp folder unless `BACKEND=redis`,
+`BACKEND=postgres` or `BACKEND=nats` is set (`own-clients.ts` always needs Redis or Postgres; `nats-leases.ts` and
+`broker-notifications.ts` need a broker). `.vscode/launch.json`
 has a debug configuration for each; start with "Example: walkthrough", which pauses before `start()`
 and lists where to step.
 

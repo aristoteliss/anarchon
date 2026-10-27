@@ -137,13 +137,14 @@ The scheduler options above, with these differences. Reference: [Decorators](../
 
 | Option | Type | Default | Meaning |
 | --- | --- | --- | --- |
+| `strategy` | `'msg-id' \| 'lease'` | `'msg-id'` | `'lease'`: backups, no overlap, catch-up and retries, on the bucket `<stream>_RUNS` |
 | `servers` | `string \| string[]` | `'nats://localhost:4222'` | Server URL or URLs |
 | `connection` | NATS connection | | Your own connection |
 | `stream` | `string` | `'CRON'` | JetStream stream name |
 | `prefix` | `string` | `'cron.'` | Subject prefix |
-| `duplicateWindowMs` | `number` | `300000` | How long a run is remembered |
+| `duplicateWindowMs` | `number` | `300000` | `msg-id`: how long a run is remembered |
 | `historySize` | `number` | `1000` | Messages kept per subject |
-| `replicas` | `number` | `1` | Stream replicas |
+| `replicas` | `number` | `1` | Stream replicas, and with `lease` those of a new bucket |
 
 ## Durations
 
