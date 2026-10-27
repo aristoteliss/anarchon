@@ -40,8 +40,40 @@ pnpm test:slow # test/e2e: cluster and failure scenarios with real processes
   removing or renaming anything users or custom backends rely on is a breaking change.
 - A new option goes in its `keysOf` list (`src/option-keys.ts`, or next to its interface), or it
   is refused at runtime as unknown. A new error is thrown with a code (`coded()`, `src/errors.ts`).
-- The compatibility rules (backend contract, stored data, unions that may grow) are in
-  [AGENTS.md](AGENTS.md#compatibility).
 - Comments explain non-obvious concurrency or protocol constraints only.
+
+## Compatibility
+
+anarchon is extended without breaking the apps and the custom backends built on it. A change that
+breaks one of these rules is a breaking change: it waits for a major release and goes under
+"Breaking" in the changelog.
+
+- **Public API.** Every intended change to what `src/index.ts` exports is recorded with
+  `pnpm api:update`, and the diff of `api/anarchon.api.txt` is reviewed. `pnpm test:release` fails
+  on an unrecorded change. Removing or renaming an export, a member or an option is breaking.
+- **The backend contract** (`Backend`, `RunStore`, `SqlDialect`) is implemented outside this
+  repository. A new member is optional, with a fallback in the scheduler for backends without it.
+  A new method takes one object parameter, so it can grow; the positional parameters of the
+  existing methods stay until a major release.
+- **Types that backends produce and users read** (`RunRecord`, `StoredResult`, `ClaimOutcome`):
+  a new field is optional. Backends build history with `buildHistory()`, so new fields reach them
+  without changes.
+- **Unions may grow:** `RunReason`, `RunStatus`, the `SkipEvent` reasons, `JobInfo.type`,
+  `ClaimOutcome` kinds and `ErrorCode` may gain members in a minor release; their JSDoc says so.
+  The scheduler handles a claim outcome it doesn't know like `'done'`.
+- **Stored data.** Two versions of one major run side by side on one store during a rolling deploy.
+  Add fields, never rename or remove them; read them with a default (`run.m or maxAttempts`);
+  scripts update a stored object instead of rebuilding it, so fields a newer version wrote survive.
+  A new SQL column comes with a migration in `init()` that checks for the column first (PostgreSQL
+  9.5 has no `ADD COLUMN IF NOT EXISTS`). Raise `STORE_FORMAT` (`src/store-format.ts`) only for a
+  change older versions can't read or would damage; that needs every instance stopped, and the
+  changelog says so.
+- **Options.** A new option goes in its `keysOf` list (`src/option-keys.ts` or next to its
+  interface), or it is refused at runtime. An option a backend can't honour is refused, never
+  ignored: absent from the types where the backend is known, and a `TypeError` elsewhere.
+- **Errors.** Every thrown error has an `ErrorCode`; codes are stable, messages may be reworded.
+  A new kind of failure gets a new code.
+- **Dependencies.** `croner` decides run times, and every instance of a service must compute the
+  same ones: a change of its major version, or of how anarchon calls it, is a breaking change.
 
 CI runs the same commands on every pull request (`.github/workflows/ci.yml`).
