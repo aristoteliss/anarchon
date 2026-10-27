@@ -152,6 +152,17 @@ scheduler.every('hourly-rollup', '1h', async (ctx) => {
 });
 ```
 
+A window tied to one slot gets done only if that slot runs, and a run can be skipped (see [Guarantees and limits](../../reference/guarantees/#that-every-slot-runs)). If every hour must be rolled up, have each run also do the earlier hours that are still missing:
+
+```ts
+scheduler.every('hourly-rollup', '1h', async (ctx) => {
+  for (const hour of await hoursNotRolledUp({ before: ctx.slot })) {
+    ctx.signal.throwIfAborted();
+    await rollUp({ from: hour, to: hour + 60 * 60_000 });
+  }
+});
+```
+
 ### Reject writes from an older attempt
 
 An idempotent write makes a second attempt harmless when the attempts run one after the other. When they overlap (a frozen runner wakes up and writes before it learns that a backup took over), the older attempt can overwrite what the newer one wrote. On a lease backend, every attempt of a run has a higher `ctx.attempt` than the one before, so `ctx.slot` and `ctx.attempt` together work as a fencing token: store the attempt with the row, and let a write apply only if its attempt isn't older.

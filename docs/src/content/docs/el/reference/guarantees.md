@@ -123,11 +123,10 @@ scheduler.every(
   'settle-payments',
   '5m',
   async (ctx) => {
-    // Το ίδιο παράθυρο σε κάθε προσπάθεια
-    const to = ctx.slot;
-    const from = to - 5 * 60_000;
-
-    for (const payment of await unsettledBetween(from, to)) {
+    // Ό,τι δεν έχει διακανονιστεί έως τη θυρίδα αυτής της εκτέλεσης. Το τέλος
+    // είναι σταθερό, άρα κάθε προσπάθεια καλύπτει τις ίδιες πληρωμές. Δεν υπάρχει
+    // αρχή, άρα η επόμενη εκτέλεση διακανονίζει και ό,τι έχασε μια παραλειφθείσα.
+    for (const payment of await unsettledUpTo(ctx.slot)) {
       ctx.signal.throwIfAborted();                         // διακοπή όταν ζητηθεί
       await settle(payment, { idempotencyKey: payment.id }); // ασφαλές να επαναληφθεί
     }

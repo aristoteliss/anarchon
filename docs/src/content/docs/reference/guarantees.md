@@ -123,11 +123,10 @@ scheduler.every(
   'settle-payments',
   '5m',
   async (ctx) => {
-    // The same window on every attempt
-    const to = ctx.slot;
-    const from = to - 5 * 60_000;
-
-    for (const payment of await unsettledBetween(from, to)) {
+    // Everything unsettled up to this run's slot. The end is fixed, so every
+    // attempt covers the same payments. There is no start, so the next run
+    // also settles what a skipped run missed.
+    for (const payment of await unsettledUpTo(ctx.slot)) {
       ctx.signal.throwIfAborted();                         // stop when asked
       await settle(payment, { idempotencyKey: payment.id }); // safe to repeat
     }

@@ -15,7 +15,9 @@
  *   maxAttempts: 1    a charge whose runner died is NOT started again by a backup: a half-done
  *                     run needs a person, not a retry. (The default, 3, suits jobs safe to redo.)
  *   catchUpMs         after a full outage, the day's run still happens when an instance starts,
- *                     if it is at most this late
+ *                     if it is at most this late. It covers the latest missed day only: if a
+ *                     longer outage must not skip a day, have each run charge every day not
+ *                     charged yet, up to ctx.slot
  *   timeoutMs         a run that hangs is cut off and recorded as failed, so tomorrow's can start
  *   ctx.slot          the key of each charge: the same on every instance and every attempt, so the
  *                     ledger refuses a second charge for the same day even if one slipped through

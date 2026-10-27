@@ -104,6 +104,8 @@ These are real runs with three processes on Redis 8.6, broken on purpose with `k
 
 A takeover starts the handler again from the beginning, as a new attempt. It doesn't resume where the previous runner stopped.
 
+RabbitMQ and NATS hold no lease either. Like the simple claim, they pick one winner per run, and a run whose runner dies is lost: no takeover, no catch-up. See [Backends](#backends).
+
 ### How the lease works
 
 - **Claiming.** A claim stores the run with a lease that ends `leaseMs` (default 30 s) from now, measured on the Redis server clock, so clock differences between instances don't matter. The runner renews the lease every `heartbeatMs` (default 5 s).
@@ -115,6 +117,8 @@ A takeover starts the handler again from the beginning, as a new attempt. It doe
 - **Late claims.** Redis checks how late a new claim is on its own clock, so a claim that was delayed or queued (the client queues commands while it reconnects) can't start a stale run. A run is never trimmed from the state while a late claim could still ask for it, whatever `historySize` is.
 
 A lease isn't a lock you hold and release. Every decision is still a single atomic claim, and the lease only says "the runner is still alive". A frozen runner can't know it was taken over until it wakes up, so two attempts can briefly overlap in that case. Check `ctx.signal` before side effects, and keep jobs idempotent.
+
+anarchon is not a queue. A run can be skipped: the previous one is still going, an instance is too late, or every instance was down for longer than `catchUpMs`. If the work must get done, have each run work on everything outstanding, not only on its own slot's window. A skipped run then costs a delay, not lost work. See [Guarantees and limits](https://aristoteliss.github.io/anarchon/reference/guarantees/#that-every-slot-runs).
 
 ## API
 
