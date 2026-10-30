@@ -7,6 +7,27 @@
       "description": "Backend (redis, postgres and nats read REDIS_URL / POSTGRES_URL / NATS_URL from your environment)",
       "options": ["sqlite", "redis", "postgres", "nats"],
       "default": "sqlite"
+    },
+    {
+      "id": "ownClientsBackend",
+      "type": "pickString",
+      "description": "Backend (redis reads REDIS_URL, postgres reads POSTGRES_URL)",
+      "options": ["redis", "postgres"],
+      "default": "redis"
+    },
+    {
+      "id": "broker",
+      "type": "pickString",
+      "description": "Broker (NATS at nats://localhost:4222, RabbitMQ at amqp://localhost:5672)",
+      "options": ["nats", "rabbitmq"],
+      "default": "nats"
+    },
+    {
+      "id": "startupFlow",
+      "type": "pickString",
+      "description": "How the decorated jobs get started",
+      "options": ["auto", "manual", "hand"],
+      "default": "auto"
     }
   ],
   "configurations": [
@@ -16,37 +37,18 @@
       "request": "launch",
       "runtimeArgs": ["--import", "tsx"],
       "program": "${workspaceFolder}/examples/walkthrough.ts",
-      "env": { "BACKEND": "sqlite" },
+      "env": {
+        "BACKEND": "sqlite"
+      },
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
     },
     {
-      "name": "Example: failover",
+      "name": "Example: quick-start",
       "type": "node",
       "request": "launch",
       "runtimeArgs": ["--import", "tsx"],
-      "program": "${workspaceFolder}/examples/failover.ts",
-      "env": { "BACKEND": "${input:backend}" },
-      "console": "integratedTerminal",
-      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
-    },
-    {
-      "name": "Example: options and events",
-      "type": "node",
-      "request": "launch",
-      "runtimeArgs": ["--import", "tsx"],
-      "program": "${workspaceFolder}/examples/options-and-events.ts",
-      "env": { "BACKEND": "${input:backend}" },
-      "console": "integratedTerminal",
-      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
-    },
-    {
-      "name": "Example: HTTP API (Express)",
-      "type": "node",
-      "request": "launch",
-      "runtimeArgs": ["--import", "tsx"],
-      "program": "${workspaceFolder}/examples/http-api.ts",
-      "env": { "BACKEND": "${input:backend}" },
+      "program": "${workspaceFolder}/examples/quick-start.ts",
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
     },
@@ -56,7 +58,210 @@
       "request": "launch",
       "runtimeArgs": ["--import", "tsx"],
       "program": "${workspaceFolder}/examples/basic.ts",
-      "env": { "BACKEND": "sqlite" },
+      "env": {
+        "BACKEND": "sqlite"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: failover",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/failover.ts",
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: crash-proof",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/crash-proof.ts",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "autoAttachChildProcesses": true
+    },
+    {
+      "name": "Example: options and events",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/options-and-events.ts",
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: HTTP API (Express)",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/http-api.ts",
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: own clients",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/own-clients.ts",
+      "env": {
+        "BACKEND": "${input:ownClientsBackend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: run data",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/run-data.ts",
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: billing",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/billing.ts",
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: cache refresh",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/cache-refresh.ts",
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: nightly export",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/nightly-export.ts",
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: tenants",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/tenants.ts",
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: broker notifications",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/broker-notifications.ts",
+      "env": {
+        "BROKER": "${input:broker}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: NATS leases",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/nats-leases.ts",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "autoAttachChildProcesses": true
+    },
+    {
+      "name": "Example: decorators",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/decorators.ts",
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: decorators (legacy)",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/decorators-legacy.ts",
+      "env": {
+        "BACKEND": "${input:backend}",
+        "TSX_TSCONFIG_PATH": "${workspaceFolder}/examples/tsconfig.legacy.json"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: decorators options",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/decorators-options.ts",
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: decorators startup",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/examples/decorators-startup.ts",
+      "args": ["${input:startupFlow}"],
+      "env": {
+        "BACKEND": "${input:backend}"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Example: NestJS app",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/nestjs/check.mjs",
+      "args": ["--run"],
+      "cwd": "${workspaceFolder}/examples/nestjs",
+      "autoAttachChildProcesses": true,
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
     },
