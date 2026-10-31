@@ -64,4 +64,4 @@ What anarchon does not do either:
 - A run that throws is not retried on another instance.
 - `timeoutMs` marks a hung run failed and lets the next runs go ahead, but it does not stop the handler: a handler that ignores `ctx.signal` keeps its resources.
 
-More in the documentation: [NestJS recipe](https://aristoteliss.github.io/anarchon/recipes/nestjs/) and [Decorators](https://aristoteliss.github.io/anarchon/guides/decorators/).
+More in the documentation: [NestJS recipe](https://aristoteliss.github.io/anarchon-docs/recipes/nestjs/) and [Decorators](https://aristoteliss.github.io/anarchon-docs/guides/decorators/).

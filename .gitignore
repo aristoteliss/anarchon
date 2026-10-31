@@ -4,7 +4,6 @@ dist/
 anarchon.db*
 coverage/
 data/
-.astro/
 test/test-run.log
 
 # local settings and secrets: values belong in the environment, never in the repository
@@ -28,5 +27,3 @@ __pycache__/
 # launch drafts and outreach notes: private until the owner publishes them
 marketing/
 
-# internal notes and drafts: private until the owner publishes them
-docs/internal/

@@ -6,7 +6,7 @@
 [![node](https://img.shields.io/node/v/anarchon.svg)](https://www.npmjs.com/package/anarchon)
 [![license](https://img.shields.io/badge/license-AGPL--3.0%20or%20commercial-blue.svg)](https://github.com/aristoteliss/anarchon#license-and-commercial-use)
 
-[**Documentation**](https://aristoteliss.github.io/anarchon/) · [Quick start](https://aristoteliss.github.io/anarchon/getting-started/quick-start/) · [Guarantees and limits](https://aristoteliss.github.io/anarchon/reference/guarantees/) · [Examples](#examples) · [License](#license-and-commercial-use)
+[**Documentation**](https://aristoteliss.github.io/anarchon-docs/) · [Quick start](https://aristoteliss.github.io/anarchon-docs/getting-started/quick-start/) · [Guarantees and limits](https://aristoteliss.github.io/anarchon-docs/reference/guarantees/) · [Examples](#examples) · [License](#license-and-commercial-use)
 
 Leaderless scheduling for Node.js clusters. Run the same jobs in every instance; an atomic claim in Redis, Valkey, PostgreSQL or SQLite selects one runner for each scheduled slot. The default `lease` strategy retries after a runner stops renewing its lease. That gives at-least-once execution after failures, not exactly-once side effects: handlers should be idempotent, and a frozen runner can briefly overlap its replacement.
 
@@ -45,7 +45,7 @@ The recording above is `examples/quick-start.ts`: three processes on one machine
 
 The demo sets the lease to 3 seconds and the heartbeat to 0.5 seconds so the takeover is quick to watch. With the defaults (30 s and 5 s) a takeover comes about 30 seconds after a crash. A takeover starts the handler from the beginning, which is why handlers must be idempotent.
 
-For a no-server demo you build yourself, follow the [five-minute SQLite quick start](https://aristoteliss.github.io/anarchon/getting-started/quick-start/). It runs three processes against one shared SQLite file on the same machine. To try the Redis-backed `examples/basic.ts` demo instead, start Redis, open three terminals in the repository, and run this command in each:
+For a no-server demo you build yourself, follow the [five-minute SQLite quick start](https://aristoteliss.github.io/anarchon-docs/getting-started/quick-start/). It runs three processes against one shared SQLite file on the same machine. To try the Redis-backed `examples/basic.ts` demo instead, start Redis, open three terminals in the repository, and run this command in each:
 
 ```sh
 pnpm install
@@ -119,7 +119,7 @@ RabbitMQ, and NATS with its default strategy, hold no lease either. Like the sim
 
 A lease isn't a lock you hold and release. Every decision is still a single atomic claim, and the lease only says "the runner is still alive". A frozen runner can't know it was taken over until it wakes up, so two attempts can briefly overlap in that case. Check `ctx.signal` before side effects, and keep jobs idempotent.
 
-anarchon is not a queue. A run can be skipped: the previous one is still going, an instance is too late, or every instance was down for longer than `catchUpMs`. If the work must get done, have each run work on everything outstanding, not only on its own slot's window. A skipped run then costs a delay, not lost work. See [Guarantees and limits](https://aristoteliss.github.io/anarchon/reference/guarantees/#that-every-slot-runs).
+anarchon is not a queue. A run can be skipped: the previous one is still going, an instance is too late, or every instance was down for longer than `catchUpMs`. If the work must get done, have each run work on everything outstanding, not only on its own slot's window. A skipped run then costs a delay, not lost work. See [Guarantees and limits](https://aristoteliss.github.io/anarchon-docs/reference/guarantees/#that-every-slot-runs).
 
 ## API
 
@@ -244,7 +244,7 @@ Things to know:
 
 Runnable examples: [examples/decorators.ts](examples/decorators.ts) (standard decorators), [examples/decorators-legacy.ts](examples/decorators-legacy.ts) (legacy decorators), [examples/decorators-startup.ts](examples/decorators-startup.ts) (the three ways to start), [examples/decorators-options.ts](examples/decorators-options.ts) (schedulers from settings, a scheduler per job, several objects of a class, run data) and [examples/nestjs](examples/nestjs) (a NestJS app, checked on NestJS 11 and 12).
 
-More in the [decorators guide](https://aristoteliss.github.io/anarchon/guides/decorators/), the [decorators reference](https://aristoteliss.github.io/anarchon/reference/decorators/) and the [NestJS recipe](https://aristoteliss.github.io/anarchon/recipes/nestjs/#declaring-jobs-with-decorators).
+More in the [decorators guide](https://aristoteliss.github.io/anarchon-docs/guides/decorators/), the [decorators reference](https://aristoteliss.github.io/anarchon-docs/reference/decorators/) and the [NestJS recipe](https://aristoteliss.github.io/anarchon-docs/recipes/nestjs/#declaring-jobs-with-decorators).
 
 #### Run data
 
@@ -263,7 +263,7 @@ await scheduler.runNow('export', { data: { requestedBy: user.id } });           
 scheduler.setData({ tenant: 'acme', plan: 'pro' });                                 // replace the scheduler's while it runs
 ```
 
-The layers are merged from the most general to the most specific: two plain objects are merged, any other value replaces. A function that throws fails the run. The data is not stored and not shared between instances, so it can hold secrets and clients. More in the [run data guide](https://aristoteliss.github.io/anarchon/guides/run-data/); runnable in [examples/run-data.ts](examples/run-data.ts).
+The layers are merged from the most general to the most specific: two plain objects are merged, any other value replaces. A function that throws fails the run. The data is not stored and not shared between instances, so it can hold secrets and clients. More in the [run data guide](https://aristoteliss.github.io/anarchon-docs/guides/run-data/); runnable in [examples/run-data.ts](examples/run-data.ts).
 
 `handler(ctx)` receives `{ name, slot, scheduledAt, instanceId, manual, attempt, reason, signal, data }`:
 - `attempt` is 1, or 2+ when a backup took over.
@@ -409,12 +409,17 @@ Notes:
 
 ## Documentation
 
-**Read the [hosted documentation](https://aristoteliss.github.io/anarchon/)** for guides to every option and method, the claim
+**Read the [hosted documentation](https://aristoteliss.github.io/anarchon-docs/)** for guides to every option and method, the claim
 and lease algorithms step by step with diagrams, one page per backend, and recipes (Express, NestJS,
-Kubernetes, long-running jobs). [Choosing anarchon](https://aristoteliss.github.io/anarchon/getting-started/choosing-anarchon/)
+Kubernetes, long-running jobs). It covers the [.NET package](https://github.com/aristoteliss/anarchon-dotnet) too. [Choosing anarchon](https://aristoteliss.github.io/anarchon-docs/getting-started/choosing-anarchon/)
 compares it with BullMQ, node-cron, your own lock and Kubernetes CronJobs, and says when another tool fits better.
 
+The documentation has its own repository, [anarchon-docs](https://github.com/aristoteliss/anarchon-docs),
+checked out here at `docs/` as a git submodule:
+
 ```sh
+git submodule update --init   # once, or clone with --recursive
+pnpm docs:install
 pnpm docs:dev     # http://localhost:4321
 pnpm docs:build   # static site in docs/dist
 ```
@@ -511,5 +516,5 @@ This software is **Dual-Licensed**.
 
 The project offers the **GNU AGPLv3** (see [`LICENSE`](LICENSE)) and a separate commercial license (see [`COMMERCIAL_LICENSE.txt`](COMMERCIAL_LICENSE.txt)). The AGPLv3 is a copyleft license; review its terms to determine how they apply to your use. The commercial license allows commercial integration without AGPL copyleft obligations and sets an annual fee based on the licensee's gross global revenue. Review the full terms and fee schedule in the linked files before adopting either option.
 
-For a concise comparison, see the [commercial license terms](COMMERCIAL_LICENSE.txt), including eligibility, annual revenue bands, and fees. The [licensing page](https://aristoteliss.github.io/anarchon/reference/licensing/) answers the common questions: which revenue counts, how to register for the free tier, and who to contact.
+For a concise comparison, see the [commercial license terms](COMMERCIAL_LICENSE.txt), including eligibility, annual revenue bands, and fees. The [licensing page](https://aristoteliss.github.io/anarchon-docs/reference/licensing/) answers the common questions: which revenue counts, how to register for the free tier, and who to contact.
 

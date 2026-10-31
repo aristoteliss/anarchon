@@ -1,5 +1,10 @@
 version: 2
 updates:
+  # docs/ is the anarchon-docs repository; this moves the pointer to its latest commit.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: daily
   # The workflows pin each action to a commit; this keeps the pins current.
   - package-ecosystem: github-actions
     directory: /

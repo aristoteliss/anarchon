@@ -1,6 +1,6 @@
 {
   "name": "anarchon",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Leaderless cron and interval scheduling for Node.js services, coordinated through your existing datastore. An atomic claim selects one runner per attempt; on Redis, Valkey, PostgreSQL and SQLite a lease lets another instance retry a run whose runner failed. RabbitMQ and NATS: claim only.",
   "keywords": [
     "cron",
@@ -28,7 +28,7 @@
     "type": "git",
     "url": "git+https://github.com/aristoteliss/anarchon.git"
   },
-  "homepage": "https://aristoteliss.github.io/anarchon/",
+  "homepage": "https://aristoteliss.github.io/anarchon-docs/",
   "bugs": {
     "url": "https://github.com/aristoteliss/anarchon/issues"
   },
@@ -80,10 +80,11 @@
     "api:update": "pnpm rebuild && node scripts/api-snapshot.mjs --update",
     "verify:all": "pnpm test:servers && pnpm lint && pnpm check && pnpm test:all && pnpm test:release",
     "scenarios": "tsx test/e2e/scenarios/report.ts stream-id lease postgres sqlite",
-    "docs:dev": "pnpm --filter anarchon-docs dev",
-    "docs:build": "pnpm --filter anarchon-docs build",
-    "docs:preview": "pnpm --filter anarchon-docs preview",
-    "docs:check": "pnpm --filter anarchon-docs check:diagrams",
+    "docs:install": "pnpm --dir docs install",
+    "docs:dev": "pnpm --dir docs dev",
+    "docs:build": "pnpm --dir docs build",
+    "docs:preview": "pnpm --dir docs preview",
+    "docs:check": "pnpm --dir docs check:diagrams",
     "example": "tsx examples/basic.ts",
     "example:api": "tsx examples/http-api.ts",
     "example:walkthrough": "tsx examples/walkthrough.ts",

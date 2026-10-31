@@ -6,12 +6,12 @@ body:
     attributes:
       value: |
         Remove passwords, tokens and connection strings from everything you paste, including logs.
-        For a question about usage, read the [FAQ](https://aristoteliss.github.io/anarchon/reference/faq/) first.
+        For a question about usage, read the [FAQ](https://aristoteliss.github.io/anarchon-docs/reference/faq/) first.
   - type: input
     id: version
     attributes:
       label: anarchon version
-      placeholder: 0.6.0
+      placeholder: 0.6.1
     validations:
       required: true
   - type: input

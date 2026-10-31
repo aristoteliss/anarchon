@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1
+
+### Changed
+
+- **The documentation moved** to [aristoteliss.github.io/anarchon-docs](https://aristoteliss.github.io/anarchon-docs/),
+  its own repository, where it covers both the Node.js and the .NET package. Links to the old
+  address open the same page at the new one. The package's `homepage` points there.
+
 ## 0.6.0
 
 NATS gets leases: with `strategy: 'lease'`, `NatsBackend` has backup runners, no overlapping runs,

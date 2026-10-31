@@ -31,10 +31,12 @@ pnpm test:slow # test/e2e: cluster and failure scenarios with real processes
 ```
 
 - Fix a bug by first adding a test that reproduces it.
-- A change to behavior or to the public API needs its documentation page, in English and
-  in Greek (`docs/src/content/docs/` and `docs/src/content/docs/el/`), and an entry in
-  `CHANGELOG.md`.
-- A change to the documentation needs `pnpm docs:check` and `pnpm docs:build`.
+- A change to behavior or to the public API needs an entry in `CHANGELOG.md`, and its
+  documentation page in English and in Greek. The documentation is its own repository,
+  [anarchon-docs](https://github.com/aristoteliss/anarchon-docs), checked out at `docs/` as a
+  submodule: run `git submodule update --init` once, change the pages in `docs/src/content/docs/`
+  and `docs/src/content/docs/el/`, and open the pull request in anarchon-docs. Check it with
+  `pnpm docs:install`, `pnpm docs:check` and `pnpm docs:build`.
 - A change to the public API needs `pnpm api:update`: it records the new declarations in
   `api/anarchon.api.txt`, and `pnpm test:release` fails while they differ. Review that diff:
   removing or renaming anything users or custom backends rely on is a breaking change.
