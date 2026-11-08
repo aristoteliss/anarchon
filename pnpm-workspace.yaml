@@ -1,12 +1,9 @@
 packages:
-  - '.'
-  - 'examples/nestjs'
+  - "."
+  - "examples/nestjs"
 
 allowBuilds:
   better-sqlite3: true
   esbuild: true
   protobufjs: true
   sharp: true
-
-minimumReleaseAgeExclude:
-  - '@nestjs/locks@0.0.4'

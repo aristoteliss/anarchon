@@ -15,6 +15,7 @@ Leaderless scheduling for Node.js clusters. Run the same jobs in every instance;
 </p>
 
 anarchon also handles what goes wrong in real clusters:
+
 - jobs that run longer than their interval
 - an instance crashing or freezing mid-run
 - rolling deploys, and every instance restarting at once
@@ -22,13 +23,33 @@ anarchon also handles what goes wrong in real clusters:
 ```ts
 import { RedisBackend, Scheduler } from 'anarchon';
 
-const scheduler = new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) }); // a backend is required: none is assumed
+const scheduler = new Scheduler({
+  backend: new RedisBackend({ redis: 'redis://localhost:6379' }),
+}); // a backend is required: none is assumed
 
 scheduler
-  .every('sync', '10s', async (ctx) => { /* ... */ })
-  .every('report', '35m', async (ctx) => { /* ... */ }, { timeoutMs: 20 * 60_000 })
-  .cron('digest', '0 */2 * * *', async (ctx) => { /* ... */ }, { timezone: 'Europe/Athens' })
-  .at('migrate', new Date('2026-12-01T03:00:00Z'), async (ctx) => { /* a one-off job: one slot */ });
+  .every('sync', '10s', async (ctx) => {
+    /* ... */
+  })
+  .every(
+    'report',
+    '35m',
+    async (ctx) => {
+      /* ... */
+    },
+    { timeoutMs: 20 * 60_000 },
+  )
+  .cron(
+    'digest',
+    '0 */2 * * *',
+    async (ctx) => {
+      /* ... */
+    },
+    { timezone: 'Europe/Athens' },
+  )
+  .at('migrate', new Date('2026-12-01T03:00:00Z'), async (ctx) => {
+    /* a one-off job: one slot */
+  });
 
 await scheduler.start();
 ```
@@ -76,7 +97,7 @@ pnpm add @nats-io/kv                    # also, for NATS with strategy: 'lease'
 
 ## How it works
 
-1. **Every instance computes the same run times.** Each scheduled run has a time, called its *slot*. Intervals use a grid counted from 1970 UTC, so "every 10s" means :00, :10, :20…. Cron jobs use the expression. All instances agree on the slots, whenever each one started.
+1. **Every instance computes the same run times.** Each scheduled run has a time, called its _slot_. Intervals use a grid counted from 1970 UTC, so "every 10s" means :00, :10, :20…. Cron jobs use the expression. All instances agree on the slots, whenever each one started.
 2. **Each instance waits a random delay.** It waits until the slot plus a random 0 to `jitterMs` (default 2 s). The delay is what spreads the work across instances.
 3. **One atomic claim decides.** Each instance runs the same Lua script, which records the run unless it's already there. Redis runs scripts one at a time, so exactly one instance wins.
 4. **The winner runs the job under a lease.** It renews the lease every few seconds, and the other instances become its backups.
@@ -93,15 +114,15 @@ This is the same idea as Meteor's SyncedCron, where every server inserts `{ name
 
 These are real runs with three processes on Redis 8.6, broken on purpose with `kill -9`, `SIGSTOP`, `SIGTERM` and full restarts. Run them yourself with `pnpm run scenarios`.
 
-| What happens | Simple claim (`stream-id`) | anarchon (`lease`, the default) |
-|---|---|---|
-| A 7 s job runs every 3 s | **3 copies run at the same time** | 1 at a time; runs due meanwhile are skipped (`skip`, reason `overlap`) |
-| The winner is killed mid-run | **The run is lost**; history says `running` forever | A backup takes over about one lease later and finishes it as attempt 2 |
-| The winner freezes (GC pause, stalled VM) longer than its lease | No backup; the run waits | A backup takes over. When the frozen one wakes up, `ctx.signal` aborts and it emits `lost` |
-| A non-winner restarts mid-run | Fine: runs once | Fine: runs once, and the restarted instance becomes a backup |
-| The winner is stopped mid-run (`SIGTERM`, rolling deploy) | **The run is lost**; history says `interrupted` | It hands the run over at once; a backup finishes it as attempt 2 |
-| All 3 are killed mid-run, then restart | **The run is lost** | After the restart, one instance re-runs it as attempt 2 |
-| All 3 are down when a run is due | **The run never happens** | On start, it's caught up if it was due less than `catchUpMs` ago (default 5 min) |
+| What happens                                                    | Simple claim (`stream-id`)                          | anarchon (`lease`, the default)                                                            |
+| --------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| A 7 s job runs every 3 s                                        | **3 copies run at the same time**                   | 1 at a time; runs due meanwhile are skipped (`skip`, reason `overlap`)                     |
+| The winner is killed mid-run                                    | **The run is lost**; history says `running` forever | A backup takes over about one lease later and finishes it as attempt 2                     |
+| The winner freezes (GC pause, stalled VM) longer than its lease | No backup; the run waits                            | A backup takes over. When the frozen one wakes up, `ctx.signal` aborts and it emits `lost` |
+| A non-winner restarts mid-run                                   | Fine: runs once                                     | Fine: runs once, and the restarted instance becomes a backup                               |
+| The winner is stopped mid-run (`SIGTERM`, rolling deploy)       | **The run is lost**; history says `interrupted`     | It hands the run over at once; a backup finishes it as attempt 2                           |
+| All 3 are killed mid-run, then restart                          | **The run is lost**                                 | After the restart, one instance re-runs it as attempt 2                                    |
+| All 3 are down when a run is due                                | **The run never happens**                           | On start, it's caught up if it was due less than `catchUpMs` ago (default 5 min)           |
 
 A takeover starts the handler again from the beginning, as a new attempt. It doesn't resume where the previous runner stopped.
 
@@ -127,20 +148,20 @@ anarchon is not a queue. A run can be skipped: the previous one is still going, 
 
 `backend` is required. No store is assumed: `new Scheduler()` throws.
 
-| Option | Default | Meaning |
-|---|---|---|
-| `backend` | none: required | Where runs are stored: `new RedisBackend(...)`, `new PostgresBackend(...)`, `new SqliteBackend(...)` and the rest. See [Backends](#backends) |
-| `instanceId` | `hostname:pid` | Name shown in history |
-| `jitterMs` | `2000` | Maximum random delay before claiming a run. Lowered automatically for short intervals |
-| `maxLateMs` | `60000` | Skip a run if this instance reaches it later than this |
-| `historySize` | `1000` | Runs kept per job |
-| `historyTtlMs` | none | Also drop history older than this, like SyncedCron's `collectionTTL` |
-| `timezone` | server's | Default time zone for cron jobs |
-| `leaseMs` | `30000` | How long a running job's lease lasts without a heartbeat |
-| `heartbeatMs` | `5000` | How often a running job renews its lease, and how often backups check on it |
-| `log` | `false` | Log one line per start, finish, failure, skip and lost run |
-| `logger` | `console` | Where logs and unhandled errors go |
-| `unrefTimers` | `false` | Let the process exit even while timers are pending |
+| Option         | Default        | Meaning                                                                                                                                      |
+| -------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend`      | none: required | Where runs are stored: `new RedisBackend(...)`, `new PostgresBackend(...)`, `new SqliteBackend(...)` and the rest. See [Backends](#backends) |
+| `instanceId`   | `hostname:pid` | Name shown in history                                                                                                                        |
+| `jitterMs`     | `2000`         | Maximum random delay before claiming a run. Lowered automatically for short intervals                                                        |
+| `maxLateMs`    | `60000`        | Skip a run if this instance reaches it later than this                                                                                       |
+| `historySize`  | `1000`         | Runs kept per job                                                                                                                            |
+| `historyTtlMs` | none           | Also drop history older than this, like SyncedCron's `collectionTTL`                                                                         |
+| `timezone`     | server's       | Default time zone for cron jobs                                                                                                              |
+| `leaseMs`      | `30000`        | How long a running job's lease lasts without a heartbeat                                                                                     |
+| `heartbeatMs`  | `5000`         | How often a running job renews its lease, and how often backups check on it                                                                  |
+| `log`          | `false`        | Log one line per start, finish, failure, skip and lost run                                                                                   |
+| `logger`       | `console`      | Where logs and unhandled errors go                                                                                                           |
+| `unrefTimers`  | `false`        | Let the process exit even while timers are pending                                                                                           |
 
 A shorter `leaseMs` means faster takeover after a crash. A longer one tolerates longer pauses before a backup steps in.
 
@@ -157,9 +178,19 @@ scheduler.at(name, when, handler, options?)          // once, at a Date / ms / I
 The same jobs can be declared on the methods of a class. There is no framework, no `reflect-metadata` and no register call: an object adds its jobs when it is created, and the scheduler can be created for you from settings you give once.
 
 ```ts
-import { At, Cron, Every, type JobContext, RedisBackend, Scheduler } from 'anarchon';
+import {
+  At,
+  Cron,
+  Every,
+  type JobContext,
+  RedisBackend,
+  Scheduler,
+} from 'anarchon';
 
-Scheduler.configure({ backend: new RedisBackend({ redis: process.env.REDIS_URL }), autoStart: true }); // a backend must be given: none is assumed
+Scheduler.configure({
+  backend: new RedisBackend({ redis: process.env.REDIS_URL }),
+  autoStart: true,
+}); // a backend must be given: none is assumed
 
 class Reports {
   @Cron('weekday-digest', '0 8 * * 1-5', { timezone: 'Europe/Athens' })
@@ -179,26 +210,32 @@ Each decorator takes the arguments of its method without the handler: `@Every(na
 
 **Who creates and starts the scheduler** is your choice:
 
-| | Code |
-|---|---|
-| Settings, started for you | `Scheduler.configure({ backend, autoStart: true })` |
-| Settings, started by you | `Scheduler.configure({ backend })`, then `await Scheduler.startAll()` |
-| By hand | `const scheduler = new Scheduler({ backend })`, then `await scheduler.start()` |
+|                           | Code                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| Settings, started for you | `Scheduler.configure({ backend, autoStart: true })`                            |
+| Settings, started by you  | `Scheduler.configure({ backend })`, then `await Scheduler.startAll()`          |
+| By hand                   | `const scheduler = new Scheduler({ backend })`, then `await scheduler.start()` |
 
 Stop them on shutdown with `await Scheduler.stopAll()`.
 
 **A job can choose its scheduler.** Jobs that give the same name share one, so ten jobs can be on one scheduler, on ten, or anything between. A named scheduler that doesn't exist yet is created from its settings.
 
 ```ts
-Scheduler.configure({ backend: (name) => new PostgresBackend({ connection: pool, table: `cron_${name}` }) });
-Scheduler.configure('billing', { backend: new RedisBackend({ redis: process.env.BILLING_REDIS_URL }), leaseMs: 10_000 }); // optional: settings of its own
+Scheduler.configure({
+  backend: (name) =>
+    new PostgresBackend({ connection: pool, table: `cron_${name}` }),
+});
+Scheduler.configure('billing', {
+  backend: new RedisBackend({ redis: process.env.BILLING_REDIS_URL }),
+  leaseMs: 10_000,
+}); // optional: settings of its own
 
 class Jobs {
-  @Cron('job-1', '*/10 * * * * *')                            // the default scheduler
+  @Cron('job-1', '*/10 * * * * *') // the default scheduler
   one() {}
-  @Cron('job-2', '*/10 * * * * *', { scheduler: 'billing' })  // the scheduler named 'billing'
+  @Cron('job-2', '*/10 * * * * *', { scheduler: 'billing' }) // the scheduler named 'billing'
   two() {}
-  @Every('job-3', '5s', { scheduler: 'reports' })             // created from the default settings: table cron_reports
+  @Every('job-3', '5s', { scheduler: 'reports' }) // created from the default settings: table cron_reports
   three() {}
 }
 ```
@@ -224,11 +261,11 @@ class Reports {
 }
 ```
 
-| | Standard | Legacy |
-|---|---|---|
-| `tsconfig.json` | nothing to set | `"experimentalDecorators": true` |
-| An object adds its jobs when created | always | only with `@Scheduled()` on the class |
-| `@Scheduled()` | not needed, harmless | needed, unless you call `register()` |
+|                                      | Standard             | Legacy                                |
+| ------------------------------------ | -------------------- | ------------------------------------- |
+| `tsconfig.json`                      | nothing to set       | `"experimentalDecorators": true`      |
+| An object adds its jobs when created | always               | only with `@Scheduled()` on the class |
+| `@Scheduled()`                       | not needed, harmless | needed, unless you call `register()`  |
 
 Things to know:
 
@@ -251,36 +288,44 @@ More in the [decorators guide](https://aristoteliss.github.io/anarchon-docs/guid
 A job often needs something it can't take from its surroundings: the tenant it runs for, the permission it runs with, a token that must be fresh. Give it as `data`, and each run reads it as `ctx.data`.
 
 ```ts
-const scheduler = new Scheduler({ backend, data: { tenant: 'acme' } });               // for every job
+const scheduler = new Scheduler({ backend, data: { tenant: 'acme' } }); // for every job
 
-scheduler.every('export', '1h', async (ctx: JobContext<{ tenant: string; permission: string }>) => {
-  await exportFor(ctx.data.tenant, ctx.data.permission);
-}, { data: { permission: 'reports:export' } });                                     // for this job, on top
+scheduler.every(
+  'export',
+  '1h',
+  async (ctx: JobContext<{ tenant: string; permission: string }>) => {
+    await exportFor(ctx.data.tenant, ctx.data.permission);
+  },
+  { data: { permission: 'reports:export' } },
+); // for this job, on top
 
-scheduler.every('sync', '5m', sync, { data: async () => ({ token: await freshToken() }) }); // read when each run starts
+scheduler.every('sync', '5m', sync, {
+  data: async () => ({ token: await freshToken() }),
+}); // read when each run starts
 
-await scheduler.runNow('export', { data: { requestedBy: user.id } });               // for one manual run
-scheduler.setData({ tenant: 'acme', plan: 'pro' });                                 // replace the scheduler's while it runs
+await scheduler.runNow('export', { data: { requestedBy: user.id } }); // for one manual run
+scheduler.setData({ tenant: 'acme', plan: 'pro' }); // replace the scheduler's while it runs
 ```
 
 The layers are merged from the most general to the most specific: two plain objects are merged, any other value replaces. A function that throws fails the run. The data is not stored and not shared between instances, so it can hold secrets and clients. More in the [run data guide](https://aristoteliss.github.io/anarchon-docs/guides/run-data/); runnable in [examples/run-data.ts](examples/run-data.ts).
 
 `handler(ctx)` receives `{ name, slot, scheduledAt, instanceId, manual, attempt, reason, signal, data }`:
+
 - `attempt` is 1, or 2+ when a backup took over.
 - `reason` is `'scheduled'`, `'manual'`, `'catch-up'` or `'takeover'`.
 - `signal` aborts on `stop()`, on timeout, and when a backup took the run over. Throw when it aborts (`ctx.signal.throwIfAborted()`) so a stopped run is handed over instead of counting as finished.
 
-| Job option | Default | Meaning |
-|---|---|---|
-| `jitterMs`, `maxLateMs`, `historySize`, `historyTtlMs` | scheduler's | Per-job overrides |
-| `timeoutMs` | none | Abort `ctx.signal` and mark the run failed after this long |
-| `overlap` | `'skip'` | Skip a run while the previous one is still running, or `'allow'` both |
-| `maxAttempts` | `3` | How many times a run may be started when runners die (hand-overs on `stop()` don't count) |
-| `catchUpMs` | `300000` | On start, run the latest run if it was missed and due less than this ago. `0` turns it off |
-| `yieldAfterFailure` | `false` | After a run failed on this instance, wait until `slot + jitterMs + heartbeatMs` before claiming the next one, so a healthy instance claims it first |
-| `offsetMs` | `0` | `every()` only: shift the grid |
-| `timezone` | scheduler's | `cron()` only |
-| `data` | none | Data for this job's runs, read as `ctx.data`. A value, or a function called when a run starts |
+| Job option                                             | Default     | Meaning                                                                                                                                             |
+| ------------------------------------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jitterMs`, `maxLateMs`, `historySize`, `historyTtlMs` | scheduler's | Per-job overrides                                                                                                                                   |
+| `timeoutMs`                                            | none        | Abort `ctx.signal` and mark the run failed after this long                                                                                          |
+| `overlap`                                              | `'skip'`    | Skip a run while the previous one is still running, or `'allow'` both                                                                               |
+| `maxAttempts`                                          | `3`         | How many times a run may be started when runners die (hand-overs on `stop()` don't count)                                                           |
+| `catchUpMs`                                            | `300000`    | On start, run the latest run if it was missed and due less than this ago. `0` turns it off                                                          |
+| `yieldAfterFailure`                                    | `false`     | After a run failed on this instance, wait until `slot + jitterMs + heartbeatMs` before claiming the next one, so a healthy instance claims it first |
+| `offsetMs`                                             | `0`         | `every()` only: shift the grid                                                                                                                      |
+| `timezone`                                             | scheduler's | `cron()` only                                                                                                                                       |
+| `data`                                                 | none        | Data for this job's runs, read as `ctx.data`. A value, or a function called when a run starts                                                       |
 
 `overlap`, `maxAttempts`, `catchUpMs` and `yieldAfterFailure`, like the scheduler's `leaseMs` and `heartbeatMs`, need a backend with leases (Redis or Valkey `lease`, PostgreSQL, SQLite). On another backend they aren't offered by the types, and a job or scheduler that sets them anyway is refused with an error. `at()` takes no `overlap`.
 
@@ -295,6 +340,7 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 ```
+
 - **`runNow(name, { data }?)`** runs a job immediately on this instance, without deduplication, and records it as a manual run. Manual runs are never retried. `data` is for that one run.
 - **`remove(name)`** stops scheduling a job on this instance.
 
@@ -303,8 +349,8 @@ process.on('SIGTERM', async () => {
 ```ts
 await scheduler.history('sync', 20); // newest first, from all instances, one record per attempt
 await scheduler.lastRun('sync');
-scheduler.nextRun('sync');           // Date, or null for a one-off job that already ran
-scheduler.jobs();                    // jobs on this instance + next run
+scheduler.nextRun('sync'); // Date, or null for a one-off job that already ran
+scheduler.jobs(); // jobs on this instance + next run
 ```
 
 Each attempt is a `RunRecord`:
@@ -331,27 +377,28 @@ Each attempt is a `RunRecord`:
 ### Events
 
 ```ts
-scheduler.on('start',       (e) => {});  // this instance is starting a run (attempt, reason)
-scheduler.on('success',     (r) => {});  // RunRecord
-scheduler.on('failure',     (r) => {});  // RunRecord + cause (what the job threw)
-scheduler.on('interrupted', (r) => {});  // stopped or taken over mid-run, not a failure (+ cause, handedOver)
-scheduler.on('skip',        (e) => {});  // reason: 'taken' | 'late' | 'overlap'
-scheduler.on('lost',        (e) => {});  // a backup took over a run this instance was running
-scheduler.on('error',       (e) => {});  // Redis problems; logged if nobody listens
+scheduler.on('start', (e) => {}); // this instance is starting a run (attempt, reason)
+scheduler.on('success', (r) => {}); // RunRecord
+scheduler.on('failure', (r) => {}); // RunRecord + cause (what the job threw)
+scheduler.on('interrupted', (r) => {}); // stopped or taken over mid-run, not a failure (+ cause, handedOver)
+scheduler.on('skip', (e) => {}); // reason: 'taken' | 'late' | 'overlap'
+scheduler.on('lost', (e) => {}); // a backup took over a run this instance was running
+scheduler.on('error', (e) => {}); // Redis problems; logged if nobody listens
 ```
 
 ## Strategies
 
 `lease` is the default and the only strategy with backups, no-overlap, retries and catch-up. The simple strategies only decide who runs each slot, and are kept for comparison and minimal setups:
 
-| Strategy | Claim | Why only one wins | Needs |
-|---|---|---|---|
-| `lease` (default) | Lua script on `{cron:<job>}:state` | The script runs atomically | Redis 5+ or Valkey |
-| `stream-id` | `XADD cron:<job>:runs <slot>-0 …` | A new stream ID must be bigger than the last one | Redis 5+ or Valkey |
-| `idmp` | `XADD … IDMP <job> <slot> * …` | Redis keeps the first entry with that idempotency key | Redis 8.6+ |
-| `script` | Lua: look for the slot in the stream, else `XADD` | The script runs atomically | Redis 5+ or Valkey |
+| Strategy          | Claim                                             | Why only one wins                                     | Needs              |
+| ----------------- | ------------------------------------------------- | ----------------------------------------------------- | ------------------ |
+| `lease` (default) | Lua script on `{cron:<job>}:state`                | The script runs atomically                            | Redis 5+ or Valkey |
+| `stream-id`       | `XADD cron:<job>:runs <slot>-0 …`                 | A new stream ID must be bigger than the last one      | Redis 5+ or Valkey |
+| `idmp`            | `XADD … IDMP <job> <slot> * …`                    | Redis keeps the first entry with that idempotency key | Redis 8.6+         |
+| `script`          | Lua: look for the slot in the stream, else `XADD` | The script runs atomically                            | Redis 5+ or Valkey |
 
 With `lease`, each job has these keys, all with one hash tag so Redis Cluster keeps them together:
+
 - `{cron:<job>}:state`: each run's attempt, token, status and lease
 - `{cron:<job>}:active`: unfinished runs
 - `{cron:<job>}:slots`: used for trimming
@@ -363,37 +410,59 @@ With `lease`, each job has these keys, all with one hash tag so Redis Cluster ke
 Redis, Valkey, PostgreSQL, SQLite and NATS with `strategy: 'lease'` get everything described above: leases, backups, no overlap, catch-up and hand-over on `stop()`. RabbitMQ, and NATS with its default `msg-id` strategy, only make sure one instance wins each run (like the simple `stream-id` claim): they can't hold a lease that a backup could check.
 
 ```ts
-import { NatsBackend, PostgresBackend, RabbitMQBackend, RedisBackend, Scheduler, SqliteBackend, ValkeyBackend } from 'anarchon';
+import {
+  NatsBackend,
+  PostgresBackend,
+  RabbitMQBackend,
+  RedisBackend,
+  Scheduler,
+  SqliteBackend,
+  ValkeyBackend,
+} from 'anarchon';
 
-new Scheduler({ backend: new RedisBackend({ redis: 'redis://localhost:6379' }) });
-new Scheduler({ backend: new ValkeyBackend({ valkey: 'redis://localhost:6390' }) });
-new Scheduler({ backend: new PostgresBackend({ connection: process.env.DATABASE_URL }) });
+new Scheduler({
+  backend: new RedisBackend({ redis: 'redis://localhost:6379' }),
+});
+new Scheduler({
+  backend: new ValkeyBackend({ valkey: 'redis://localhost:6390' }),
+});
+new Scheduler({
+  backend: new PostgresBackend({ connection: process.env.DATABASE_URL }),
+});
 new Scheduler({ backend: new SqliteBackend({ database: './anarchon.db' }) });
 new Scheduler({ backend: new RabbitMQBackend({ url: 'amqp://localhost' }) });
-new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222' }) });
-new Scheduler({ backend: new NatsBackend({ servers: 'nats://localhost:4222', strategy: 'lease' }) });
+new Scheduler({
+  backend: new NatsBackend({ servers: 'nats://localhost:4222' }),
+});
+new Scheduler({
+  backend: new NatsBackend({
+    servers: 'nats://localhost:4222',
+    strategy: 'lease',
+  }),
+});
 ```
 
-| Backend | How one instance wins | Leases, backups, catch-up | Needs |
-|---|---|---|---|
-| Redis / Valkey | One Lua script per claim (see Strategies) | Yes (`lease`, the default) | Redis 5+ or Valkey |
-| PostgreSQL | One short transaction per claim. Its first statement writes the job's row in `<table>_jobs`, so claims of one job take turns | Yes | PostgreSQL 9.5+; `pg` or your own `pg` Pool / Client or postgres.js |
-| SQLite | One `BEGIN IMMEDIATE` transaction per claim; SQLite has one writer at a time | Yes | SQLite 3.35+; node:sqlite, better-sqlite3 or `@libsql/client` |
-| RabbitMQ | A gate queue per run that holds one message (`x-max-length: 1`, `reject-publish`); publisher confirms say who was first | No | RabbitMQ 3.9+, `amqplib` |
-| NATS (`msg-id`, the default) | JetStream publish with `Nats-Msg-Id: <job>:<slot>`; repeats come back as duplicates | No | JetStream enabled, `@nats-io/transport-node` + `@nats-io/jetstream` |
-| NATS (`lease`) | A write to the job's key in the JetStream key-value bucket `<stream>_RUNS`, only at the revision that was read; a refused write is decided again | Yes | nats-server 2.10+ with JetStream; also `@nats-io/kv` |
+| Backend                      | How one instance wins                                                                                                                            | Leases, backups, catch-up  | Needs                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------- |
+| Redis / Valkey               | One Lua script per claim (see Strategies)                                                                                                        | Yes (`lease`, the default) | Redis 5+ or Valkey                                                  |
+| PostgreSQL                   | One short transaction per claim. Its first statement writes the job's row in `<table>_jobs`, so claims of one job take turns                     | Yes                        | PostgreSQL 9.5+; `pg` or your own `pg` Pool / Client or postgres.js |
+| SQLite                       | One `BEGIN IMMEDIATE` transaction per claim; SQLite has one writer at a time                                                                     | Yes                        | SQLite 3.35+; node:sqlite, better-sqlite3 or `@libsql/client`       |
+| RabbitMQ                     | A gate queue per run that holds one message (`x-max-length: 1`, `reject-publish`); publisher confirms say who was first                          | No                         | RabbitMQ 3.9+, `amqplib`                                            |
+| NATS (`msg-id`, the default) | JetStream publish with `Nats-Msg-Id: <job>:<slot>`; repeats come back as duplicates                                                              | No                         | JetStream enabled, `@nats-io/transport-node` + `@nats-io/jetstream` |
+| NATS (`lease`)               | A write to the job's key in the JetStream key-value bucket `<stream>_RUNS`, only at the revision that was read; a refused write is decided again | Yes                        | nats-server 2.10+ with JetStream; also `@nats-io/kv`                |
 
 `new RedisBackend(options)`:
 
-| Option | Default | Meaning |
-|---|---|---|
-| `redis` | `localhost:6379` | `{ host, port, password, db }`, a URL, or your own client: ioredis, iovalkey, node-redis, Valkey GLIDE, or any `{ send(command, args) }`. Clients you pass aren't closed on stop |
-| `strategy` | `'lease'` | `'lease'`, or one of the simple claims: `'stream-id'`, `'idmp'` (Redis 8.6+), `'script'`. Settings go inside it: `{ name: 'script', windowMs }`, `{ name: 'idmp', durationSec, maxSize }` |
-| `prefix` | `'cron:'` | Key prefix |
+| Option     | Default          | Meaning                                                                                                                                                                                   |
+| ---------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `redis`    | `localhost:6379` | `{ host, port, password, db }`, a URL, or your own client: ioredis, iovalkey, node-redis, Valkey GLIDE, or any `{ send(command, args) }`. Clients you pass aren't closed on stop          |
+| `strategy` | `'lease'`        | `'lease'`, or one of the simple claims: `'stream-id'`, `'idmp'` (Redis 8.6+), `'script'`. Settings go inside it: `{ name: 'script', windowMs }`, `{ name: 'idmp', durationSec, maxSize }` |
+| `prefix`   | `'cron:'`        | Key prefix                                                                                                                                                                                |
 
 `new ValkeyBackend(options)` takes the same options, with `valkey` in place of `redis`. Its `strategy` can't be `'idmp'`, which Valkey doesn't support: that is a type error, not an error from `start()`.
 
 Notes:
+
 - **Postgres and SQLite** create two tables on start: `anarchon_runs` (one row per run: attempt, token, status, lease end) and `anarchon_runs_attempts` (one row per attempt: the history). Postgres adds `anarchon_runs_jobs`, and both keep the store format in `anarchon_runs_meta`. Pick another name with `table` (Postgres may include a schema). Leases use the database's clock.
 - **SQLite** only coordinates processes that open the same file: one machine, or a volume with working file locks (not NFS). For several machines, use Postgres or a libSQL server (`@libsql/client` with a remote URL).
 - **RabbitMQ and NATS `msg-id`** remember a run for `slotTtlMs` / `duplicateWindowMs` (default 5 min), so `jitterMs + maxLateMs` must be shorter. NATS `lease` remembers a run while a late claim could still ask for it, like the other lease backends; its stream name may only use letters, digits, `_` and `-`, since it names the bucket.
@@ -473,15 +542,15 @@ COMPOSE_PROFILES=brokers pnpm test:servers # also RabbitMQ and NATS
 pnpm test:servers:down                     # remove them and their data
 ```
 
-| Server | Default URL | Variable |
-|---|---|---|
-| Redis 8.6+ | `redis://localhost:6381` | `REDIS_URL` |
-| Older Redis (optional) | `redis://localhost:6380` | `REDIS_OLD_URL` |
-| Valkey (optional) | `redis://localhost:6390` | `VALKEY_URL` |
-| PostgreSQL (optional) | `postgres://postgres:postgres@localhost:5433/anarchon_test` | `POSTGRES_URL` |
-| RabbitMQ (optional) | `amqp://localhost` | `RABBITMQ_URL` |
-| NATS with JetStream (optional) | `nats://localhost:4222` | `NATS_URL` |
-| libSQL server: sqld or Turso (optional) | `http://localhost:8081` | `LIBSQL_URL`, token in `LIBSQL_AUTH_TOKEN` |
+| Server                                  | Default URL                                                 | Variable                                   |
+| --------------------------------------- | ----------------------------------------------------------- | ------------------------------------------ |
+| Redis 8.6+                              | `redis://localhost:6381`                                    | `REDIS_URL`                                |
+| Older Redis (optional)                  | `redis://localhost:6380`                                    | `REDIS_OLD_URL`                            |
+| Valkey (optional)                       | `redis://localhost:6390`                                    | `VALKEY_URL`                               |
+| PostgreSQL (optional)                   | `postgres://postgres:postgres@localhost:5433/anarchon_test` | `POSTGRES_URL`                             |
+| RabbitMQ (optional)                     | `amqp://localhost`                                          | `RABBITMQ_URL`                             |
+| NATS with JetStream (optional)          | `nats://localhost:4222`                                     | `NATS_URL`                                 |
+| libSQL server: sqld or Turso (optional) | `http://localhost:8081`                                     | `LIBSQL_URL`, token in `LIBSQL_AUTH_TOKEN` |
 
 SQLite needs no server (node:sqlite on Node 22.13+; files go to the temp folder, or `SQLITE_DIR`).
 
@@ -501,6 +570,7 @@ pnpm scenarios         # the failure scenarios: simple claim vs lease on Redis, 
 ```
 
 This covers:
+
 - for every backend (each Redis strategy on Redis 8.6, Redis 7.0 and Valkey 9.1; Postgres; SQLite with each driver; RabbitMQ; NATS): a race where three clients fight over 40 runs, retry-safety, and history
 - a cluster test that starts 3 separate processes per backend and checks that every run happened exactly once, the work was spread, and history names the right instance
 - the lease state machine, step by step, plus hand-over on `stop()`, late claims and trimming, on every backend with leases
@@ -517,4 +587,3 @@ This software is **Dual-Licensed**.
 The project offers the **GNU AGPLv3** (see [`LICENSE`](LICENSE)) and a separate commercial license (see [`COMMERCIAL_LICENSE.txt`](COMMERCIAL_LICENSE.txt)). The AGPLv3 is a copyleft license; review its terms to determine how they apply to your use. The commercial license allows commercial integration without AGPL copyleft obligations and sets an annual fee based on the licensee's gross global revenue. Review the full terms and fee schedule in the linked files before adopting either option.
 
 For a concise comparison, see the [commercial license terms](COMMERCIAL_LICENSE.txt), including eligibility, annual revenue bands, and fees. The [licensing page](https://aristoteliss.github.io/anarchon-docs/reference/licensing/) answers the common questions: which revenue counts, how to register for the free tier, and who to contact.
-

@@ -1,6 +1,6 @@
 {
   "name": "anarchon",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Leaderless cron and interval scheduling for Node.js services, coordinated through your existing datastore. An atomic claim selects one runner per attempt; on Redis, Valkey, PostgreSQL and SQLite a lease lets another instance retry a run whose runner failed. RabbitMQ and NATS: claim only.",
   "keywords": [
     "cron",
@@ -106,7 +106,7 @@
     "prepublishOnly": "pnpm rebuild"
   },
   "dependencies": {
-    "croner": "^10.0.1"
+    "croner": "^11.0.0"
   },
   "peerDependencies": {
     "@nats-io/jetstream": ">=3",
@@ -141,27 +141,27 @@
     }
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
+    "@biomejs/biome": "^2.6.6",
     "@libsql/client": "^0.18.0",
     "@nats-io/jetstream": "^3.4.0",
     "@nats-io/kv": "^3.4.0",
     "@nats-io/transport-node": "^3.4.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
     "@valkey/valkey-glide": "^2.5.3",
-    "@vitest/coverage-v8": "^5.0.5",
-    "amqplib": "^2.2.0",
+    "@vitest/coverage-v8": "^5.1.0",
+    "amqplib": "^2.2.1",
     "better-sqlite3": "^13.0.3",
     "express": "^5.3.0",
     "ioredis": "^6.0.0",
     "iovalkey": "^0.4.0",
     "pg": "^8.23.1",
-    "postgres": "^3.4.9",
-    "redis": "^6.3.0",
+    "postgres": "^4.1.0",
+    "redis": "^6.3.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }

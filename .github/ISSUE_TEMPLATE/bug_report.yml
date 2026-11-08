@@ -64,7 +64,7 @@ body:
     id: actual
     attributes:
       label: Actual behavior
-      description: 'What happened instead. Logs with `log: true` help, and so does `scheduler.history(name)` for the run.'
+      description: "What happened instead. Logs with `log: true` help, and so does `scheduler.history(name)` for the run."
     validations:
       required: true
   - type: textarea
