@@ -17,11 +17,11 @@ It needs no server. The jobs are coordinated through a SQLite file in the temp f
 
 NestJS compiles with legacy decorators (`experimentalDecorators`). In that style a method decorator can't act when a provider is created, so a provider gets its jobs onto the scheduler in one of two ways. [src/jobs.ts](src/jobs.ts) has one provider for each case:
 
-| Provider | How its jobs are added |
-| --- | --- |
-| `ReportsService` | `@Scheduled()` on the class, under `@Injectable()` |
-| `AuditService` | `@Scheduled()` on the class, over `@Injectable()` |
-| `InvoicesService` | `this.scheduler.register(this)` in `onModuleInit` |
+| Provider           | How its jobs are added                                                         |
+| ------------------ | ------------------------------------------------------------------------------ |
+| `ReportsService`   | `@Scheduled()` on the class, under `@Injectable()`                             |
+| `AuditService`     | `@Scheduled()` on the class, over `@Injectable()`                              |
+| `InvoicesService`  | `this.scheduler.register(this)` in `onModuleInit`                              |
 | `ForgottenService` | Neither: the job is not added, and the scheduler warns about it when it starts |
 
 [src/app.module.ts](src/app.module.ts) creates the scheduler as a provider, starts it in `onApplicationBootstrap` and stops it in `onApplicationShutdown`.
@@ -46,11 +46,11 @@ pnpm --filter anarchon-example-nestjs locks:compare   # about a minute
 
 Instance A starts first, so `@nestjs/locks` makes it the owner of the job. A healthy instance B joins, and the next five runs are reported. anarchon runs twice: with its defaults, and with `yieldAfterFailure: true`.
 
-| Scenario | anarchon | `@nestjs/locks` (`@OnOneInstance()` and `@WithoutOverlapping()`) | anarchon, `yieldAfterFailure: true` |
-| --- | --- | --- | --- |
-| Control: A and B are healthy | 5 of 5 succeed | 5 of 5 succeed, all on A | 5 of 5 succeed |
-| A throws in every run | The runs B claims succeed (1 to 3 of 5 in our runs) | 0 of 5: every run fails on A, B skips every run | 5 of 5: after A's first failure, B claims every run |
-| A never ends a run | A's runs fail after a 1 s `timeoutMs`, and the runs B claims succeed (2 to 5 of 5 in our runs) | 0 of 5: no instance runs the job again | 5 of 5: after A's first timeout, B claims every run |
+| Scenario                     | anarchon                                                                                       | `@nestjs/locks` (`@OnOneInstance()` and `@WithoutOverlapping()`) | anarchon, `yieldAfterFailure: true`                 |
+| ---------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------- |
+| Control: A and B are healthy | 5 of 5 succeed                                                                                 | 5 of 5 succeed, all on A                                         | 5 of 5 succeed                                      |
+| A throws in every run        | The runs B claims succeed (1 to 3 of 5 in our runs)                                            | 0 of 5: every run fails on A, B skips every run                  | 5 of 5: after A's first failure, B claims every run |
+| A never ends a run           | A's runs fail after a 1 s `timeoutMs`, and the runs B claims succeed (2 to 5 of 5 in our runs) | 0 of 5: no instance runs the job again                           | 5 of 5: after A's first timeout, B claims every run |
 
 Why, in `@nestjs/locks` 0.0.4:
 

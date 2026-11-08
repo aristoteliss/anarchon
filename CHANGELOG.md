@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0
+
+Cron schedules move to croner 11, which changes when some timezone schedules run on the two nights
+a year the clocks change. Nothing else changes: the API and the stored data are the same as 0.6, so
+0.6 and 0.7 instances can share a store during a rolling deploy.
+
+### Changed
+
+- **croner 11.** Cron schedules in a timezone with daylight saving time run at different times on
+  the two nights the clocks change:
+  - When clocks go forward, a job set inside the skipped hour runs at the first valid time after
+    it: `30 2 * * *` runs at 3:00 instead of 3:30.
+  - When clocks go back, a job with more than one time per hour, such as `* * * * *`, keeps running
+    through the repeated hour instead of pausing.
+  - A once-a-day job still runs once.
+
+  This matches classic cron. UTC schedules and interval schedules are unchanged.
+
 ## 0.6.1
 
 ### Changed
@@ -132,7 +150,7 @@ stored layout is unchanged; 0.4 only adds a format marker (`<prefix>format`, `<t
   `backend` is required in `SchedulerOptions` and `ConfigureOptions`.
 - **A named scheduler created from default settings needs a `backend` function.** Settings with
   `redis` gave each named scheduler the key prefix `cron:<name>:`. Write it as
-  `` backend: (name) => new RedisBackend({ redis: url, prefix: `cron:${name}:` }) ``.
+  ``backend: (name) => new RedisBackend({ redis: url, prefix: `cron:${name}:` })``.
 - **`RedisStrategyName` is now `KeyValueStrategyName`.** Same values (`'lease' | 'stream-id' |
   'idmp' | 'script'`); `KeyValueStrategyName<'valkey'>` lists the ones Valkey supports, and
   `KeyValueStrategies` lists them by server.

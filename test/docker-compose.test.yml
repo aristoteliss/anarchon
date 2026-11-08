@@ -10,25 +10,25 @@ name: anarchon-test
 services:
   redis:
     image: redis:8.6-alpine
-    ports: ['127.0.0.1:6381:6379']
+    ports: ["127.0.0.1:6381:6379"]
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ["CMD", "redis-cli", "ping"]
       interval: 2s
       retries: 15
 
   redis-7:
     image: redis:7.0-alpine
-    ports: ['127.0.0.1:6380:6379']
+    ports: ["127.0.0.1:6380:6379"]
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ["CMD", "redis-cli", "ping"]
       interval: 2s
       retries: 15
 
   valkey:
     image: valkey/valkey:9.1-alpine
-    ports: ['127.0.0.1:6390:6379']
+    ports: ["127.0.0.1:6390:6379"]
     healthcheck:
-      test: ['CMD', 'valkey-cli', 'ping']
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 2s
       retries: 15
 
@@ -37,32 +37,32 @@ services:
     environment:
       POSTGRES_PASSWORD: postgres # a throwaway test database, never a real one
       POSTGRES_DB: anarchon_test
-    ports: ['127.0.0.1:5433:5432']
+    ports: ["127.0.0.1:5433:5432"]
     healthcheck:
-      test: ['CMD', 'pg_isready', '-U', 'postgres', '-d', 'anarchon_test']
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "anarchon_test"]
       interval: 2s
       retries: 15
 
   libsql:
     image: ghcr.io/tursodatabase/libsql-server:latest
-    ports: ['127.0.0.1:8081:8080']
+    ports: ["127.0.0.1:8081:8080"]
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     profiles: [brokers]
-    ports: ['127.0.0.1:5672:5672', '127.0.0.1:15672:15672']
+    ports: ["127.0.0.1:5672:5672", "127.0.0.1:15672:15672"]
     healthcheck:
       # ping answers before the AMQP listener accepts connections; this waits for the listener
-      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'check_port_connectivity']
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 5s
       retries: 20
 
   nats:
     image: nats:alpine
     profiles: [brokers]
-    command: ['-js', '-m', '8222']
-    ports: ['127.0.0.1:4222:4222', '127.0.0.1:8222:8222']
+    command: ["-js", "-m", "8222"]
+    ports: ["127.0.0.1:4222:4222", "127.0.0.1:8222:8222"]
     healthcheck:
-      test: ['CMD', 'wget', '-q', '-O', '-', 'http://localhost:8222/healthz']
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8222/healthz"]
       interval: 2s
       retries: 15

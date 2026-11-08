@@ -8,15 +8,15 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/pages-redirect/**'
-      - '.github/workflows/deploy-docs.yml'
+      - ".github/pages-redirect/**"
+      - ".github/workflows/deploy-docs.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: 'pages'
+  group: "pages"
   cancel-in-progress: false
 
 jobs:
