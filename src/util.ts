@@ -1,7 +1,6 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { coded } from './errors';
-import type { ClaimInput, RunStore } from './types';
 
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -130,75 +129,5 @@ function editDistance(a: string, b: string): number {
   return previous[b.length] ?? 0;
 }
 
-/** Refuses historyTtlMs on a backend that trims history by count only. */
-export function refuseHistoryTtl(
-  backend: string,
-  job: { name: string; historyTtlMs?: number | undefined },
-): void {
-  if (job.historyTtlMs !== undefined) {
-    throw coded(
-      new TypeError(
-        `Job "${job.name}": historyTtlMs is not supported by ${backend}, which keeps history by count (historySize) only`,
-      ),
-      'ANARCHON_UNSUPPORTED',
-    );
-  }
-}
-
-/** Job names used in queue names and NATS subjects must stay simple. */
-export function assertSimpleName(backend: string, name: string): void {
-  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
-    throw coded(
-      new TypeError(
-        `Job "${name}": with ${backend}, job names may only contain letters, digits, "_" and "-"`,
-      ),
-      'ANARCHON_UNSUPPORTED',
-    );
-  }
-}
-
 export const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-/** Parses a server version like "3.12.1" or "redis_version:8.6.3" into [major, minor]. */
-export function versionAtLeast(
-  version: string,
-  major: number,
-  minor: number,
-): boolean {
-  for (const token of version.split(/[^0-9.]+/)) {
-    const [first, second] = token.split('.');
-    if (first && second) {
-      const [maj, min] = [Number(first), Number(second)];
-      return maj > major || (maj === major && min >= minor);
-    }
-  }
-  return false;
-}
-
-/**
- * Claims a runNow() run on a lease store, at the first free millisecond from its slot, and returns
- * that slot. The run is never retried and may overlap other runs of its job.
- */
-export async function claimManualSlot(
-  runs: RunStore,
-  input: ClaimInput,
-): Promise<number> {
-  for (let slot = input.slot; slot < input.slot + 10; slot++) {
-    const outcome = await runs.claim({
-      ...input,
-      slot,
-      mode: 'new',
-      reason: 'manual',
-      leaseMs: 86_400_000,
-      overlap: 'allow',
-      maxAttempts: 1,
-    });
-    if (outcome.kind === 'won') return slot;
-  }
-
-  throw coded(
-    new Error(`Could not record a manual run of "${input.job}"`),
-    'ANARCHON_STORE',
-  );
-}

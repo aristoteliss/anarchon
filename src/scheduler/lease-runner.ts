@@ -1,8 +1,8 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
-import { randomInt, randomUUID } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { coded } from '../errors';
+import { claimManualSlot } from '../backends/shared';
 
 import type {
   ClaimInput,
@@ -21,6 +21,7 @@ import {
   type Job,
   randomJitter,
   runKey,
+  skipEvent,
 } from './job';
 
 /**
@@ -96,11 +97,7 @@ export class LeaseRunner {
     if (!outcome) return;
 
     if (signal.aborted) {
-      if (
-        outcome.kind === 'won' &&
-        !core.isIdle() &&
-        signal === core.stopSignal()
-      ) {
+      if (outcome.kind === 'won' && core.canWrite(signal)) {
         await this.runs.release(job.name, slot, input.token).catch(() => {});
       }
       return;
@@ -154,6 +151,7 @@ export class LeaseRunner {
 
     try {
       await core.ensureReady();
+      await core.prepare(job);
       if (signal.aborted) return undefined;
 
       return await this.runs.claim({
@@ -185,8 +183,10 @@ export class LeaseRunner {
   ): void {
     // background checks don't report skips
     const quiet = reason === 'takeover' || reason === 'catch-up';
+    const { core } = this;
     const skip = (why: SkipEvent['reason'], lateMs?: number) => {
-      if (!quiet) this.emitSkip(job, slot, why, lateMs);
+      if (quiet) return;
+      core.emit('skip', skipEvent(core.instanceId, job, slot, why, lateMs));
     };
 
     switch (outcome.kind) {
@@ -213,82 +213,39 @@ export class LeaseRunner {
     }
   }
 
-  /** Emits 'skip' for a run this instance does not execute. */
-  private emitSkip(
-    job: Job,
-    slot: number,
-    why: SkipEvent['reason'],
-    lateMs?: number,
-  ): void {
-    const event: SkipEvent = {
-      job: job.name,
-      slot,
-      scheduledAt: new Date(slot),
-      instanceId: this.core.instanceId,
-      reason: why,
-    };
-    if (lateMs !== undefined) event.lateMs = lateMs;
-
-    this.core.emit('skip', event);
-  }
-
   /** runNow(): a run of its own, never retried by a backup and allowed to overlap. */
   async runManual(
     job: Job,
     data?: unknown,
     signal = this.core.stopSignal(),
   ): Promise<RunRecord> {
-    const token = randomUUID();
-
-    for (let slot = Date.now(), tries = 0; tries < 10; slot++, tries++) {
-      if (signal.aborted) {
-        return this.executor.execute(
-          job,
-          slot,
-          { ...this.executor.newRun(1, 'manual', signal), data },
-          false,
-        );
-      }
-
-      const claimedAt = Date.now();
-      const outcome = await this.claimManual(job, slot, token);
-      if (outcome.kind === 'won') {
-        return this.executeLeased({
-          job,
-          slot,
-          token,
-          claimedAt,
-          attempt: 1,
-          reason: 'manual',
-          data,
-          signal,
-        });
-      }
+    const { core } = this;
+    const input = claimInput(core.instanceId, job, Date.now());
+    if (signal.aborted) {
+      return this.executor.execute(
+        job,
+        input.slot,
+        { ...this.executor.newRun(1, 'manual', signal), data },
+        false,
+      );
     }
 
-    throw coded(
-      new Error(`Could not start a manual run of "${job.name}"`),
-      'ANARCHON_STORE',
-    );
-  }
-
-  /** Claims one slot for runNow(): a new run with its own token, allowed to overlap, never retried. */
-  private claimManual(
-    job: Job,
-    slot: number,
-    token: string,
-  ): Promise<ClaimOutcome> {
-    const input = claimInput(this.core.instanceId, job, slot);
-
-    return this.runs.claim({
-      ...input,
-      token,
-      mode: 'new',
-      reason: 'manual',
-      leaseMs: this.core.leaseMs,
-      overlap: 'allow',
-      maxAttempts: 1,
+    // Before the claim is sent: the lease lasts until leaseMs after this, at the earliest.
+    const claimedAt = Date.now();
+    const slot = await claimManualSlot(this.runs, input, {
+      leaseMs: core.leaseMs,
       keepMs: job.keepMs,
+    });
+
+    return this.executeLeased({
+      job,
+      slot,
+      token: input.token,
+      claimedAt,
+      attempt: 1,
+      reason: 'manual',
+      data,
+      signal,
     });
   }
 
@@ -444,7 +401,7 @@ class HeldLease {
 
     for (
       let delay = 200;
-      !this.lost && !core.isIdle() && signal === core.stopSignal();
+      !this.lost && core.canWrite(signal);
       delay = Math.min(delay * 2, core.heartbeatMs)
     ) {
       try {

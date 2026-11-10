@@ -13,6 +13,19 @@ import type {
   RunStore,
   StoredResult,
 } from '../../types';
+import {
+  type ClaimDecision,
+  decideClaim,
+  type LeaseState,
+  pendingStatus,
+  refuseLate,
+} from '../lease-rules';
+import {
+  claimManualSlot,
+  claimWithoutLeases,
+  closeIfOwned,
+  Lazy,
+} from '../shared';
 
 /** A statement parameter: the SQL backends only bind strings, numbers and null. */
 export type SqlValue = string | number | null;
@@ -114,16 +127,6 @@ export class Mutex {
   }
 }
 
-/** The JSON-free state row of a run. */
-interface RunRow {
-  attempt: number;
-  maxAttempts: number;
-  released: number;
-  token: string;
-  status: string;
-  leaseUntil: number;
-}
-
 /**
  * Postgres and SQLite, with the same lease rules as the Redis 'lease' strategy (see LeaseStore):
  * a claim is one transaction that reads and writes the run's row, so exactly one instance wins each
@@ -171,7 +174,9 @@ export abstract class SqlBackend implements Backend, RunStore {
   private connection:
     | Promise<{ client: SqlClient; owned: boolean }>
     | undefined;
-  private ready: Promise<SqlClient> | undefined;
+  private readonly ready = new Lazy(() =>
+    this.prepare().catch((error: unknown) => this.forgetFailedStart(error)),
+  );
 
   protected constructor(table: string) {
     if (!isIdentifier(table)) {
@@ -202,20 +207,9 @@ export abstract class SqlBackend implements Backend, RunStore {
   async claim(input: ClaimInput): Promise<boolean>;
   async claim(input: RunClaim): Promise<ClaimOutcome>;
   async claim(input: ClaimInput | RunClaim): Promise<boolean | ClaimOutcome> {
-    if (!('mode' in input)) {
-      // Plain Backend.claim (without the scheduler's lease handling): a long lease, no backups.
-      const outcome = await this.claimRun({
-        ...input,
-        mode: 'new',
-        reason: 'scheduled',
-        leaseMs: 86_400_000,
-        overlap: 'allow',
-        maxAttempts: 1,
-      });
-      return outcome.kind === 'won';
-    }
-
-    return this.claimRun(input);
+    return 'mode' in input
+      ? this.claimRun(input)
+      : claimWithoutLeases(this, input);
   }
 
   /** One UPDATE: sets lease_until to now + leaseMs where the token matches, the run is still running and its lease was not released. */
@@ -294,23 +288,7 @@ export abstract class SqlBackend implements Backend, RunStore {
 
   /** Claims a run of its own for runNow(), at the first free millisecond from input.slot. Returns the slot it used. */
   async recordManualRun(input: ClaimInput): Promise<number> {
-    for (let slot = input.slot; slot < input.slot + 10; slot++) {
-      const outcome = await this.claimRun({
-        ...input,
-        slot,
-        mode: 'new',
-        reason: 'manual',
-        leaseMs: 86_400_000,
-        overlap: 'allow',
-        maxAttempts: 1,
-      });
-      if (outcome.kind === 'won') return slot;
-    }
-
-    throw coded(
-      new Error(`Could not record a manual run of "${input.job}"`),
-      'ANARCHON_STORE',
-    );
+    return claimManualSlot(this, input);
   }
 
   /** Writes how the attempt ended on its row in <table>_attempts. */
@@ -374,7 +352,14 @@ export abstract class SqlBackend implements Backend, RunStore {
       claims.push(claim);
       const result = toStoredResult(row, claim);
       if (result) results.push(result);
-      else pending.set(`${claim.slot}|${claim.attempt}`, pendingStatusOf(row));
+      else {
+        const status = pendingStatus(
+          currentRun(row),
+          claim.attempt,
+          Number(row.now),
+        );
+        pending.set(`${claim.slot}|${claim.attempt}`, status);
+      }
     }
 
     return buildHistory({
@@ -391,15 +376,8 @@ export abstract class SqlBackend implements Backend, RunStore {
   async close(): Promise<void> {
     const connection = this.connection;
     this.connection = undefined;
-    this.ready = undefined;
-    if (!connection) return;
-
-    try {
-      const { client, owned } = await connection;
-      if (owned) await client.close?.();
-    } catch {
-      // never connected
-    }
+    this.ready.reset();
+    await closeIfOwned(connection);
   }
 
   /**
@@ -441,7 +419,7 @@ export abstract class SqlBackend implements Backend, RunStore {
   private async readRun(
     tx: SqlQuery,
     { job, slot }: RunClaim,
-  ): Promise<RunRow | undefined> {
+  ): Promise<LeaseState | undefined> {
     const [row] = await tx.all(
       `SELECT attempt, max_attempts, released, token, status, lease_until
        FROM ${this.table}
@@ -520,13 +498,8 @@ export abstract class SqlBackend implements Backend, RunStore {
     input: RunClaim,
     now: number,
   ): Promise<ClaimOutcome | undefined> {
-    // Too late (delayed or queued claim): don't start a stale run.
-    const late = now - input.slot;
-    if (input.maxLateMs && late > input.maxLateMs) {
-      return { kind: 'late', lateMs: late };
-    }
-
-    const refused = await this.settleOtherRuns(tx, input, now);
+    const refused =
+      refuseLate(input, now) ?? (await this.settleOtherRuns(tx, input, now));
     if (refused) return refused;
 
     await this.insertRun(tx, input, now);
@@ -683,10 +656,7 @@ export abstract class SqlBackend implements Backend, RunStore {
   }
 
   private getReady(): Promise<SqlClient> {
-    this.ready ??= this.prepare().catch((error: unknown) =>
-      this.forgetFailedStart(error),
-    );
-    return this.ready;
+    return this.ready.get();
   }
 
   /** Connects, checks the server, creates the tables and checks their store format. */
@@ -716,10 +686,8 @@ export abstract class SqlBackend implements Backend, RunStore {
   /** Lets the next call start again, closes a connection this backend opened, and rethrows. */
   private async forgetFailedStart(error: unknown): Promise<never> {
     const connection = this.connection;
-    this.ready = undefined;
     this.connection = undefined;
-    const opened = await connection?.catch(() => undefined);
-    if (opened?.owned) await opened.client.close?.().catch(() => {});
+    await closeIfOwned(connection);
     throw error;
   }
 
@@ -778,47 +746,6 @@ export abstract class SqlBackend implements Backend, RunStore {
   }
 }
 
-/** What a claim does with the run's row, decided on the database's clock. */
-type ClaimDecision =
-  /** Answer without writing. */
-  | { kind: 'answer'; outcome: ClaimOutcome }
-  /** The run has used up its attempts: end it. */
-  | { kind: 'give-up' }
-  /** The runner stopped renewing its lease: it died, froze, or handed the run over. */
-  | { kind: 'take-over'; attempt: number }
-  /** Nobody has claimed this run: start it. */
-  | { kind: 'start' };
-
-/** The lease state machine, the same as the Redis CLAIM script, and in its order. */
-function decideClaim(
-  run: RunRow | undefined,
-  input: RunClaim,
-  now: number,
-): ClaimDecision {
-  if (!run) {
-    return input.mode === 'takeover'
-      ? { kind: 'answer', outcome: { kind: 'none' } }
-      : { kind: 'start' };
-  }
-
-  // Our own claim, sent again.
-  if (run.token === input.token && run.status === 'running') {
-    return { kind: 'answer', outcome: { kind: 'won', attempt: run.attempt } };
-  }
-  if (run.status !== 'running') {
-    return { kind: 'answer', outcome: { kind: 'done' } };
-  }
-  if (run.leaseUntil >= now) {
-    return {
-      kind: 'answer',
-      outcome: { kind: 'running', attempt: run.attempt },
-    };
-  }
-
-  if (run.attempt - run.released >= run.maxAttempts) return { kind: 'give-up' };
-  return { kind: 'take-over', attempt: run.attempt + 1 };
-}
-
 /** The claim of one row of <table>_attempts. */
 function toClaimRecord(row: SqlRow): ClaimRecord {
   return {
@@ -852,27 +779,21 @@ function toStoredResult(
   return result;
 }
 
-/**
- * The status of an attempt without a result: still running, or its runner stopped before finishing.
- * Decided on the database's clock (`row.now`).
- */
-function pendingStatusOf(row: SqlRow): RunStatus {
-  const current = Number(row.current_attempt) === Number(row.attempt);
-  if (!current) return 'interrupted';
-
-  if (
-    row.current_status === 'running' &&
-    Number(row.lease_until) >= Number(row.now)
-  ) {
-    return 'running';
+/** The run an attempt's row was joined with, as it stands now; undefined when the run is gone. */
+function currentRun(
+  row: SqlRow,
+): Pick<LeaseState, 'attempt' | 'status' | 'leaseUntil'> | undefined {
+  if (row.current_attempt === null || row.current_attempt === undefined) {
+    return undefined;
   }
-  if (row.current_status === 'success' || row.current_status === 'failed') {
-    return row.current_status;
-  }
-  return 'interrupted';
+  return {
+    attempt: Number(row.current_attempt),
+    status: String(row.current_status),
+    leaseUntil: Number(row.lease_until),
+  };
 }
 
-function toRunRow(row: SqlRow): RunRow {
+function toRunRow(row: SqlRow): LeaseState {
   return {
     attempt: Number(row.attempt),
     maxAttempts: Number(row.max_attempts),

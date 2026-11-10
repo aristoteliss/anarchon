@@ -30,6 +30,7 @@ import {
   onceSchedule,
   parseDuration,
   type Schedule,
+  toTime,
 } from '../schedule';
 import type {
   AtJobOptions,
@@ -52,7 +53,7 @@ import { ClaimOnlyRunner } from './claim-only-runner';
 import type { SchedulerCore } from './core';
 import { layerData } from './data';
 import { Executor } from './executor';
-import { createJob, type Job, type JobDefaults } from './job';
+import { createJob, type Job, type JobDefaults, skipEvent } from './job';
 import { LeaseRunner } from './lease-runner';
 import { logRuns } from './logging';
 import { readOptions } from './options';
@@ -211,7 +212,8 @@ export class Scheduler<B extends Backend = Backend> {
       heartbeatMs: settings.heartbeatMs,
       unrefTimers: settings.unrefTimers,
       isRunning: () => this.state === 'running',
-      isIdle: () => this.state === 'idle',
+      canWrite: (signal) =>
+        this.state !== 'idle' && signal === this.abort.signal,
       schedulerData: () => this.dataSource,
       stopSignal: () => this.abort.signal,
       ensureReady: () => this.ensureReady(),
@@ -522,12 +524,7 @@ export class Scheduler<B extends Backend = Backend> {
     }
     refuseUnknown(`Job "${name}"`, options, AT_JOB_OPTIONS);
 
-    const time =
-      when instanceof Date
-        ? when.getTime()
-        : typeof when === 'number'
-          ? when
-          : Date.parse(when);
+    const time = toTime(when);
     if (!Number.isFinite(time)) {
       throw coded(
         new RangeError(`Job "${name}": invalid date ${String(when)}`),
@@ -999,14 +996,7 @@ export class Scheduler<B extends Backend = Backend> {
 
     const lateMs = Date.now() - slot;
     if (lateMs > job.maxLateMs) {
-      this.emit('skip', {
-        job: job.name,
-        slot,
-        scheduledAt: new Date(slot),
-        instanceId: this.instanceId,
-        reason: 'late',
-        lateMs,
-      });
+      this.emit('skip', skipEvent(this.instanceId, job, slot, 'late', lateMs));
       return;
     }
     return this.leases

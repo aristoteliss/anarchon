@@ -7,6 +7,14 @@ import { coded } from '../../errors';
 import { type ClaimRecord, claimPayload, parseJson } from '../../history';
 import { checkStoreFormat, STORE_FORMAT } from '../../store-format';
 import type { ClaimOutcome, RunClaim, RunStatus, RunStore } from '../../types';
+import {
+  decideClaim as decide,
+  leaseStateOf,
+  pendingStatus,
+  refuseLate,
+  type StoredRun,
+} from '../lease-rules';
+import { Lazy } from '../shared';
 
 /**
  * The 'lease' strategy of {@link NatsBackend}: the same lease rules as the Redis 'lease' strategy,
@@ -38,24 +46,6 @@ const WRITE_TRIES = 20;
 const WRONG_REVISION = new Set([10_071, 10_164]);
 /** The key that records the store format. Job names have no dots, so it can't be a job's key. */
 const FORMAT_KEY = 'meta.format';
-
-/** One run's state, with the fields of the Redis 'lease' strategy. */
-interface StoredRun {
-  /** Current attempt. */
-  a: number;
-  /** The attempt limit the run started with. */
-  m?: number;
-  /** Hand-overs on stop(): they don't count against the limit. */
-  r?: number;
-  /** The current attempt's token. */
-  t: string;
-  /** Status. */
-  s: 'running' | 'success' | 'failed' | 'interrupted';
-  /** The instance running the current attempt. */
-  i: string;
-  /** Lease end on the server's clock (ms); 0 once released or finished. */
-  l: number;
-}
 
 /** A job's runs by slot. */
 type JobRuns = Record<string, StoredRun>;
@@ -91,7 +81,7 @@ type ClaimStep =
  * ```
  */
 export class NatsLeaseStore implements RunStore {
-  private kv: Promise<KV> | undefined;
+  private readonly kv = new Lazy(() => this.openBucket());
 
   /**
    * @param state The backend's connection, opened on first use.
@@ -202,13 +192,15 @@ export class NatsLeaseStore implements RunStore {
     job: string,
   ): Promise<(claim: ClaimRecord & { attempt: number }) => RunStatus> {
     const { stored, now } = await this.load(job);
-    return (claim) =>
-      pendingStatusOf(stored.runs[claim.slot], claim.attempt, now);
+    return (claim) => {
+      const run = stored.runs[claim.slot];
+      return pendingStatus(run && leaseStateOf(run), claim.attempt, now);
+    };
   }
 
   /** Forgets the bucket handle: the backend closed the connection it belongs to. */
   close(): void {
-    this.kv = undefined;
+    this.kv.reset();
   }
 
   /** Rewrites one run with what `next` returns; false when the run is gone or `next` refuses. */
@@ -299,11 +291,7 @@ export class NatsLeaseStore implements RunStore {
   }
 
   private open(): Promise<KV> {
-    this.kv ??= this.openBucket().catch((error: unknown) => {
-      this.kv = undefined;
-      throw error;
-    });
-    return this.kv;
+    return this.kv.get();
   }
 
   /** Opens the bucket, creating it on first use. */
@@ -319,33 +307,37 @@ export class NatsLeaseStore implements RunStore {
   }
 }
 
-/** The lease state machine, the same as the Redis CLAIM script, and in its order. */
+/** Applies the lease rules (lease-rules.ts) to the job's runs: what to answer, and what to write. */
 function decideClaim(runs: JobRuns, input: RunClaim, now: number): ClaimStep {
-  const run = runs[input.slot];
-  if (!run) {
-    return input.mode === 'takeover'
-      ? answer({ kind: 'none' })
-      : startRun(runs, input, now);
+  const { slot, token, instanceId, leaseMs } = input;
+  const run = runs[slot];
+  const decision = decide(run && leaseStateOf(run), input, now);
+  if (decision.kind === 'answer') return answer(decision.outcome);
+  if (decision.kind === 'start' || !run) return startRun(runs, input, now);
+
+  if (decision.kind === 'give-up') {
+    const ended: StoredRun = { ...run, s: 'interrupted' };
+    return write({ ...runs, [slot]: ended }, { kind: 'done' });
   }
 
-  // Our own claim, sent again.
-  if (run.t === input.token && run.s === 'running') {
-    return answer({ kind: 'won', attempt: run.a });
-  }
-  if (run.s !== 'running') return answer({ kind: 'done' });
-  if (run.l >= now) return answer({ kind: 'running', attempt: run.a });
-
-  return takeOver(runs, run, input, now);
+  const { attempt, maxAttempts } = decision;
+  const next: StoredRun = {
+    ...run,
+    a: attempt,
+    m: maxAttempts,
+    t: token,
+    i: instanceId,
+    l: now + leaseMs,
+  };
+  return write({ ...runs, [slot]: next }, { kind: 'won', attempt });
 }
 
 /** A run nobody claimed yet: refused when too late or overlapping a live run, else attempt 1. */
 function startRun(runs: JobRuns, input: RunClaim, now: number): ClaimStep {
-  const { slot, maxLateMs, overlap, keepMs } = input;
+  const { slot, overlap, keepMs } = input;
 
-  // A claim that arrives too late (delayed, or queued while the server was unreachable) must not
-  // start a stale run, or one so old that it may have been trimmed already.
-  const lateMs = now - slot;
-  if (maxLateMs && lateMs > maxLateMs) return answer({ kind: 'late', lateMs });
+  const late = refuseLate(input, now);
+  if (late) return answer(late);
 
   const live = liveSlot(runs, now);
   if (overlap === 'skip' && live !== undefined) {
@@ -357,34 +349,6 @@ function startRun(runs: JobRuns, input: RunClaim, now: number): ClaimStep {
     [slot]: newRun(input, now),
   };
   return write(trim(started, now, keepMs ?? 0), { kind: 'won', attempt: 1 });
-}
-
-/** The runner stopped renewing its lease before finishing: it died, froze, or handed the run over. */
-function takeOver(
-  runs: JobRuns,
-  run: StoredRun,
-  input: RunClaim,
-  now: number,
-): ClaimStep {
-  const { slot, token, instanceId, leaseMs } = input;
-
-  // A run keeps the attempt limit it started with (manual runs: 1); hand-overs don't count.
-  const limit = run.m ?? input.maxAttempts;
-  if (run.a - (run.r ?? 0) >= limit) {
-    const ended: StoredRun = { ...run, s: 'interrupted' };
-    return write({ ...runs, [slot]: ended }, { kind: 'done' });
-  }
-
-  const attempt = run.a + 1;
-  const next: StoredRun = {
-    ...run,
-    a: attempt,
-    m: limit,
-    t: token,
-    i: instanceId,
-    l: now + leaseMs,
-  };
-  return write({ ...runs, [slot]: next }, { kind: 'won', attempt });
 }
 
 /** The first attempt of a run, with a lease from now. */
@@ -428,17 +392,6 @@ function trim(runs: JobRuns, now: number, keepMs: number): JobRuns {
     ([slot, run]) => run.s === 'running' || now - Number(slot) <= keepMs,
   );
   return Object.fromEntries(kept);
-}
-
-/** An attempt without a result is 'running' only while it is the current attempt with a live lease. */
-function pendingStatusOf(
-  run: StoredRun | undefined,
-  attempt: number,
-  now: number,
-): RunStatus {
-  if (!run || run.a !== attempt) return 'interrupted';
-  if (run.s === 'running') return run.l >= now ? 'running' : 'interrupted';
-  return run.s;
 }
 
 function answer(outcome: ClaimOutcome): ClaimStep {

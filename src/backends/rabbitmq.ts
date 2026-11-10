@@ -24,13 +24,13 @@ import type {
   RunRecord,
   StoredResult,
 } from '../types';
+import { positiveInt, refuseUnknown } from '../util';
 import {
   assertSimpleName,
-  positiveInt,
+  Lazy,
   refuseHistoryTtl,
-  refuseUnknown,
   versionAtLeast,
-} from '../util';
+} from './shared';
 
 /**
  * The parts of an amqplib connection this backend uses: what `amqplib.connect()` returns fits.
@@ -157,8 +157,12 @@ export class RabbitMQBackend implements Backend {
   private readonly url: string;
   private readonly prefix: string;
   private readonly userConnection: RabbitMQConnectionLike | undefined;
-  private connection: Promise<ChannelModel> | undefined;
-  private confirm: Promise<ConfirmChannel> | undefined;
+  private readonly connection = new Lazy<ChannelModel>((forget) =>
+    this.connect(forget),
+  );
+  private readonly confirm = new Lazy<ConfirmChannel>((forget) =>
+    this.openConfirmChannel(forget),
+  );
   /** Gate queue -> token of the claims this instance won recently. */
   private readonly won = new Map<string, string>();
 
@@ -292,10 +296,8 @@ export class RabbitMQBackend implements Backend {
 
   /** Closes the connection if this backend opened it. One that was passed in stays open. */
   async close(): Promise<void> {
-    const confirm = this.confirm;
-    const connection = this.connection;
-    this.confirm = undefined;
-    this.connection = undefined;
+    const confirm = this.confirm.reset();
+    const connection = this.connection.reset();
     await confirm?.then((c) => c.close()).catch(() => {});
     if (!this.userConnection) {
       await connection?.then((c) => c.close()).catch(() => {});
@@ -303,52 +305,38 @@ export class RabbitMQBackend implements Backend {
   }
 
   private getConnection(): Promise<ChannelModel> {
-    if (this.connection) return this.connection;
+    return this.connection.get();
+  }
 
-    const pending: Promise<ChannelModel> = (async () => {
-      if (this.userConnection) {
-        return this.userConnection as unknown as ChannelModel;
-      }
+  /** Opens the connection, unless one was given. When it closes, the next call opens a new one. */
+  private async connect(forget: () => boolean): Promise<ChannelModel> {
+    if (this.userConnection) {
+      return this.userConnection as unknown as ChannelModel;
+    }
 
-      const connect = await loadConnect();
-      const connection: ChannelModel = await connect(this.url);
-      connection.on('error', () => {}); // also reported through 'close'
-      connection.on('close', () => {
-        if (this.connection === pending) {
-          this.connection = undefined;
-          this.confirm = undefined;
-        }
-      });
-      return connection;
-    })().catch((error: unknown) => {
-      if (this.connection === pending) this.connection = undefined;
-      throw error;
+    const connect = await loadConnect();
+    const connection: ChannelModel = await connect(this.url);
+    connection.on('error', () => {}); // also reported through 'close'
+    connection.on('close', () => {
+      if (forget()) this.confirm.reset();
     });
-
-    this.connection = pending;
-    return pending;
+    return connection;
   }
 
   private getConfirmChannel(): Promise<ConfirmChannel> {
-    if (this.confirm) return this.confirm;
+    return this.confirm.get();
+  }
 
-    const pending: Promise<ConfirmChannel> = (async () => {
-      const connection = await this.getConnection();
-      const channel =
-        (await connection.createConfirmChannel()) as ConfirmChannel;
+  /** Opens the channel that claims and history records are published on. When it closes, the next call opens a new one. */
+  private async openConfirmChannel(
+    forget: () => boolean,
+  ): Promise<ConfirmChannel> {
+    const connection = await this.getConnection();
+    const channel = (await connection.createConfirmChannel()) as ConfirmChannel;
 
-      channel.on('error', () => {}); // also reported through 'close'
-      channel.on('close', () => {
-        if (this.confirm === pending) this.confirm = undefined;
-      });
-      return channel;
-    })().catch((error: unknown) => {
-      if (this.confirm === pending) this.confirm = undefined;
-      throw error;
-    });
-
-    this.confirm = pending;
-    return pending;
+    channel.on('error', () => {}); // also reported through 'close'
+    channel.on('close', forget);
+    return channel;
   }
 
   /** Declares a queue on a channel of its own: a refused declaration closes the channel it was sent on. */

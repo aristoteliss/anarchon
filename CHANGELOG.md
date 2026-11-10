@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.0
+
+The inside of the scheduler and of the backends is simpler to read and to change: the lease rules
+are in one place, and every backend opens its connection the same way. One bug is fixed. No
+breaking change: the public API, the backend contract and the stored data are the same as 0.6.2,
+so 0.6.2 and 0.7.0 instances can share a store during a rolling deploy.
+
+### Fixed
+
+- **A job added after `start()` on a lease backend is now prepared.** The scheduler called the
+  backend's `prepareJob()` for such a job only on a backend without leases. With NATS `'lease'`,
+  the stream could keep fewer runs than the job's `historySize`. Redis, Valkey, PostgreSQL and
+  SQLite prepare nothing per job with leases, so they were not affected.
+
+### Changed
+
+- **`runNow()` on a lease backend** checks for `stop()` once, before it claims its run. Before, it
+  checked before each of its at most 10 tries for a free millisecond.
+- **The error message of a manual run that finds no free millisecond** is "Could not start a manual
+  run of ..." on every backend. The code, `ANARCHON_STORE`, is the same.
+- **Internal structure.** No change to what the backends store or answer:
+  - The lease rules that PostgreSQL, SQLite and NATS `'lease'` follow are one module
+    (`src/backends/lease-rules.ts`). The Redis Lua script keeps its own copy, in the same order.
+  - `RedisBackend` hands every call to one store: the lease store, or the streams of a claim-only
+    strategy. Each strategy holds its own settings and checks.
+  - The backends share their connection handling, the checks of job names and server versions,
+    and the claim of a manual run (`src/backends/shared.ts`).
+  - The scheduler's runners share one way to build a `skip` event and to decide whether a run may
+    still write to the store.
+
 ## 0.6.2
 
 Cron schedules move to croner 11, which changes when some timezone schedules run on the two nights

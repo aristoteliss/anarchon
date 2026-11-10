@@ -159,6 +159,14 @@ export function everySchedule(intervalMs: number, offsetMs = 0): Schedule {
   };
 }
 
+/** The time a `when` of at() or @At stands for, in ms since epoch; NaN when it stands for none. */
+export function toTime(when: unknown): number {
+  if (when instanceof Date) return when.getTime();
+  if (typeof when === 'number') return when;
+  if (typeof when === 'string') return Date.parse(when);
+  return Number.NaN;
+}
+
 /** Runs once, at `at` (ms since epoch). */
 export function onceSchedule(at: number): Schedule {
   if (!Number.isFinite(at)) {
