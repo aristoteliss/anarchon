@@ -458,3 +458,51 @@ test('a scheduled claim won while stop() waits records the run as interrupted wi
   assert.equal(handlerCalls, 0);
   assert.deepEqual(saved, ['interrupted']);
 });
+
+test('a job added after start() is prepared before its first claim, with and without leases', async () => {
+  for (const leases of [true, false]) {
+    const calls: string[] = [];
+    let claimed = () => {};
+    const firstClaim = new Promise<void>((resolve) => {
+      claimed = resolve;
+    });
+    const claim = (job: string) => {
+      calls.push(`claim:${job}`);
+      if (job === 'late-added') claimed();
+    };
+    const runs: RunStore = {
+      claim: async ({ job }) => {
+        claim(job);
+        return { kind: 'done' };
+      },
+      heartbeat: async () => true,
+      finish: async () => true,
+      release: async () => true,
+      active: async () => [],
+    };
+    const backend: Backend = {
+      ...memoryBackend(),
+      prepareJob: async (job) => {
+        calls.push(`prepare:${job}`);
+      },
+      claim: async ({ job }) => {
+        claim(job);
+        return false;
+      },
+      ...(leases ? { runs } : {}),
+    };
+
+    const scheduler = new Scheduler({ backend, jitterMs: 0 });
+    await scheduler.start();
+    scheduler.every('late-added', '1s', () => {});
+    await firstClaim;
+    await scheduler.stop();
+
+    const kind = leases ? 'with leases' : 'without leases';
+    assert.deepEqual(
+      calls.slice(0, 2),
+      ['prepare:late-added', 'claim:late-added'],
+      kind,
+    );
+  }
+});

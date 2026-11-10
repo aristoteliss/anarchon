@@ -1,8 +1,15 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { coded } from '../../errors';
-import type { ClaimInput, IdmpOptions, KeyValueStrategy } from '../../types';
-import { errorMessage } from '../../util';
+import type {
+  ClaimInput,
+  IdmpOptions,
+  JobLimits,
+  KeyValueStrategyName,
+  ScriptOptions,
+} from '../../types';
+import { errorMessage, intInRange, positiveInt } from '../../util';
+import { versionAtLeast } from '../shared';
 import type { KeyValueClient } from './client';
 import { parseEntries, toRecord, toStr } from './replies';
 import { ScriptRunner } from './scripts';
@@ -14,7 +21,11 @@ export interface StreamClaim extends ClaimInput {
 
 export interface ClaimStrategy {
   /** The strategy's name, as passed in `strategy`. */
-  readonly name: KeyValueStrategy;
+  readonly name: KeyValueStrategyName;
+  /** How long the strategy remembers that a run was claimed (ms). Infinity: forever. */
+  readonly dedupeWindowMs: number;
+  /** Throws for a job whose late claims could outlive the strategy's memory of its runs. */
+  checkJob(job: JobLimits): void;
   /** Checks once that the server supports this strategy. */
   init(): Promise<void>;
   /** Runs once per job stream before its first claim. */
@@ -52,7 +63,7 @@ async function tokenAt(
   return entry?.fields.token;
 }
 
-async function serverInfo(
+export async function serverInfo(
   redis: KeyValueClient,
 ): Promise<{ product: string; version: string }> {
   const reply = await redis.send('INFO', ['server']);
@@ -79,8 +90,11 @@ async function serverInfo(
  */
 export class StreamIdStrategy implements ClaimStrategy {
   readonly name = 'stream-id';
+  readonly dedupeWindowMs = Infinity;
 
-  constructor(private readonly redis: KeyValueClient) {}
+  constructor(private readonly redis: () => Promise<KeyValueClient>) {}
+
+  checkJob(): void {}
 
   /** Nothing to check: XADD with an explicit ID works on every server with streams. */
   async init(): Promise<void> {}
@@ -91,9 +105,10 @@ export class StreamIdStrategy implements ClaimStrategy {
   /** XADD with the slot as the entry ID. Won if Redis accepts it, or if the entry already there carries our token. */
   async claim(input: StreamClaim): Promise<boolean> {
     const id = `${input.slot}-0`;
+    const redis = await this.redis();
 
     try {
-      await this.redis.send('XADD', [
+      await redis.send('XADD', [
         input.key,
         'MAXLEN',
         '~',
@@ -110,7 +125,7 @@ export class StreamIdStrategy implements ClaimStrategy {
 
       // Someone already holds this slot (or a later one). It can be us, if the client resent the XADD
       // after a dropped connection: the token tells us.
-      const stored = await tokenAt(this.redis, input.key, id);
+      const stored = await tokenAt(redis, input.key, id);
       return stored === input.token;
     }
   }
@@ -130,21 +145,48 @@ export class StreamIdStrategy implements ClaimStrategy {
  */
 export class IdmpStrategy implements ClaimStrategy {
   readonly name = 'idmp';
+  readonly dedupeWindowMs: number;
+  private readonly options: Required<IdmpOptions>;
 
   constructor(
-    private readonly redis: KeyValueClient,
-    private readonly options: Required<IdmpOptions>,
-  ) {}
+    private readonly redis: () => Promise<KeyValueClient>,
+    settings: IdmpOptions,
+  ) {
+    // The ranges the server accepts.
+    this.options = {
+      durationSec: intInRange(
+        'strategy.durationSec',
+        settings.durationSec ?? 300,
+        1,
+        86_400,
+      ),
+      maxSize: intInRange(
+        'strategy.maxSize',
+        settings.maxSize ?? 1_000,
+        1,
+        10_000,
+      ),
+    };
+    this.dedupeWindowMs = this.options.durationSec * 1_000;
+  }
+
+  /** The server must still remember a run while late instances may try to claim it. */
+  checkJob({ name, jitterMs, maxLateMs, minGapMs }: JobLimits): void {
+    const needed = jitterMs + maxLateMs;
+    if (this.options.maxSize * minGapMs <= needed) {
+      throw coded(
+        new RangeError(
+          `Job "${name}": the idmp strategy's maxSize (${this.options.maxSize}) runs × ${minGapMs} ms between runs must cover jitterMs + maxLateMs (${needed} ms)`,
+        ),
+        'ANARCHON_UNSAFE_JOB',
+      );
+    }
+  }
 
   /** Refuses servers without idempotent XADD (Valkey, Redis before 8.6), naming the strategies that work there. */
   async init(): Promise<void> {
-    const { product, version } = await serverInfo(this.redis);
-    const match = /^(\d+)\.(\d+)/.exec(version);
-    const ok =
-      product === 'Redis' &&
-      !!match &&
-      (Number(match[1]) > 8 ||
-        (Number(match[1]) === 8 && Number(match[2]) >= 6));
+    const { product, version } = await serverInfo(await this.redis());
+    const ok = product === 'Redis' && versionAtLeast(version, 8, 6);
 
     if (!ok) {
       throw coded(
@@ -162,7 +204,8 @@ export class IdmpStrategy implements ClaimStrategy {
     let info = await this.streamInfo(key);
     if (!info) {
       // XCFGSET needs an existing stream: create an empty one.
-      await this.redis.send('XADD', [key, 'MAXLEN', 0, '*', 'init', 1]);
+      const redis = await this.redis();
+      await redis.send('XADD', [key, 'MAXLEN', 0, '*', 'init', 1]);
       info = (await this.streamInfo(key)) ?? {};
     }
 
@@ -171,7 +214,8 @@ export class IdmpStrategy implements ClaimStrategy {
       Number(info['idmp-duration']) !== this.options.durationSec ||
       Number(info['idmp-maxsize']) !== this.options.maxSize
     ) {
-      await this.redis.send('XCFGSET', [
+      const redis = await this.redis();
+      await redis.send('XCFGSET', [
         key,
         'IDMP-DURATION',
         this.options.durationSec,
@@ -183,7 +227,8 @@ export class IdmpStrategy implements ClaimStrategy {
 
   /** XADD with the slot as idempotency key, then reads the entry Redis kept. Won if that entry carries our token. */
   async claim(input: StreamClaim): Promise<boolean> {
-    const reply = await this.redis.send('XADD', [
+    const redis = await this.redis();
+    const reply = await redis.send('XADD', [
       input.key,
       'IDMP',
       input.job,
@@ -196,7 +241,7 @@ export class IdmpStrategy implements ClaimStrategy {
     ]);
 
     // A duplicate returns the ID of the entry that was stored first, so compare tokens.
-    const stored = await tokenAt(this.redis, input.key, toStr(reply));
+    const stored = await tokenAt(redis, input.key, toStr(reply));
     return stored === input.token;
   }
 
@@ -204,7 +249,8 @@ export class IdmpStrategy implements ClaimStrategy {
     key: string,
   ): Promise<Record<string, unknown> | null> {
     try {
-      const reply = await this.redis.send('XINFO', ['STREAM', key]);
+      const redis = await this.redis();
+      const reply = await redis.send('XINFO', ['STREAM', key]);
       return toRecord(reply);
     } catch (error) {
       if (/no such key/i.test(errorMessage(error))) return null;
@@ -240,13 +286,42 @@ return ARGV[4]
 
 export class ScriptStrategy implements ClaimStrategy {
   readonly name = 'script';
+  readonly dedupeWindowMs: number;
   private readonly scripts: ScriptRunner;
+  private readonly windowMs: number;
 
-  constructor(
-    redis: KeyValueClient,
-    private readonly windowMs: number,
-  ) {
-    this.scripts = new ScriptRunner(async () => redis);
+  constructor(redis: () => Promise<KeyValueClient>, settings: ScriptOptions) {
+    this.scripts = new ScriptRunner(redis);
+    this.windowMs = positiveInt(
+      'strategy.windowMs',
+      settings.windowMs ?? 300_000,
+    );
+    this.dedupeWindowMs = this.windowMs;
+  }
+
+  /** The claims of the last windowMs must still be in the stream while late instances may claim. */
+  checkJob(job: JobLimits): void {
+    const { name, jitterMs, maxLateMs, minGapMs, historySize, historyTtlMs } =
+      job;
+    const needed = jitterMs + maxLateMs;
+
+    if (historyTtlMs !== undefined && historyTtlMs <= this.windowMs) {
+      throw coded(
+        new RangeError(
+          `Job "${name}": historyTtlMs must be longer than the script strategy's windowMs (${this.windowMs} ms)`,
+        ),
+        'ANARCHON_UNSAFE_JOB',
+      );
+    }
+
+    if (historySize * minGapMs <= needed) {
+      throw coded(
+        new RangeError(
+          `Job "${name}": historySize (${historySize}) runs × ${minGapMs} ms between runs must cover jitterMs + maxLateMs (${needed} ms) for the "script" strategy`,
+        ),
+        'ANARCHON_UNSAFE_JOB',
+      );
+    }
   }
 
   /** Loads the claim script, so claims can send its hash instead of its text. */
@@ -274,4 +349,18 @@ export class ScriptStrategy implements ClaimStrategy {
 
     return toStr(stored) === input.token;
   }
+}
+
+/** The settings a strategy takes besides its name. */
+export type StrategySettings = IdmpOptions & ScriptOptions;
+
+/** The claim-only strategy with this name, with its settings checked. */
+export function createStrategy(
+  name: Exclude<KeyValueStrategyName, 'lease'>,
+  settings: StrategySettings,
+  redis: () => Promise<KeyValueClient>,
+): ClaimStrategy {
+  if (name === 'idmp') return new IdmpStrategy(redis, settings);
+  if (name === 'script') return new ScriptStrategy(redis, settings);
+  return new StreamIdStrategy(redis);
 }

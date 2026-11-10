@@ -26,14 +26,14 @@ import type {
   RunStore,
   StoredResult,
 } from '../../types';
+import { errorMessage, positiveInt, refuseUnknown } from '../../util';
 import {
   assertSimpleName,
   claimManualSlot,
-  errorMessage,
-  positiveInt,
+  claimWithoutLeases,
+  Lazy,
   refuseHistoryTtl,
-  refuseUnknown,
-} from '../../util';
+} from '../shared';
 import { NatsLeaseStore } from './lease';
 
 /**
@@ -260,7 +260,7 @@ export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
   private historySize: number;
   private streamHistorySize = 0;
   private readonly replicas: number | undefined;
-  private state: Promise<JetStreamState> | undefined;
+  private readonly state = new Lazy(() => this.connect());
 
   /** Validates the options. Nothing connects until init(). */
   constructor(options: NatsBackendOptions<S> = {}) {
@@ -326,18 +326,7 @@ export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
    * through `runs` instead.)
    */
   async claim(input: ClaimInput): Promise<boolean> {
-    if (this.lease) {
-      // Used only without the scheduler's lease handling: a long lease, no backups.
-      const outcome = await this.lease.claim({
-        ...input,
-        mode: 'new',
-        reason: 'scheduled',
-        leaseMs: 86_400_000,
-        overlap: 'allow',
-        maxAttempts: 1,
-      });
-      return outcome.kind === 'won';
-    }
+    if (this.lease) return claimWithoutLeases(this.lease, input);
 
     const { js, jsm } = await this.getState();
     const payload = JSON.stringify(claimPayload(input, false));
@@ -442,8 +431,7 @@ export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
 
   /** Closes the connection if this backend opened it. One that was passed in stays open. */
   async close(): Promise<void> {
-    const state = this.state;
-    this.state = undefined;
+    const state = this.state.reset();
     this.lease?.close();
     if (!state || this.userConnection) return;
 
@@ -456,11 +444,7 @@ export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
   }
 
   private getState(): Promise<JetStreamState> {
-    this.state ??= this.connect().catch((error: unknown) => {
-      this.state = undefined;
-      throw error;
-    });
-    return this.state;
+    return this.state.get();
   }
 
   /** Connects (unless a connection was given), then checks JetStream and the stream. */

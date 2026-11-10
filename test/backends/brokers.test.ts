@@ -245,9 +245,9 @@ describe('RabbitMQ and NATS (simple claim)', () => {
       assert.equal(await withOwned.claim(input(slot, 'A')), true);
       const firstConn = await (
         withOwned as unknown as {
-          connection: Promise<{ close(): Promise<void> }>;
+          connection: { get(): Promise<{ close(): Promise<void> }> };
         }
-      ).connection;
+      ).connection.get();
       await firstConn.close();
       assert.equal(await withOwned.claim(input(slot + 1000, 'A')), true);
     } finally {

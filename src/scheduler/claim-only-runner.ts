@@ -3,7 +3,7 @@
 import type { ClaimInput, RunRecord } from '../types';
 import type { SchedulerCore } from './core';
 import type { Executor } from './executor';
-import { claimInput, type Job } from './job';
+import { claimInput, type Job, skipEvent } from './job';
 
 /**
  * Runs for backends without leases (Redis 'stream-id', 'idmp', 'script', RabbitMQ, NATS 'msg-id'): one
@@ -27,7 +27,9 @@ export class ClaimOnlyRunner {
     if (won === undefined) return;
 
     if (!won) {
-      if (!signal.aborted) this.emitTaken(job, slot);
+      if (!signal.aborted) {
+        core.emit('skip', skipEvent(core.instanceId, job, slot, 'taken'));
+      }
       return;
     }
 
@@ -70,17 +72,6 @@ export class ClaimOnlyRunner {
       }
       return undefined;
     }
-  }
-
-  /** Emits 'skip' for a run another instance won. */
-  private emitTaken(job: Job, slot: number): void {
-    this.core.emit('skip', {
-      job: job.name,
-      slot,
-      scheduledAt: new Date(slot),
-      instanceId: this.core.instanceId,
-      reason: 'taken',
-    });
   }
 
   /** runNow(): recorded in history, not deduplicated. */

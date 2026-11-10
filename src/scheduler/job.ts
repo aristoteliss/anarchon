@@ -5,7 +5,13 @@ import { coded } from '../errors';
 
 import { LEASE_JOB_OPTIONS } from '../option-keys';
 import type { Schedule } from '../schedule';
-import type { Backend, ClaimInput, JobHandler, JobOptions } from '../types';
+import type {
+  Backend,
+  ClaimInput,
+  JobHandler,
+  JobOptions,
+  SkipEvent,
+} from '../types';
 import { intInRange, nonNegativeInt, positiveInt } from '../util';
 
 /**
@@ -291,6 +297,26 @@ export function randomJitter(job: Job): number {
 /** What identifies one run of one job on this instance (in the maps of watched and local runs). */
 export function runKey(job: Job, slot: number): string {
   return `${job.name}\u0000${slot}`;
+}
+
+/** The 'skip' event of a run this instance does not execute. */
+export function skipEvent(
+  instanceId: string,
+  job: Job,
+  slot: number,
+  reason: SkipEvent['reason'],
+  lateMs?: number,
+): SkipEvent {
+  const event: SkipEvent = {
+    job: job.name,
+    slot,
+    scheduledAt: new Date(slot),
+    instanceId,
+    reason,
+  };
+  if (lateMs !== undefined) event.lateMs = lateMs;
+
+  return event;
 }
 
 /** What an instance sends to claim a run. The token is new for every attempt. */

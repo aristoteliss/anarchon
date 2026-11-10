@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { coded } from './errors';
-import { parseDuration } from './schedule';
+import { parseDuration, toTime } from './schedule';
 import type { Scheduler } from './scheduler/scheduler';
 import type {
   AtJobOptions,
@@ -411,14 +411,6 @@ const EVERY: ScheduleKind = {
   usage:
     "the job's name, a string, comes first and the interval second: @Every(name, interval)",
 };
-
-/** The time an argument of @At stands for, in Unix ms; NaN when it stands for none. */
-function toTime(value: unknown): number {
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') return Date.parse(value);
-  return Number.NaN;
-}
 
 const AT: ScheduleKind = {
   decorator: 'At',

@@ -11,7 +11,7 @@ import {
 } from './decorators';
 // Which schedulers there are (the default one, the named ones, the ones that can be created from
 // settings), and on which of them the jobs of each decorated object live.
-import { coded } from './errors';
+import { coded, isAnarchonError } from './errors';
 import {
   CONFIGURE_OPTIONS,
   REGISTER_DEFAULTS,
@@ -338,12 +338,7 @@ onObjectCreated((target) => {
     if (!place(target, {}, undefined)) waiting.set(target.constructor, target);
   } catch (error) {
     // The usual cause is a second object of one class, which register() with a prefix solves.
-    if (
-      !(error instanceof Error) ||
-      !/is already registered$/.test(error.message)
-    ) {
-      throw error;
-    }
+    if (!isAnarchonError(error, 'ANARCHON_JOB_EXISTS')) throw error;
 
     throw coded(
       new Error(

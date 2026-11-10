@@ -98,8 +98,7 @@ export class Executor {
     const status = statusOf(run, failure);
 
     // After stop() has returned, nothing is written any more (the lease runs out on its own).
-    const stopped =
-      !claimed || core.isIdle() || run.parent !== core.stopSignal();
+    const stopped = !claimed || !core.canWrite(run.parent);
     const handedOver = stopped ? false : await end(run, status);
 
     const finishedAt = Date.now();

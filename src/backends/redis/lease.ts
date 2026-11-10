@@ -5,13 +5,14 @@ import type {
   ClaimOutcome,
   RunClaim,
   RunRecord,
-  RunStatus,
   RunStore,
   StoredResult,
 } from '../../types';
+import { leaseStateOf, pendingStatus, type StoredRun } from '../lease-rules';
 import type { KeyValueClient } from './client';
-import { parseEntries, type StreamEntry, toResults, toStr } from './replies';
+import { type StreamEntry, toStr } from './replies';
 import { ScriptRunner } from './scripts';
+import { readHistory } from './streams';
 
 /**
  * Lease strategy for Redis and Valkey (any version with Lua, so Redis 5+).
@@ -190,16 +191,6 @@ for i = 1, #ARGV do out[i + 1] = redis.call('HGET', KEYS[1], ARGV[i]) or '' end
 return out
 `;
 
-interface StoredRun {
-  a: number;
-  m?: number;
-  r?: number;
-  t: string;
-  s: 'running' | 'success' | 'failed' | 'interrupted';
-  i: string;
-  l: number;
-}
-
 /**
  * The {@link RunStore} of `RedisBackend` and `ValkeyBackend` with the 'lease' strategy: claims,
  * heartbeats and hand-overs as Lua scripts (the algorithm is described at the top of this file).
@@ -341,29 +332,18 @@ export class LeaseStore implements RunStore {
    * while it is the current attempt with a live lease; otherwise 'interrupted'.
    */
   async history(job: string, limit: number): Promise<RunRecord[]> {
-    const redis = await this.redis();
-    const stream = await redis.send('XREVRANGE', [
-      this.key(job, 'runs'),
-      '+',
-      '-',
-      'COUNT',
+    const keys = {
+      streams: [this.key(job, 'runs')],
+      results: this.key(job, 'results'),
+    };
+    const { claims, results } = await readHistory(
+      await this.redis(),
+      keys,
       limit,
-    ]);
-    const claims = parseEntries(stream).flatMap(
-      (entry) => toClaimRecord(entry) ?? [],
+      toClaimRecord,
     );
     if (claims.length === 0) return [];
 
-    const oldest = claims.reduce(
-      (min, claim) => Math.min(min, claim.slot),
-      Infinity,
-    );
-    const members = await redis.send('ZRANGEBYSCORE', [
-      this.key(job, 'results'),
-      oldest,
-      '+inf',
-    ]);
-    const results = toResults(members);
     const { now, states } = await this.readStates(job, claims);
 
     return buildHistory({
@@ -371,8 +351,10 @@ export class LeaseStore implements RunStore {
       claims,
       results,
       limit,
-      pendingStatus: (claim) =>
-        pendingStatusOf(states.get(claim.slot), claim.attempt, now),
+      pendingStatus: (claim) => {
+        const run = states.get(claim.slot);
+        return pendingStatus(run && leaseStateOf(run), claim.attempt, now);
+      },
     });
   }
 
@@ -454,15 +436,4 @@ function toClaimOutcome(reply: unknown): ClaimOutcome {
 function toStoredRun(raw: unknown): StoredRun | null {
   const text = toStr(raw);
   return text ? (parseJson(text) as StoredRun | null) : null;
-}
-
-/** An attempt without a result is 'running' only while it is the current attempt with a live lease. */
-function pendingStatusOf(
-  run: StoredRun | null | undefined,
-  attempt: number | undefined,
-  now: number,
-): RunStatus {
-  if (!run || run.a !== attempt) return 'interrupted';
-  if (run.s === 'running') return run.l >= now ? 'running' : 'interrupted';
-  return run.s;
 }

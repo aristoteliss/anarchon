@@ -22,8 +22,11 @@ export interface SchedulerCore {
   schedulerData(): unknown;
   /** Between start() and stop(). Timers and background checks do nothing outside it. */
   isRunning(): boolean;
-  /** stop() has returned (or start() was never called): nothing is written to the backend any more. */
-  isIdle(): boolean;
+  /**
+   * Whether work started under this stop signal may still write to the backend: stop() has not
+   * returned since, and the signal is the one of the current start().
+   */
+  canWrite(signal: AbortSignal): boolean;
   /** Aborts when stop() is called. A new one is made by every start(). */
   stopSignal(): AbortSignal;
   /** Connects the backend once; later calls wait for the same connection. */

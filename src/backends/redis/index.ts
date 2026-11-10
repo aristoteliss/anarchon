@@ -1,13 +1,11 @@
 /* Copyright (C) 2026-present Aristotelis — see repository license. */
 
 import { coded } from '../../errors';
-import { buildHistory, toClaim } from '../../history';
 import { keysOf, STRATEGY_SETTINGS } from '../../option-keys';
 import { checkStoreFormat, STORE_FORMAT } from '../../store-format';
 import type {
   Backend,
   ClaimInput,
-  IdmpOptions,
   JobLimits,
   KeyValueStrategy,
   KeyValueStrategyName,
@@ -15,13 +13,14 @@ import type {
   RunStore,
   StoredResult,
 } from '../../types';
+import { refuseUnknown } from '../../util';
 import {
   claimManualSlot,
-  intInRange,
-  positiveInt,
-  refuseUnknown,
+  claimWithoutLeases,
+  closeIfOwned,
+  Lazy,
   versionAtLeast,
-} from '../../util';
+} from '../shared';
 import {
   checkConnectionOptions,
   type KeyValueClient,
@@ -29,14 +28,13 @@ import {
   resolveRedis,
 } from './client';
 import { LeaseStore } from './lease';
-import { parseEntries, toResults, toStr } from './replies';
+import { toStr } from './replies';
 import {
-  type ClaimStrategy,
-  claimFields,
-  IdmpStrategy,
-  ScriptStrategy,
-  StreamIdStrategy,
+  createStrategy,
+  type StrategySettings,
+  serverInfo,
 } from './strategies';
+import { type RedisStore, StreamStore } from './streams';
 
 /**
  * Options of {@link RedisBackend}.
@@ -177,16 +175,10 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
   readonly dedupeWindowMs: number;
   /** Set with the 'lease' strategy only: lets the scheduler use leases, backups and catch-up. */
   readonly runs: S extends 'lease' ? RunStore : undefined;
-  private readonly lease?: LeaseStore;
-
+  private readonly store: RedisStore;
   private readonly prefix: string;
   private readonly input: KeyValueConnection | undefined;
-  private readonly idmp: Required<IdmpOptions>;
-  private readonly scriptWindowMs: number;
-  private connection:
-    | Promise<{ client: KeyValueClient; owned: boolean }>
-    | undefined;
-  private ready: Promise<ClaimStrategy> | undefined;
+  private readonly connection = new Lazy(() => resolveRedis(this.input));
 
   /** Validates the options. Nothing connects until init(). */
   constructor(options: RedisBackendOptions<S> = {}) {
@@ -196,78 +188,36 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
     });
     checkConnectionOptions('redis', options.redis);
     const { name, settings } = readStrategy(options.strategy);
-    this.idmp = toIdmpOptions(settings);
-    this.scriptWindowMs = positiveInt(
-      'strategy.windowMs',
-      settings.windowMs ?? 300_000,
-    );
 
     this.strategy = name as S;
     this.name = `redis:${this.strategy}`;
     this.prefix = options.prefix ?? 'cron:';
     this.input = options.redis;
-    this.dedupeWindowMs =
-      name === 'idmp'
-        ? this.idmp.durationSec * 1_000
-        : name === 'script'
-          ? this.scriptWindowMs
-          : Infinity;
 
-    if (name === 'lease') {
-      this.lease = new LeaseStore(
-        async () => (await this.getConnection()).client,
-        this.prefix,
-      );
-    }
-    this.runs = this.lease as this['runs'];
+    const client = () => this.client();
+    const lease =
+      name === 'lease' ? new LeaseStore(client, this.prefix) : undefined;
+    this.store = lease
+      ? leaseAsStore(lease, client)
+      : new StreamStore(
+          client,
+          this.prefix,
+          createStrategy(name as ClaimOnlyName, settings, client),
+        );
+    this.dedupeWindowMs = this.store.dedupeWindowMs;
+    this.runs = lease as this['runs'];
   }
 
   /** 'idmp' and 'script' remember a limited number of runs: refuses a job whose late claims could outlive that memory. */
   checkJob(job: JobLimits): void {
-    const { name, jitterMs, maxLateMs, minGapMs, historySize, historyTtlMs } =
-      job;
-    const needed = jitterMs + maxLateMs;
-
-    // The server must still remember a run while late instances may try to claim it.
-    if (this.strategy === 'idmp' && this.idmp.maxSize * minGapMs <= needed) {
-      throw coded(
-        new RangeError(
-          `Job "${name}": the idmp strategy's maxSize (${this.idmp.maxSize}) runs × ${minGapMs} ms between runs must cover jitterMs + maxLateMs (${needed} ms)`,
-        ),
-        'ANARCHON_UNSAFE_JOB',
-      );
-    }
-
-    if (
-      this.strategy === 'script' &&
-      historyTtlMs !== undefined &&
-      historyTtlMs <= this.scriptWindowMs
-    ) {
-      throw coded(
-        new RangeError(
-          `Job "${name}": historyTtlMs must be longer than the script strategy's windowMs (${this.scriptWindowMs} ms)`,
-        ),
-        'ANARCHON_UNSAFE_JOB',
-      );
-    }
-
-    // ('lease' needs no such check: it never forgets a run that a late claim could still ask for.)
-    if (this.strategy === 'script' && historySize * minGapMs <= needed) {
-      throw coded(
-        new RangeError(
-          `Job "${name}": historySize (${historySize}) runs × ${minGapMs} ms between runs must cover jitterMs + maxLateMs (${needed} ms) for the "script" strategy`,
-        ),
-        'ANARCHON_UNSAFE_JOB',
-      );
-    }
+    this.store.checkJob(job);
   }
 
   /** Connects and checks the server version against the strategy. */
   async init(): Promise<void> {
-    const { client } = await this.getConnection();
+    const client = await this.client();
     // A server the strategy can't run on is refused before anything is written to it.
-    if (this.lease) await refuseOldRedis(client);
-    else await this.getStrategy();
+    await this.store.init();
 
     const marker = `${this.prefix}format`;
     await client.send('SET', [marker, STORE_FORMAT, 'NX']);
@@ -277,178 +227,71 @@ export class RedisBackend<S extends KeyValueStrategyName = KeyValueStrategyName>
   }
 
   /** 'idmp' configures the job's stream here; the other strategies need nothing. */
-  async prepareJob(job: string): Promise<void> {
-    if (this.lease) return;
-    const strategy = await this.getStrategy();
-    await strategy.prepareStream(this.streamKey(job));
+  prepareJob(job: string): Promise<void> {
+    return this.store.prepareJob(job);
   }
 
   /** The plain one-winner claim. (With 'lease' the scheduler claims through `runs` instead.) */
-  async claim(input: ClaimInput): Promise<boolean> {
-    if (this.lease) {
-      // Used only without the scheduler's lease handling: a long lease, no backups.
-      const outcome = await this.lease.claim({
-        ...input,
-        mode: 'new',
-        reason: 'scheduled',
-        leaseMs: 86_400_000,
-        overlap: 'allow',
-        maxAttempts: 1,
-      });
-      return outcome.kind === 'won';
-    }
-
-    const strategy = await this.getStrategy();
-    return strategy.claim({ ...input, key: this.streamKey(input.job) });
+  claim(input: ClaimInput): Promise<boolean> {
+    return this.store.claim(input);
   }
 
   /**
    * Records a runNow() run. 'lease': claims a run of its own at the first free millisecond and returns
    * that slot. Other strategies: appends an entry to the job's stream of manual runs, which claims never read.
    */
-  async recordManualRun(input: ClaimInput): Promise<number | undefined> {
-    // (lease strategy: the scheduler claims manual runs itself, through runs.claim)
-    if (this.lease) return claimManualSlot(this.lease, input);
-
-    const { client } = await this.getConnection();
-    // A server-clock ID in the claim stream would refuse 'stream-id' claims of a run already due.
-    await client.send('XADD', [
-      this.manualKey(input.job),
-      'MAXLEN',
-      '~',
-      input.historySize,
-      '*',
-      ...claimFields(input, true),
-    ]);
+  recordManualRun(input: ClaimInput): Promise<number | undefined> {
+    return this.store.recordManualRun(input);
   }
 
   /** Adds the result to the job's sorted set and trims it by count and age. */
-  async saveResult(
+  saveResult(
     job: string,
     result: StoredResult,
     historySize: number,
     historyTtlMs?: number,
   ): Promise<void> {
-    if (this.lease) {
-      return this.lease.saveResult(job, result, historySize, historyTtlMs);
-    }
-
-    const { client } = await this.getConnection();
-    await client.send('ZADD', [
-      this.resultsKey(job),
-      Math.max(result.slot, result.finishedAt),
-      JSON.stringify(result),
-    ]);
-    await client.send('ZREMRANGEBYRANK', [
-      this.resultsKey(job),
-      0,
-      -(historySize + 1),
-    ]);
-
-    if (historyTtlMs) {
-      await client.send('ZREMRANGEBYSCORE', [
-        this.resultsKey(job),
-        '-inf',
-        `(${result.finishedAt - historyTtlMs}`,
-      ]);
-      const oldestClaim =
-        Math.min(result.slot, result.startedAt) - historyTtlMs;
-      // XTRIM MINID needs Redis 6.2+; older servers keep the count limit only.
-      for (const key of [this.streamKey(job), this.manualKey(job)]) {
-        await client.send('XTRIM', [key, 'MINID', oldestClaim]).catch(() => {});
-      }
-    }
+    return this.store.saveResult(job, result, historySize, historyTtlMs);
   }
 
-  /** Joins the claims and manual runs in the streams with the results in the sorted set. */
-  async history(job: string, limit: number): Promise<RunRecord[]> {
-    if (this.lease) return this.lease.history(job, limit);
-
-    const { client } = await this.getConnection();
-    const streams = await Promise.all(
-      [this.streamKey(job), this.manualKey(job)].map((key) =>
-        client.send('XREVRANGE', [key, '+', '-', 'COUNT', limit]),
-      ),
-    );
-    const claims = streams
-      .flatMap((reply) => parseEntries(reply))
-      .flatMap((entry) => toClaim(entry.fields) ?? []);
-    if (claims.length === 0) return [];
-
-    const oldest = claims.reduce(
-      (min, claim) => Math.min(min, claim.slot),
-      Infinity,
-    );
-    const members = await client.send('ZRANGEBYSCORE', [
-      this.resultsKey(job),
-      oldest,
-      '+inf',
-    ]);
-    const results = toResults(members);
-
-    return buildHistory({ job, claims, results, limit });
+  /** Joins the claims (and, without leases, the manual runs) in the streams with the results in the sorted set. */
+  history(job: string, limit: number): Promise<RunRecord[]> {
+    return this.store.history(job, limit);
   }
 
   /** Closes the connection if this backend opened it. A client that was passed in stays open. */
   async close(): Promise<void> {
-    const connection = this.connection;
-    this.connection = undefined;
-    this.ready = undefined;
-    if (!connection) return;
-
-    try {
-      const { client, owned } = await connection;
-      if (owned) await client.close?.();
-    } catch {
-      // never connected
-    }
+    this.store.reset();
+    await closeIfOwned(this.connection.reset());
   }
 
-  private getConnection(): Promise<{ client: KeyValueClient; owned: boolean }> {
-    this.connection ??= resolveRedis(this.input).catch((error: unknown) => {
-      this.connection = undefined;
-      throw error;
-    });
-    return this.connection;
-  }
-
-  private getStrategy(): Promise<ClaimStrategy> {
-    this.ready ??= this.createStrategy().catch((error: unknown) => {
-      this.ready = undefined;
-      throw error;
-    });
-    return this.ready;
-  }
-
-  /** Builds the strategy on the connection and checks the server supports it. */
-  private async createStrategy(): Promise<ClaimStrategy> {
-    const { client } = await this.getConnection();
-    const strategy: ClaimStrategy =
-      this.strategy === 'idmp'
-        ? new IdmpStrategy(client, this.idmp)
-        : this.strategy === 'script'
-          ? new ScriptStrategy(client, this.scriptWindowMs)
-          : new StreamIdStrategy(client);
-
-    await strategy.init();
-    return strategy;
-  }
-
-  private streamKey(job: string): string {
-    return `${this.prefix}${job}:runs`;
-  }
-
-  private manualKey(job: string): string {
-    return `${this.prefix}${job}:manual`;
-  }
-
-  private resultsKey(job: string): string {
-    return `${this.prefix}${job}:results`;
+  private async client(): Promise<KeyValueClient> {
+    return (await this.connection.get()).client;
   }
 }
 
-/** A strategy's settings, as given inside `strategy`. */
-type StrategySettings = IdmpOptions & { windowMs?: number };
+type ClaimOnlyName = Exclude<KeyValueStrategyName, 'lease'>;
+
+/** The 'lease' strategy as the backend's store: the `Backend` methods, answered by the lease store. */
+function leaseAsStore(
+  lease: LeaseStore,
+  client: () => Promise<KeyValueClient>,
+): RedisStore {
+  return {
+    dedupeWindowMs: Infinity,
+    // Never forgets a run that a late claim could still ask for.
+    checkJob: () => {},
+    init: async () => refuseOldRedis(await client()),
+    prepareJob: async () => {},
+    // Used only without the scheduler's lease handling, which claims through `runs`.
+    claim: (input) => claimWithoutLeases(lease, input),
+    recordManualRun: (input) => claimManualSlot(lease, input),
+    saveResult: (job, result, historySize, historyTtlMs) =>
+      lease.saveResult(job, result, historySize, historyTtlMs),
+    history: (job, limit) => lease.history(job, limit),
+    reset: () => {},
+  };
+}
 
 /** The strategy's name and settings; refuses an unknown name or setting. */
 function readStrategy<S extends KeyValueStrategyName>(
@@ -482,23 +325,10 @@ function readStrategy<S extends KeyValueStrategyName>(
   return { name, settings };
 }
 
-/** The 'idmp' settings, each checked against the range the server accepts. */
-function toIdmpOptions(settings: StrategySettings): Required<IdmpOptions> {
-  const durationSec = settings.durationSec ?? 300;
-  const maxSize = settings.maxSize ?? 1_000;
-
-  return {
-    durationSec: intInRange('strategy.durationSec', durationSec, 1, 86_400),
-    maxSize: intInRange('strategy.maxSize', maxSize, 1, 10_000),
-  };
-}
-
 /** Refuses a server older than Redis 5 for the 'lease' strategy. */
 async function refuseOldRedis(client: KeyValueClient): Promise<void> {
-  // Streams (XADD) arrived in Redis 5; Valkey reports redis_version 7.2.4.
-  const reply = await client.send('INFO', ['server']);
-  const info = toStr(reply);
-  const version = /redis_version:([\d.]+)/.exec(info)?.[1] ?? '0';
+  // Streams (XADD) arrived in Redis 5.
+  const { version } = await serverInfo(client);
 
   if (!versionAtLeast(version, 5, 0)) {
     throw coded(

@@ -28,7 +28,7 @@ export declare class NatsBackend<S extends NatsStrategyName = 'msg-id'> implemen
     private historySize;
     private streamHistorySize;
     private readonly replicas;
-    private state;
+    private readonly state;
     constructor(options?: NatsBackendOptions<S>);
     checkJob(job: JobLimits): void;
     init(): Promise<void>;
@@ -75,8 +75,8 @@ export declare class RabbitMQBackend implements Backend {
     private readonly url;
     private readonly prefix;
     private readonly userConnection;
-    private connection;
-    private confirm;
+    private readonly connection;
+    private readonly confirm;
     private readonly won;
     constructor(options?: RabbitMQBackendOptions);
     checkJob(job: JobLimits): void;
@@ -90,7 +90,9 @@ export declare class RabbitMQBackend implements Backend {
     history(job: string, limit: number): Promise<RunRecord[]>;
     close(): Promise<void>;
     private getConnection;
+    private connect;
     private getConfirmChannel;
+    private openConfirmChannel;
     private declare;
     private publish;
     private append;
@@ -147,13 +149,10 @@ export declare class RedisBackend<S extends KeyValueStrategyName = KeyValueStrat
     readonly strategy: S;
     readonly dedupeWindowMs: number;
     readonly runs: S extends 'lease' ? RunStore : undefined;
-    private readonly lease?;
+    private readonly store;
     private readonly prefix;
     private readonly input;
-    private readonly idmp;
-    private readonly scriptWindowMs;
-    private connection;
-    private ready;
+    private readonly connection;
     constructor(options?: RedisBackendOptions<S>);
     checkJob(job: JobLimits): void;
     init(): Promise<void>;
@@ -163,12 +162,7 @@ export declare class RedisBackend<S extends KeyValueStrategyName = KeyValueStrat
     saveResult(job: string, result: StoredResult, historySize: number, historyTtlMs?: number): Promise<void>;
     history(job: string, limit: number): Promise<RunRecord[]>;
     close(): Promise<void>;
-    private getConnection;
-    private getStrategy;
-    private createStrategy;
-    private streamKey;
-    private manualKey;
-    private resultsKey;
+    private client;
 }
 export interface ValkeyBackendOptions<S extends KeyValueStrategyName<'valkey'> = KeyValueStrategyName<'valkey'>> extends Omit<RedisBackendOptions<S>, 'redis'> {
     valkey?: KeyValueConnection;
@@ -235,7 +229,7 @@ export declare abstract class SqlBackend implements Backend, RunStore {
     protected readonly table: string;
     protected readonly attempts: string;
     private connection;
-    private ready;
+    private readonly ready;
     protected constructor(table: string);
     protected abstract connect(): Promise<{
         client: SqlClient;
@@ -541,6 +535,7 @@ export interface Schedule {
 export declare function parseDuration(value: number | string): number;
 export declare function formatDuration(ms: number): string;
 export declare function everySchedule(intervalMs: number, offsetMs?: number): Schedule;
+export declare function toTime(when: unknown): number;
 export declare function onceSchedule(at: number): Schedule;
 export declare function cronSchedule(expression: string, timezone?: string): Schedule;
 
