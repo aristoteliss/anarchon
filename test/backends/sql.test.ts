@@ -189,6 +189,53 @@ describe('Postgres and SQLite', () => {
     assert.equal(transactions, 1);
   });
 
+  test('a claim refused as an overlap writes nothing, and names the earliest live run', async (t) => {
+    if (!(await probeSqlite())) return t.skip('this Node has no node:sqlite');
+    const backend = new SqliteBackend({
+      database: join(SQLITE_DIR, `${uniqueId('overlap')}.db`),
+      table: 't_overlap',
+    });
+    const slot = futureSlot(60);
+    const claim = (at: number, leaseMs: number, overlap: 'skip' | 'allow') =>
+      backend.claim({
+        ...input(at, 'A'),
+        historySize: 100,
+        leaseMs,
+        overlap,
+        maxAttempts: 3,
+        mode: 'new',
+        reason: 'scheduled',
+      });
+
+    try {
+      await backend.init();
+      assert.deepEqual(await claim(slot, 200, 'allow'), {
+        kind: 'won',
+        attempt: 1,
+      });
+      assert.deepEqual(await claim(slot + 1_000, 60_000, 'allow'), {
+        kind: 'won',
+        attempt: 1,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
+      assert.deepEqual(await claim(slot + 2_000, 60_000, 'skip'), {
+        kind: 'overlap',
+        slot: slot + 1_000,
+      });
+      const active = await backend.active('job');
+      assert.deepEqual(
+        active.map((run) => [run.slot, run.alive]),
+        [
+          [slot, false],
+          [slot + 1_000, true],
+        ],
+      );
+    } finally {
+      await backend.close();
+    }
+  });
+
   test('SQLite: the server clock never reads earlier than the real one', async (t) => {
     if (!(await probeSqlite())) return t.skip('this Node has no node:sqlite');
     const backend = new SqliteBackend({

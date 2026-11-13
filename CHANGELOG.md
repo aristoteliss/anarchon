@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **NATS: a `prefix` without a final dot is refused.** `new NatsBackend()` now throws a `TypeError`
+  with the code `ANARCHON_INVALID_ARGUMENT` for a `prefix` that is not empty and does not end with
+  `.`. Before, the stream's subject `<prefix>>` matched none of the claim subjects: `start()`
+  passed, and every claim then failed with no reply from the server.
+- **PostgreSQL and SQLite: a claim refused as an overlap writes nothing.** It also names the
+  earliest live run of the job. Before, it could first mark older dead runs `interrupted`, in the
+  order the database returned the rows; those runs now end at the next claim that starts a run.
+  The Redis Lua script is unchanged.
+
 ## 0.7.0
 
 The inside of the scheduler and of the backends is simpler to read and to change: the lease rules

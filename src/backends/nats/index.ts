@@ -132,6 +132,7 @@ export interface NatsBackendOptions<
   stream?: string;
   /**
    * Subject prefix: subjects are `<prefix><job>.claims` and `<prefix><job>.results`. Default 'cron.'.
+   * A prefix that is not empty must end with a dot.
    *
    * @example
    * ```ts
@@ -284,7 +285,7 @@ export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
     this.servers = options.servers ?? 'nats://localhost:4222';
     this.userConnection = options.connection;
     this.stream = stream;
-    this.prefix = options.prefix ?? 'cron.';
+    this.prefix = readPrefix(options.prefix ?? 'cron.');
     if (bucket) {
       const state = () => this.getState();
       this.lease = new NatsLeaseStore(
@@ -619,6 +620,21 @@ function withAttempt(
 ): ClaimRecord {
   if (typeof raw.attempt !== 'number') return claim;
   return { ...claim, attempt: raw.attempt, reason: raw.reason as RunReason };
+}
+
+/**
+ * The subject prefix; refuses one that is not empty and has no final dot. Subjects are
+ * `<prefix><job>.claims`: without the dot, the stream's subject `<prefix>>` matches none of them.
+ */
+function readPrefix(prefix: string): string {
+  if (prefix === '' || prefix.endsWith('.')) return prefix;
+
+  throw coded(
+    new TypeError(
+      `NatsBackend: the prefix "${prefix}" must end with "." (such as "${prefix}.")`,
+    ),
+    'ANARCHON_INVALID_ARGUMENT',
+  );
 }
 
 /** The strategy's name; refuses an unknown one. */

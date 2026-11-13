@@ -506,29 +506,39 @@ export abstract class SqlBackend implements Backend, RunStore {
     return undefined;
   }
 
-  /** Refuses to overlap a live run of the job, and ends older runs whose runner died. */
+  /**
+   * Refuses to overlap a live run of the job; otherwise ends older runs whose runner died. A refused
+   * claim writes nothing.
+   */
   private async settleOtherRuns(
     tx: SqlQuery,
     input: RunClaim,
     now: number,
   ): Promise<ClaimOutcome | undefined> {
-    const others = await tx.all(
+    const rows = await tx.all(
       `SELECT slot, lease_until
        FROM ${this.table}
        WHERE job = ? AND status = 'running'${this.dialect.forUpdate}`,
       [input.job],
     );
+    const others = rows.map((row) => ({
+      slot: Number(row.slot),
+      alive: Number(row.lease_until) >= now,
+    }));
 
-    for (const other of others) {
-      const otherSlot = Number(other.slot);
-      if (Number(other.lease_until) >= now) {
-        if (input.overlap === 'skip') {
-          return { kind: 'overlap', slot: otherSlot };
-        }
-      } else if (otherSlot < input.slot) {
-        // An older run died and a newer one is starting: stop trying to finish the old one.
-        await this.interrupt(tx, input.job, otherSlot);
-      }
+    const live = others
+      .filter((other) => other.alive)
+      .map((other) => other.slot);
+    if (input.overlap === 'skip' && live.length > 0) {
+      return { kind: 'overlap', slot: Math.min(...live) };
+    }
+
+    // An older run died and a newer one is starting: stop trying to finish the old one.
+    const dead = others.filter(
+      (other) => !other.alive && other.slot < input.slot,
+    );
+    for (const { slot } of dead) {
+      await this.interrupt(tx, input.job, slot);
     }
 
     return undefined;
