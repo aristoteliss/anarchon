@@ -435,7 +435,9 @@ function lostRaces(job: string): Error {
 }
 
 /** Loads the key-value client; refuses when it is not installed. */
-async function loadKv(): Promise<typeof import('@nats-io/kv')> {
+async function loadKv(): Promise<
+  typeof import('@nats-io/kv', { with: { 'resolution-mode': 'import' }})
+> {
   try {
     return await import('@nats-io/kv');
   } catch {

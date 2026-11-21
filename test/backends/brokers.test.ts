@@ -502,4 +502,16 @@ describe("NATS with the 'lease' strategy", () => {
     assert.equal(new NatsBackend().name, 'nats');
     assert.equal(new NatsBackend({ strategy: 'lease' }).name, 'nats:lease');
   });
+
+  test('a subject prefix must end with a dot, so the stream covers the subjects', () => {
+    assert.throws(
+      () => new NatsBackend({ prefix: 'billing.cron' }),
+      (error: Error & { code?: string }) =>
+        error instanceof TypeError &&
+        error.code === 'ANARCHON_INVALID_ARGUMENT' &&
+        /prefix "billing.cron" must end with "\."/.test(error.message),
+    );
+    assert.doesNotThrow(() => new NatsBackend({ prefix: 'billing.cron.' }));
+    assert.doesNotThrow(() => new NatsBackend({ prefix: '' }));
+  });
 });

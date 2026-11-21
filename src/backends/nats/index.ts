@@ -132,6 +132,7 @@ export interface NatsBackendOptions<
   stream?: string;
   /**
    * Subject prefix: subjects are `<prefix><job>.claims` and `<prefix><job>.results`. Default 'cron.'.
+   * A prefix that is not empty must end with a dot.
    *
    * @example
    * ```ts
@@ -284,7 +285,7 @@ export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
     this.servers = options.servers ?? 'nats://localhost:4222';
     this.userConnection = options.connection;
     this.stream = stream;
-    this.prefix = options.prefix ?? 'cron.';
+    this.prefix = readPrefix(options.prefix ?? 'cron.');
     if (bucket) {
       const state = () => this.getState();
       this.lease = new NatsLeaseStore(
@@ -467,7 +468,9 @@ export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
 
   /** The JetStream manager; refuses a server without JetStream. */
   private async openManager(
-    jetstreamModule: typeof import('@nats-io/jetstream'),
+    jetstreamModule: typeof import('@nats-io/jetstream', { with: {
+      'resolution-mode': 'import',
+    }}),
     nc: NatsConnection,
   ): Promise<JetStreamManager> {
     try {
@@ -558,8 +561,12 @@ export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
 
 /** Loads the NATS client packages; refuses when they are not installed. */
 async function loadNats(): Promise<{
-  transport: typeof import('@nats-io/transport-node');
-  jetstreamModule: typeof import('@nats-io/jetstream');
+  transport: typeof import('@nats-io/transport-node', { with: {
+    'resolution-mode': 'import',
+  }});
+  jetstreamModule: typeof import('@nats-io/jetstream', { with: {
+    'resolution-mode': 'import',
+  }});
 }> {
   try {
     const transport = await import('@nats-io/transport-node');
@@ -619,6 +626,21 @@ function withAttempt(
 ): ClaimRecord {
   if (typeof raw.attempt !== 'number') return claim;
   return { ...claim, attempt: raw.attempt, reason: raw.reason as RunReason };
+}
+
+/**
+ * The subject prefix; refuses one that is not empty and has no final dot. Subjects are
+ * `<prefix><job>.claims`: without the dot, the stream's subject `<prefix>>` matches none of them.
+ */
+function readPrefix(prefix: string): string {
+  if (prefix === '' || prefix.endsWith('.')) return prefix;
+
+  throw coded(
+    new TypeError(
+      `NatsBackend: the prefix "${prefix}" must end with "." (such as "${prefix}.")`,
+    ),
+    'ANARCHON_INVALID_ARGUMENT',
+  );
 }
 
 /** The strategy's name; refuses an unknown one. */

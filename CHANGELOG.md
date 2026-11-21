@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.7.1
+
+Two fixes, on NATS and on PostgreSQL and SQLite. No breaking change: the public API, the backend
+contract and the stored data are the same as 0.7.0, so 0.7.0 and 0.7.1 instances can share a store
+during a rolling deploy. Anarchon for .NET 0.7.0 has the same two fixes.
+
+### Fixed
+
+- **NATS: a `prefix` without a final dot is refused.** `new NatsBackend()` now throws a `TypeError`
+  with the code `ANARCHON_INVALID_ARGUMENT` for a `prefix` that is not empty and does not end with
+  `.`. Before, the stream's subject `<prefix>>` matched none of the claim subjects: `start()`
+  passed, and every claim then failed with no reply from the server.
+- **PostgreSQL and SQLite: a claim refused as an overlap writes nothing.** It also names the
+  earliest live run of the job. Before, it could first mark older dead runs `interrupted`, in the
+  order the database returned the rows; those runs now end at the next claim that starts a run.
+  The Redis Lua script is unchanged.
+
+### Changed
+
+- **Dependencies.** croner 11.0.1 (was 11.0.0). The tests and the examples use the latest versions
+  of the database and broker clients, such as `@nats-io/*` 3.5, `@valkey/valkey-glide` 2.6 and
+  `amqplib` 2.4. The ranges of the optional peer dependencies are unchanged.
+- **Tests.** A new end-to-end test runs a CommonJS app on NATS: the app loads the client with
+  `require()` and gives its own connection to anarchon. Both NATS strategies pass the backend
+  contract.
+
 ## 0.7.0
 
 The inside of the scheduler and of the backends is simpler to read and to change: the lease rules
