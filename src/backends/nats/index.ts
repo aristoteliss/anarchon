@@ -468,7 +468,9 @@ export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
 
   /** The JetStream manager; refuses a server without JetStream. */
   private async openManager(
-    jetstreamModule: typeof import('@nats-io/jetstream'),
+    jetstreamModule: typeof import('@nats-io/jetstream', { with: {
+      'resolution-mode': 'import',
+    }}),
     nc: NatsConnection,
   ): Promise<JetStreamManager> {
     try {
@@ -559,8 +561,12 @@ export class NatsBackend<S extends NatsStrategyName = 'msg-id'>
 
 /** Loads the NATS client packages; refuses when they are not installed. */
 async function loadNats(): Promise<{
-  transport: typeof import('@nats-io/transport-node');
-  jetstreamModule: typeof import('@nats-io/jetstream');
+  transport: typeof import('@nats-io/transport-node', { with: {
+    'resolution-mode': 'import',
+  }});
+  jetstreamModule: typeof import('@nats-io/jetstream', { with: {
+    'resolution-mode': 'import',
+  }});
 }> {
   try {
     const transport = await import('@nats-io/transport-node');
